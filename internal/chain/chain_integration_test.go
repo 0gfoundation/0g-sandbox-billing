@@ -1,8 +1,8 @@
 package chain_test
 
-// Integration test: deploys SandboxServing on an in-process simulated EVM,
-// then exercises GetLastNonce, SettleFeesWithTEE and GetAccount via the real
-// chain.Client code paths.
+// Integration test: deploys the SandboxServing beacon-proxy stack on an in-process
+// simulated EVM, then exercises GetLastNonce, SettleFeesWithTEE and GetAccount via
+// the real chain.Client code paths.
 //
 // No external process (Anvil, geth) is required — the go-ethereum simulated
 // backend runs entirely in memory.
@@ -38,16 +38,14 @@ var (
 	simChainID = big.NewInt(1337)
 )
 
-// loadBytecode reads the Foundry-compiled JSON and returns the deploy bytecode.
-func loadBytecode(t *testing.T) []byte {
+// loadArtifact reads the Foundry-compiled JSON and returns (bytecode, parsedABI).
+func loadArtifact(t *testing.T, relPath string, abiStr string) ([]byte, abi.ABI) {
 	t.Helper()
-	// Locate the project root relative to this test file.
 	_, thisFile, _, _ := runtime.Caller(0)
-	artifactPath := filepath.Join(filepath.Dir(thisFile),
-		"..", "..", "contracts", "out", "SandboxServing.sol", "SandboxServing.json")
+	artifactPath := filepath.Join(filepath.Dir(thisFile), "..", "..", relPath)
 	raw, err := os.ReadFile(artifactPath)
 	if err != nil {
-		t.Fatalf("read artifact: %v", err)
+		t.Fatalf("read artifact %s: %v", relPath, err)
 	}
 	var artifact struct {
 		Bytecode struct {
@@ -55,21 +53,25 @@ func loadBytecode(t *testing.T) []byte {
 		} `json:"bytecode"`
 	}
 	if err := json.Unmarshal(raw, &artifact); err != nil {
-		t.Fatalf("parse artifact: %v", err)
+		t.Fatalf("parse artifact %s: %v", relPath, err)
 	}
 	hexStr := strings.TrimPrefix(artifact.Bytecode.Object, "0x")
-	b, err := hex.DecodeString(hexStr)
+	bytecode, err := hex.DecodeString(hexStr)
 	if err != nil {
-		t.Fatalf("decode bytecode: %v", err)
+		t.Fatalf("decode bytecode %s: %v", relPath, err)
 	}
-	return b
+	parsedABI, err := abi.JSON(strings.NewReader(abiStr))
+	if err != nil {
+		t.Fatalf("parse ABI %s: %v", relPath, err)
+	}
+	return bytecode, parsedABI
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-// deployFixture deploys SandboxServing on a fresh simulated chain and returns
-// the low-level binding, the simulated backend, provider/user addresses, and
-// their signers.
+// deployFixture deploys the full SandboxServing beacon-proxy stack on a fresh
+// simulated chain and returns the SandboxServing binding (bound to the proxy
+// address), the simulated backend, proxy/provider/user addresses, and signers.
 func deployFixture(t *testing.T) (
 	contract *chain.SandboxServing,
 	backend *simulated.Backend,
@@ -111,23 +113,53 @@ func deployFixture(t *testing.T) (
 		t.Fatalf("user transactor: %v", err)
 	}
 
-	// Deploy using raw bytecode + ABI.
-	// Set GasLimit explicitly to skip bind's EstimateGas call (which can fail
-	// on simulated backends due to pending-block EVM rule mismatches).
-	parsedABI, err := abi.JSON(strings.NewReader(chain.SandboxServingMetaData.ABI))
+	// ── Step 1: Deploy SandboxServing implementation (no constructor args) ────
+	implBytecode, implABI := loadArtifact(t,
+		"contracts/out/SandboxServing.sol/SandboxServing.json",
+		chain.SandboxServingMetaData.ABI)
+
+	providerAuth.GasLimit = 5_000_000
+	implAddr, _, _, err := bind.DeployContract(providerAuth, implABI, implBytecode, client)
 	if err != nil {
-		t.Fatalf("parse ABI: %v", err)
+		t.Fatalf("deploy impl: %v", err)
 	}
-	bytecode := loadBytecode(t)
-	providerStake := big.NewInt(0)
-	providerAuth.GasLimit = 5_000_000 // skip EstimateGas
-	contractAddr, _, _, err = bind.DeployContract(providerAuth, parsedABI, bytecode, client, providerStake)
-	if err != nil {
-		t.Fatalf("deploy SandboxServing: %v", err)
-	}
-	providerAuth.GasLimit = 0 // reset for subsequent calls
+	providerAuth.GasLimit = 0
 	backend.Commit()
 
+	// ── Step 2: Deploy UpgradeableBeacon(impl, providerAddr) ─────────────────
+	beaconBytecode, beaconABI := loadArtifact(t,
+		"contracts/out/UpgradeableBeacon.sol/UpgradeableBeacon.json",
+		chain.UpgradeableBeaconMetaData.ABI)
+
+	providerAuth.GasLimit = 3_000_000
+	beaconAddr, _, _, err := bind.DeployContract(providerAuth, beaconABI, beaconBytecode, client,
+		implAddr, providerAddr)
+	if err != nil {
+		t.Fatalf("deploy beacon: %v", err)
+	}
+	providerAuth.GasLimit = 0
+	backend.Commit()
+
+	// ── Step 3: Deploy BeaconProxy(beacon, initialize(0)) ─────────────────────
+	proxyBytecode, proxyConstructorABI := loadArtifact(t,
+		"contracts/out/BeaconProxy.sol/BeaconProxy.json",
+		`[{"type":"constructor","inputs":[{"name":"beacon","type":"address"},{"name":"data","type":"bytes"}],"stateMutability":"payable"}]`)
+
+	initCalldata, err := implABI.Pack("initialize", big.NewInt(0))
+	if err != nil {
+		t.Fatalf("pack initialize calldata: %v", err)
+	}
+
+	providerAuth.GasLimit = 5_000_000
+	contractAddr, _, _, err = bind.DeployContract(providerAuth, proxyConstructorABI, proxyBytecode, client,
+		beaconAddr, initCalldata)
+	if err != nil {
+		t.Fatalf("deploy proxy: %v", err)
+	}
+	providerAuth.GasLimit = 0
+	backend.Commit()
+
+	// Bind SandboxServing interface to the proxy address.
 	contract, err = chain.NewSandboxServing(contractAddr, client)
 	if err != nil {
 		t.Fatalf("bind contract: %v", err)

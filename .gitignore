@@ -1,5 +1,8 @@
 # Build outputs
 /billing
+/deploy
+/upgrade
+/verify
 
 # Contract build artifacts (reproducible via make build-contracts)
 contracts/out/

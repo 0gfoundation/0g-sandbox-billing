@@ -3,6 +3,8 @@ pragma solidity ^0.8.24;
 
 import {Test, console} from "forge-std/Test.sol";
 import {SandboxServing} from "./SandboxServing.sol";
+import {UpgradeableBeacon} from "./proxy/UpgradeableBeacon.sol";
+import {BeaconProxy} from "./proxy/BeaconProxy.sol";
 
 contract SandboxServingTest is Test {
     SandboxServing public serving;
@@ -23,7 +25,19 @@ contract SandboxServingTest is Test {
     );
 
     function setUp() public {
-        serving = new SandboxServing(PROVIDER_STAKE);
+        // Deploy impl (constructor locks itself)
+        SandboxServing impl = new SandboxServing();
+
+        // Deploy beacon with this test contract as owner
+        UpgradeableBeacon beacon = new UpgradeableBeacon(address(impl), address(this));
+
+        // Deploy proxy with initialize(PROVIDER_STAKE) calldata
+        bytes memory initData = abi.encodeCall(SandboxServing.initialize, (PROVIDER_STAKE));
+        BeaconProxy proxy = new BeaconProxy(address(beacon), initData);
+
+        // Bind the SandboxServing interface to the proxy address
+        serving = SandboxServing(payable(address(proxy)));
+
         teeSigner = vm.addr(TEE_PRIV);
 
         // Fund accounts
@@ -298,5 +312,26 @@ contract SandboxServingTest is Test {
         vm.prank(user);
         serving.acknowledgeTEESigner(provider, false);
         assertFalse(serving.isTEEAcknowledged(user, provider));
+    }
+
+    // ── Upgrade ──────────────────────────────────────────────────────────────
+
+    function test_Upgrade_PreservesState() public {
+        // Deposit some state
+        vm.prank(user);
+        serving.deposit{value: 1 ether}(user);
+        (uint256 balBefore,,) = serving.getAccount(user);
+        assertEq(balBefore, 1 ether);
+
+        // Deploy a new impl and upgrade the beacon
+        SandboxServing newImpl = new SandboxServing();
+        // Get the beacon address from the proxy's ERC-1967 slot
+        bytes32 beaconSlot = 0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50;
+        address beaconAddr = address(uint160(uint256(vm.load(address(serving), beaconSlot))));
+        UpgradeableBeacon(beaconAddr).upgradeTo(address(newImpl));
+
+        // State must be preserved
+        (uint256 balAfter,,) = serving.getAccount(user);
+        assertEq(balAfter, 1 ether);
     }
 }

@@ -3,6 +3,8 @@ pragma solidity ^0.8.24;
 
 /// @title SandboxServing
 /// @notice On-chain billing settlement for 0G Sandbox (TEE-based voucher model)
+/// @dev Upgradeable via BeaconProxy + UpgradeableBeacon pattern (ERC-1967).
+///      Storage layout is fixed; use __gap for future fields.
 contract SandboxServing {
 
     // ─── Constants ────────────────────────────────────────────────────────────
@@ -50,18 +52,27 @@ contract SandboxServing {
         INVALID_SIGNATURE      // 5
     }
 
-    // ─── State ────────────────────────────────────────────────────────────────
+    // ─── State (storage layout — must not change between upgrades) ────────────
+    //
+    // slot 0 (packed): _locked | _initialized
+    bool private _locked;
+    bool private _initialized;
 
-    /// @dev Required stake to register as a provider (set at deploy time)
-    uint256 public immutable providerStake;
-
-    bytes32 private immutable _domainSeparator;
-
+    // slots 1–5: mappings
     mapping(address => Account) private _accounts;
     mapping(address => Service) public  services;
     mapping(address => bool)    public  serviceExists;
     mapping(address => uint256) public  providerEarnings;
     mapping(address => uint256) public  providerStakes;
+
+    // slot 6: was immutable, now regular storage (set in initialize)
+    uint256 public providerStake;
+
+    // slot 7: was immutable, now regular storage (set in initialize)
+    bytes32 private _domainSeparator;
+
+    // slots 8–57: reserved for future upgrades
+    uint256[50] private __gap;
 
     // ─── Events ───────────────────────────────────────────────────────────────
 
@@ -87,7 +98,6 @@ contract SandboxServing {
 
     // ─── Modifiers ────────────────────────────────────────────────────────────
 
-    bool private _locked;
     modifier nonReentrant() {
         require(!_locked, "reentrant");
         _locked = true;
@@ -95,10 +105,28 @@ contract SandboxServing {
         _locked = false;
     }
 
-    // ─── Constructor ──────────────────────────────────────────────────────────
+    /// @dev Prevents re-initialization. The no-arg constructor sets _initialized=true
+    ///      on the implementation contract so nobody can call initialize() on it directly.
+    modifier initializer() {
+        require(!_initialized, "already initialized");
+        _initialized = true;
+        _;
+    }
 
-    constructor(uint256 _providerStake) {
-        providerStake = _providerStake;
+    // ─── Constructor / Initializer ─────────────────────────────────────────────
+
+    /// @dev Locks the implementation contract so initialize() cannot be called on it.
+    ///      When the BeaconProxy calls initialize() via delegatecall, _initialized lives
+    ///      in the PROXY's storage, not in the implementation's, so the proxy can
+    ///      initialize exactly once.
+    constructor() {
+        _initialized = true;
+    }
+
+    /// @notice Initialize the proxy.  Called once via BeaconProxy constructor through delegatecall.
+    /// @dev address(this) = BeaconProxy address when invoked via delegatecall — correct for EIP-712.
+    function initialize(uint256 providerStake_) external initializer {
+        providerStake = providerStake_;
         _domainSeparator = keccak256(abi.encode(
             keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
             keccak256(bytes("0G Sandbox Serving")),

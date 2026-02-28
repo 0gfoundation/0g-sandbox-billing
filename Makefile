@@ -14,7 +14,7 @@ test-contracts:
 		ghcr.io/foundry-rs/foundry:latest \
 		test --root /contracts -vv
 
-# Compile contract and extract ABI
+# Compile contracts and extract ABIs
 build-contracts:
 	chmod -R 777 contracts
 	docker run --rm \
@@ -25,6 +25,12 @@ build-contracts:
 	cat contracts/out/SandboxServing.sol/SandboxServing.json | \
 		python3 -c "import sys,json; d=json.load(sys.stdin); print(json.dumps(d['abi'], indent=2))" \
 		> contracts/abi/SandboxServing.json
+	cat contracts/out/UpgradeableBeacon.sol/UpgradeableBeacon.json | \
+		python3 -c "import sys,json; d=json.load(sys.stdin); print(json.dumps(d['abi'], indent=2))" \
+		> contracts/abi/UpgradeableBeacon.json
+	cat contracts/out/BeaconProxy.sol/BeaconProxy.json | \
+		python3 -c "import sys,json; d=json.load(sys.stdin); print(json.dumps(d['abi'], indent=2))" \
+		> contracts/abi/BeaconProxy.json
 
 tidy:
 	go mod tidy
@@ -45,3 +51,9 @@ abigen:
 		--pkg chain \
 		--type SandboxServing \
 		--out internal/chain/sandbox_serving.go
+	$(shell go env GOPATH)/bin/abigen \
+		--abi contracts/abi/UpgradeableBeacon.json \
+		--pkg chain \
+		--type UpgradeableBeacon \
+		--out internal/chain/upgradeable_beacon.go
+	@echo "Go bindings regenerated."
