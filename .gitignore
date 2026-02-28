@@ -1,5 +1,5 @@
 # Build outputs
-billing
+/billing
 
 # Contract build artifacts (reproducible via make build-contracts)
 contracts/out/
