@@ -1,0 +1,35 @@
+services:
+  billing:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      DAYTONA_API_URL:       ${DAYTONA_API_URL}
+      DAYTONA_ADMIN_KEY:     ${DAYTONA_ADMIN_KEY}
+      REDIS_ADDR:            redis:6379
+      TEE_SIGNING_KEY:       ${TEE_SIGNING_KEY}
+      PROVIDER_ADDRESS:      ${PROVIDER_ADDRESS}
+      SETTLEMENT_CONTRACT:   ${SETTLEMENT_CONTRACT}
+      CHAIN_ID:              ${CHAIN_ID}
+      RPC_URL:               ${RPC_URL}
+      COMPUTE_PRICE_PER_MIN: ${COMPUTE_PRICE_PER_MIN:-1000000}
+      CREATE_FEE:            ${CREATE_FEE:-5000000}
+      VOUCHER_INTERVAL_SEC:  ${VOUCHER_INTERVAL_SEC:-3600}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis_data:
