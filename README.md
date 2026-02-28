@@ -16,21 +16,18 @@ User/Billing ──► BeaconProxy  (stable address, all ETH/state lives here)
                SandboxServing impl  (pure logic, no state, replaceable)
 ```
 
-The proxy address never changes. Upgrading only replaces the implementation.
+The **proxy address never changes**. Upgrading only replaces the implementation.
+Given the proxy address, beacon and impl can always be derived on-chain:
 
----
+```bash
+# Beacon address — ERC-1967 slot
+cast storage <proxy> 0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50
 
-## Deployed Contracts (0G Galileo Testnet, chainID 16602)
+# Current implementation
+cast call <beacon> "implementation()(address)"
 
-| Contract | Address |
-|----------|---------|
-| BeaconProxy (stable) | `0x24cD979DBd0Ae924a3f0c832a724CF4C58E5C210` |
-| UpgradeableBeacon    | `0xFDde4299dbD96e2Cd285495B9840995b5018D09B` |
-| SandboxServing impl  | `0x458b6B42338618D9Eda09f320f0D1800BD2e1A04` |
-
-Set in `.env`:
-```
-SETTLEMENT_CONTRACT=0x24cD979DBd0Ae924a3f0c832a724CF4C58E5C210
+# Beacon owner
+cast call <beacon> "owner()(address)"
 ```
 
 ---
@@ -60,12 +57,13 @@ Proxy (stable) : 0x...   ← set this as SETTLEMENT_CONTRACT
 ```
 
 Flags:
+
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--rpc` | `https://evmrpc-testnet.0g.ai` | EVM RPC endpoint |
 | `--key` | (required) | Deployer private key (hex, with or without 0x) |
 | `--chain-id` | `16602` | Chain ID |
-| `--stake` | `0` | `providerStake` value passed to `initialize()` (wei) |
+| `--stake` | `0` | `providerStake` passed to `initialize()` (wei) |
 
 ---
 
@@ -79,7 +77,7 @@ go run ./cmd/upgrade/ \
   --rpc      https://evmrpc-testnet.0g.ai \
   --key      0x<deployer-private-key> \
   --chain-id 16602 \
-  --beacon   0x<beacon-address>
+  --proxy    0x<proxy-address>
 ```
 
 Output:
@@ -90,12 +88,16 @@ Beacon             : 0x... (unchanged)
 ```
 
 Flags:
+
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--rpc` | `https://evmrpc-testnet.0g.ai` | EVM RPC endpoint |
 | `--key` | (required) | Deployer/owner private key |
 | `--chain-id` | `16602` | Chain ID |
-| `--beacon` | (required) | UpgradeableBeacon contract address |
+| `--proxy` | (required*) | BeaconProxy address — beacon resolved automatically |
+| `--beacon` | (required*) | UpgradeableBeacon address (alternative to `--proxy`) |
+
+\* Provide either `--proxy` or `--beacon`.
 
 ---
 
@@ -108,21 +110,20 @@ Verifies all three contracts on the block explorer.
 ./scripts/verify-contracts.sh --proxy 0x<proxy-address>
 ```
 
-The script:
-1. Reads the beacon address from the proxy's ERC-1967 slot
-2. Calls `beacon.implementation()` for the impl address
-3. Calls `beacon.owner()` for the owner address (used in constructor args)
-4. Submits verification for all three contracts
-5. Polls until each is confirmed
+The script reads the beacon address from the proxy's ERC-1967 slot, calls
+`beacon.implementation()` and `beacon.owner()`, submits verification for all
+three contracts, then polls until each is confirmed.
+
+After an upgrade, run the same command — the new impl is verified fresh,
+beacon and proxy show `already_verified` and are skipped automatically.
 
 Optional flags:
+
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--proxy` | (required) | BeaconProxy address |
 | `--rpc` | `https://evmrpc-testnet.0g.ai` | EVM RPC endpoint |
 | `--api` | `https://chainscan-galileo.0g.ai/open/api` | Etherscan-compatible API |
-
-After an upgrade, run the same command again — the new impl will be verified fresh, beacon and proxy show `already_verified` and are skipped automatically.
 
 ---
 

@@ -9,12 +9,13 @@
 // The proxy address is UNCHANGED — no .env update needed.
 // No user re-acknowledgement required. State is fully preserved.
 //
-// Usage:
-//   go run ./cmd/upgrade/ \
-//     --rpc      https://evmrpc-testnet.0g.ai \
-//     --key      0x<deployer-private-key>      \
-//     --chain-id 16602                         \
-//     --beacon   0x<beacon-contract-address>
+// Usage (provide either --proxy or --beacon):
+//
+//	go run ./cmd/upgrade/ \
+//	  --rpc      https://evmrpc-testnet.0g.ai \
+//	  --key      0x<deployer-private-key>      \
+//	  --chain-id 16602                         \
+//	  --proxy    0x<proxy-address>
 package main
 
 import (
@@ -37,19 +38,24 @@ import (
 	"github.com/0gfoundation/0g-sandbox-billing/internal/chain"
 )
 
+// beaconSlot is the ERC-1967 storage slot for the beacon address.
+// = keccak256("eip1967.proxy.beacon") - 1
+var beaconSlot = common.HexToHash("0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50")
+
 func main() {
-	rpcURL    := flag.String("rpc",      "https://evmrpc-testnet.0g.ai", "EVM RPC endpoint")
+	rpcURL   := flag.String("rpc",      "https://evmrpc-testnet.0g.ai", "EVM RPC endpoint")
 	keyHex   := flag.String("key",      "", "deployer/owner private key (hex)")
 	chainID  := flag.Int64("chain-id",  16602, "chain ID")
-	beaconHex := flag.String("beacon",  "", "UpgradeableBeacon contract address (required)")
+	proxyHex := flag.String("proxy",    "", "BeaconProxy address (beacon derived automatically)")
+	beaconHex := flag.String("beacon",  "", "UpgradeableBeacon address (alternative to --proxy)")
 	flag.Parse()
 
 	if *keyHex == "" {
 		fmt.Fprintln(os.Stderr, "error: --key is required")
 		os.Exit(1)
 	}
-	if *beaconHex == "" {
-		fmt.Fprintln(os.Stderr, "error: --beacon is required")
+	if *proxyHex == "" && *beaconHex == "" {
+		fmt.Fprintln(os.Stderr, "error: --proxy or --beacon is required")
 		os.Exit(1)
 	}
 
@@ -60,8 +66,6 @@ func main() {
 		os.Exit(1)
 	}
 	deployer := crypto.PubkeyToAddress(privKey.PublicKey)
-	fmt.Printf("Deployer : %s\n", deployer.Hex())
-	fmt.Printf("Beacon   : %s\n", *beaconHex)
 
 	// ── chain client ──────────────────────────────────────────────────────────
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -72,6 +76,25 @@ func main() {
 		fmt.Fprintf(os.Stderr, "dial rpc: %v\n", err)
 		os.Exit(1)
 	}
+
+	// ── resolve beacon address ────────────────────────────────────────────────
+	var beaconAddr common.Address
+	if *proxyHex != "" {
+		// Read the beacon address from the proxy's ERC-1967 storage slot.
+		proxyAddr := common.HexToAddress(*proxyHex)
+		raw, err := client.StorageAt(ctx, proxyAddr, beaconSlot, nil)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "read beacon slot: %v\n", err)
+			os.Exit(1)
+		}
+		beaconAddr = common.BytesToAddress(raw)
+		fmt.Printf("Proxy    : %s\n", proxyAddr.Hex())
+		fmt.Printf("Beacon   : %s  (resolved from proxy)\n", beaconAddr.Hex())
+	} else {
+		beaconAddr = common.HexToAddress(*beaconHex)
+		fmt.Printf("Beacon   : %s\n", beaconAddr.Hex())
+	}
+	fmt.Printf("Deployer : %s\n", deployer.Hex())
 
 	auth, err := bind.NewKeyedTransactorWithChainID(privKey, big.NewInt(*chainID))
 	if err != nil {
@@ -128,7 +151,7 @@ func main() {
 	// ── Step 2: beacon.upgradeTo(newImpl) ─────────────────────────────────────
 	fmt.Printf("\n[2/2] Calling beacon.upgradeTo(%s)...\n", newImplAddr.Hex())
 
-	beacon, err := chain.NewUpgradeableBeacon(common.HexToAddress(*beaconHex), client)
+	beacon, err := chain.NewUpgradeableBeacon(beaconAddr, client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bind beacon: %v\n", err)
 		os.Exit(1)
@@ -175,5 +198,5 @@ Beacon             : %s (unchanged)
 The proxy address is UNCHANGED — no .env update required.
 All user balances, nonces, and provider registrations are preserved.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-`, newImplAddr.Hex(), upgradeTx.Hash().Hex(), *beaconHex)
+`, newImplAddr.Hex(), upgradeTx.Hash().Hex(), beaconAddr.Hex())
 }
