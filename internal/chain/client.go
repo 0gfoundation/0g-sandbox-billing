@@ -155,6 +155,16 @@ func (c *Client) PreviewSettlementResults(ctx context.Context, vouchers []vouche
 	return statuses, nil
 }
 
+// GetLastNonce returns the last settled nonce for a (user, provider) pair from the contract.
+func (c *Client) GetLastNonce(ctx context.Context, user, provider common.Address) (*big.Int, error) {
+	opts := &bind.CallOpts{Context: ctx}
+	n, err := c.contract.GetLastNonce(opts, user, provider)
+	if err != nil {
+		return nil, fmt.Errorf("GetLastNonce: %w", err)
+	}
+	return n, nil
+}
+
 // GetAccount returns a user's balance, pendingRefund, and refundUnlockAt.
 func (c *Client) GetAccount(ctx context.Context, user common.Address) (balance, pendingRefund, refundUnlockAt *big.Int, err error) {
 	opts := &bind.CallOpts{Context: ctx}

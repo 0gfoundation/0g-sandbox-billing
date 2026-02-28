@@ -68,6 +68,8 @@ func main() {
 		onchain.ContractAddress(),
 		common.HexToAddress(cfg.Chain.ProviderAddress),
 		rdb,
+		onchain,
+		log,
 	)
 
 	// ── Daytona client ────────────────────────────────────────────────────────

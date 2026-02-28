@@ -3,6 +3,7 @@ package billing
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 
 	"github.com/0gfoundation/0g-sandbox-billing/internal/voucher"
 )
@@ -26,7 +28,25 @@ var (
 	testProviderHex = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 )
 
+// mockNonceReader returns a fixed chain nonce or an error.
+type mockNonceReader struct {
+	nonce *big.Int
+	err   error
+}
+
+func (m *mockNonceReader) GetLastNonce(_ context.Context, _, _ common.Address) (*big.Int, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return new(big.Int).Set(m.nonce), nil
+}
+
 func newTestSignerFull(t *testing.T) (*Signer, *redis.Client, common.Address) {
+	t.Helper()
+	return newTestSignerWithChainNonce(t, big.NewInt(0))
+}
+
+func newTestSignerWithChainNonce(t *testing.T, chainNonce *big.Int) (*Signer, *redis.Client, common.Address) {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
@@ -37,14 +57,19 @@ func newTestSignerFull(t *testing.T) (*Signer, *redis.Client, common.Address) {
 	}
 	signerAddr := crypto.PubkeyToAddress(privKey.PublicKey)
 
-	contractAddr := common.HexToAddress(testContractHex)
-	providerAddr := common.HexToAddress(testProviderHex)
-
-	s := NewSigner(privKey, testChainID, contractAddr, providerAddr, rdb)
+	s := NewSigner(
+		privKey,
+		testChainID,
+		common.HexToAddress(testContractHex),
+		common.HexToAddress(testProviderHex),
+		rdb,
+		&mockNonceReader{nonce: chainNonce},
+		zap.NewNop(),
+	)
 	return s, rdb, signerAddr
 }
 
-// ── IncrNonce ─────────────────────────────────────────────────────────────────
+// ── IncrNonce: normal path ────────────────────────────────────────────────────
 
 func TestIncrNonce_StartsAtOne(t *testing.T) {
 	s, _, _ := newTestSignerFull(t)
@@ -101,10 +126,10 @@ func TestIncrNonce_CaseInsensitiveOwner(t *testing.T) {
 	upper := "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	lower := strings.ToLower(upper)
 
-	s.IncrNonce(ctx, upper, testProvider)  //nolint:errcheck
-	s.IncrNonce(ctx, lower, testProvider)  //nolint:errcheck
+	s.IncrNonce(ctx, upper, testProvider) //nolint:errcheck
+	s.IncrNonce(ctx, lower, testProvider) //nolint:errcheck
 
-	// Both calls should share the same key → nonce = 2
+	// Both calls must share the same Redis key → value = 2
 	expectedKey := fmt.Sprintf(voucher.NonceKeyFmt,
 		strings.ToLower(upper), strings.ToLower(testProvider))
 	val, err := rdb.Get(ctx, expectedKey).Result()
@@ -113,6 +138,99 @@ func TestIncrNonce_CaseInsensitiveOwner(t *testing.T) {
 	}
 	if val != "2" {
 		t.Errorf("nonce after 2 calls with same address (different case): got %q want 2", val)
+	}
+}
+
+// ── IncrNonce: Redis-restart / chain-seeding path ─────────────────────────────
+
+// TestIncrNonce_SeedsFromChainOnFirstCall simulates a Redis restart where the
+// key is absent but the contract already has lastNonce = 5.
+// The first emitted nonce must be 6 (strictly greater than on-chain value).
+func TestIncrNonce_SeedsFromChainOnFirstCall(t *testing.T) {
+	s, _, _ := newTestSignerWithChainNonce(t, big.NewInt(5))
+	ctx := context.Background()
+
+	n, err := s.IncrNonce(ctx, testOwner, testProvider)
+	if err != nil {
+		t.Fatalf("IncrNonce: %v", err)
+	}
+	if n.Int64() != 6 {
+		t.Errorf("first nonce after restart: got %d want 6 (chain lastNonce=5)", n.Int64())
+	}
+}
+
+// TestIncrNonce_SubsequentCallsAfterSeed verifies that after the chain-seeded
+// first call, subsequent calls continue from the correct value.
+func TestIncrNonce_SubsequentCallsAfterSeed(t *testing.T) {
+	s, _, _ := newTestSignerWithChainNonce(t, big.NewInt(10))
+	ctx := context.Background()
+
+	n1, _ := s.IncrNonce(ctx, testOwner, testProvider) // seeds to 10, then INCR → 11
+	n2, _ := s.IncrNonce(ctx, testOwner, testProvider) // key exists, plain INCR → 12
+	n3, _ := s.IncrNonce(ctx, testOwner, testProvider) // → 13
+
+	for i, n := range []*big.Int{n1, n2, n3} {
+		want := int64(11 + i)
+		if n.Int64() != want {
+			t.Errorf("nonce[%d]: got %d want %d", i, n.Int64(), want)
+		}
+	}
+}
+
+// TestIncrNonce_ChainUnavailable_FallsBackToZero verifies that when the chain
+// is unreachable the signer falls back to seeding from 0 (nonce = 1) rather
+// than blocking or erroring.
+func TestIncrNonce_ChainUnavailable_FallsBackToZero(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+
+	privKey, _ := crypto.HexToECDSA(testPrivKeyHex)
+	s := NewSigner(
+		privKey, testChainID,
+		common.HexToAddress(testContractHex),
+		common.HexToAddress(testProviderHex),
+		rdb,
+		&mockNonceReader{err: errors.New("chain unreachable")},
+		zap.NewNop(),
+	)
+
+	n, err := s.IncrNonce(context.Background(), testOwner, testProvider)
+	if err != nil {
+		t.Fatalf("IncrNonce must not error when chain is down: %v", err)
+	}
+	if n.Int64() != 1 {
+		t.Errorf("fallback nonce: got %d want 1", n.Int64())
+	}
+}
+
+// TestIncrNonce_ConcurrentSeed verifies that two goroutines racing on a missing
+// key each receive a unique nonce (no duplicates even without a lock).
+func TestIncrNonce_ConcurrentSeed(t *testing.T) {
+	s, _, _ := newTestSignerWithChainNonce(t, big.NewInt(100))
+	ctx := context.Background()
+
+	results := make(chan int64, 2)
+	for range 2 {
+		go func() {
+			n, err := s.IncrNonce(ctx, testOwner, testProvider)
+			if err != nil {
+				t.Errorf("IncrNonce goroutine: %v", err)
+				results <- -1
+				return
+			}
+			results <- n.Int64()
+		}()
+	}
+
+	n1, n2 := <-results, <-results
+	if n1 == n2 {
+		t.Errorf("concurrent IncrNonce returned duplicate nonce %d", n1)
+	}
+	// Both must be > 100 (seeded from chain)
+	for _, n := range []int64{n1, n2} {
+		if n <= 100 {
+			t.Errorf("nonce %d should be > chain lastNonce 100", n)
+		}
 	}
 }
 
@@ -193,7 +311,6 @@ func TestSignAndEnqueue_SignatureVerifiable(t *testing.T) {
 	}
 	s.SignAndEnqueue(ctx, v) //nolint:errcheck
 
-	// Deserialize from queue and verify signature
 	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, common.HexToAddress(testProviderHex).Hex())
 	raw, _ := rdb.LPop(ctx, queueKey).Result()
 	var got voucher.SandboxVoucher
@@ -221,7 +338,6 @@ func TestSignAndEnqueue_QueueKeyUsesProviderAddress(t *testing.T) {
 	}
 	s.SignAndEnqueue(ctx, v) //nolint:errcheck
 
-	// Only the correct provider's queue should have an item
 	correctKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, common.HexToAddress(testProviderHex).Hex())
 	wrongKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, "0x0000000000000000000000000000000000000000")
 
@@ -251,7 +367,6 @@ func TestSignAndEnqueue_MultipleVouchers_FIFOOrder(t *testing.T) {
 		s.SignAndEnqueue(ctx, v) //nolint:errcheck
 	}
 
-	// RPUSH → FIFO when reading with LPOP
 	for i := int64(1); i <= 3; i++ {
 		raw, err := rdb.LPop(ctx, queueKey).Result()
 		if err != nil {
