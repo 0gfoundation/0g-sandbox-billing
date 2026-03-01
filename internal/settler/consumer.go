@@ -9,7 +9,6 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
-	"github.com/0gfoundation/0g-sandbox-billing/internal/chain"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/config"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/voucher"
 )
@@ -17,7 +16,7 @@ import (
 const maxBatchSize = 50
 
 // Run is the main settler loop: BLPOP → settle → handle statuses.
-func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain *chain.Client, stopCh chan<- StopSignal, log *zap.Logger) {
+func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain ChainClient, stopCh chan<- StopSignal, log *zap.Logger) {
 	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, cfg.Chain.ProviderAddress)
 	// lockTime/2 as BLPOP timeout (half the lock window for responsiveness)
 	blpopTimeout := time.Duration(cfg.Billing.VoucherIntervalSec) * time.Second / 2

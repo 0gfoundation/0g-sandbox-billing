@@ -116,7 +116,9 @@ func (h *Handler) handleCreate(c *gin.Context) {
 
 	if result.StatusCode >= 200 && result.StatusCode < 300 {
 		if id := extractID(upstream.Body.Bytes()); id != "" {
-			go h.billing.OnCreate(c.Request.Context(), id, wallet)
+			// Detach from the request context: billing events must not fail
+			// if the HTTP connection closes before the goroutine runs.
+			go h.billing.OnCreate(context.WithoutCancel(c.Request.Context()), id, wallet)
 		}
 	}
 }
@@ -130,7 +132,7 @@ func (h *Handler) handleStart(c *gin.Context) {
 	wallet := c.GetString("wallet_address")
 	h.rp.ServeHTTP(safeWriter{c.Writer}, c.Request)
 	if c.Writer.Status() >= 200 && c.Writer.Status() < 300 {
-		go h.billing.OnStart(c.Request.Context(), id, wallet)
+		go h.billing.OnStart(context.WithoutCancel(c.Request.Context()), id, wallet)
 	}
 }
 
@@ -138,7 +140,7 @@ func (h *Handler) handleStop(c *gin.Context) {
 	id := c.Param("id")
 	h.rp.ServeHTTP(safeWriter{c.Writer}, c.Request)
 	if c.Writer.Status() >= 200 && c.Writer.Status() < 300 {
-		go h.billing.OnStop(c.Request.Context(), id)
+		go h.billing.OnStop(context.WithoutCancel(c.Request.Context()), id)
 	}
 }
 
@@ -146,7 +148,7 @@ func (h *Handler) handleDelete(c *gin.Context) {
 	id := c.Param("id")
 	h.rp.ServeHTTP(safeWriter{c.Writer}, c.Request)
 	if c.Writer.Status() >= 200 && c.Writer.Status() < 300 {
-		go h.billing.OnDelete(c.Request.Context(), id)
+		go h.billing.OnDelete(context.WithoutCancel(c.Request.Context()), id)
 	}
 }
 
@@ -154,7 +156,7 @@ func (h *Handler) handleArchive(c *gin.Context) {
 	id := c.Param("id")
 	h.rp.ServeHTTP(safeWriter{c.Writer}, c.Request)
 	if c.Writer.Status() >= 200 && c.Writer.Status() < 300 {
-		go h.billing.OnArchive(c.Request.Context(), id)
+		go h.billing.OnArchive(context.WithoutCancel(c.Request.Context()), id)
 	}
 }
 
