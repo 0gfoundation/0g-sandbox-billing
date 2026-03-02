@@ -359,11 +359,16 @@ func TestE2E_CreateFeeSettled(t *testing.T) {
 
 	// Wait for create-fee settlement.
 	expected := new(big.Int).Add(nonceBefore, big.NewInt(1))
-	waitFor(t, fmt.Sprintf("nonce == %s", expected), 5*time.Minute, func() bool {
+	var nonceAfter *big.Int
+	waitFor(t, fmt.Sprintf("nonce >= %s", expected), 5*time.Minute, func() bool {
 		n, err := env.e2eNonce(ctx)
-		return err == nil && n.Cmp(expected) >= 0
+		if err == nil && n.Cmp(expected) >= 0 {
+			nonceAfter = n
+			return true
+		}
+		return false
 	})
-	t.Logf("create-fee settled: nonce = %s", expected)
+	t.Logf("create-fee settled: nonce = %s (delta = +%s)", nonceAfter, new(big.Int).Sub(nonceAfter, nonceBefore))
 }
 
 // TestE2E_ComputeFeeSettled verifies that stopping a sandbox after it has been
@@ -394,11 +399,11 @@ func TestE2E_ComputeFeeSettled(t *testing.T) {
 
 	// Wait for create-fee to settle (nonce+1).
 	afterCreate := new(big.Int).Add(nonceBefore, big.NewInt(1))
-	waitFor(t, fmt.Sprintf("create-fee nonce == %s", afterCreate), 5*time.Minute, func() bool {
+	waitFor(t, fmt.Sprintf("create-fee nonce >= %s", afterCreate), 5*time.Minute, func() bool {
 		n, err := env.e2eNonce(ctx)
 		return err == nil && n.Cmp(afterCreate) >= 0
 	})
-	t.Logf("create-fee settled: nonce = %s", afterCreate)
+	t.Logf("create-fee settled: nonce >= %s", afterCreate)
 
 	// Let the sandbox run for 6 voucher intervals so the periodic generator
 	// fires several times before the final stop voucher.
@@ -409,13 +414,20 @@ func TestE2E_ComputeFeeSettled(t *testing.T) {
 	// Stop via proxy → OnStop → generateFinalVoucher → compute-fee settlement.
 	env.e2eStop(t, ctx, sandboxID)
 
-	// Wait for compute-fee to settle (nonce+2).
+	// Wait for compute-fee to settle (nonce+2 minimum; actual may be higher if
+	// the periodic generator fired multiple times during the run duration).
 	afterStop := new(big.Int).Add(nonceBefore, big.NewInt(2))
-	waitFor(t, fmt.Sprintf("compute-fee nonce == %s", afterStop), 5*time.Minute, func() bool {
+	var nonceAfterStop *big.Int
+	waitFor(t, fmt.Sprintf("compute-fee nonce >= %s", afterStop), 5*time.Minute, func() bool {
 		n, err := env.e2eNonce(ctx)
-		return err == nil && n.Cmp(afterStop) >= 0
+		if err == nil && n.Cmp(afterStop) >= 0 {
+			nonceAfterStop = n
+			return true
+		}
+		return false
 	})
-	t.Logf("compute-fee settled: nonce = %s", afterStop)
+	t.Logf("compute-fee settled: nonce = %s (expected >= %s, delta = +%s)",
+		nonceAfterStop, afterStop, new(big.Int).Sub(nonceAfterStop, nonceBefore))
 
 	balance2, _, _, _ := env.onchain.GetAccount(ctx, env.userAddr)
 	t.Logf("balance after: %s neuron", balance2)

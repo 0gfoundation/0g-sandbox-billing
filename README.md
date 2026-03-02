@@ -7,6 +7,8 @@ contract; the proxy creates EIP-712-signed vouchers and settles them on-chain pe
 > **New here?** Start with [`CLAUDE.md`](CLAUDE.md) for architecture, key concepts,
 > billing flow, and how to run the server.
 
+> 中文版：[README.zh.md](README.zh.md)
+
 ---
 
 ## Contract Architecture

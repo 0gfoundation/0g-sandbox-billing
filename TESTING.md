@@ -1,134 +1,135 @@
 # Testing Guide
 
-本项目共有四个测试层级，按依赖程度从低到高排列。
+> 中文版：[TESTING.zh.md](TESTING.zh.md)
 
 ---
 
-## 层级概览
+## Test Levels Overview
 
-| 层级 | 命令 | 外部依赖 | 耗时 |
+| Level | Command | External deps | Duration |
 |---|---|---|---|
-| 单元测试 | `go test ./...` | 无 | < 5s |
-| 链集成测试 | `go test ./internal/chain/...` | 需先 `make build-contracts` | < 5s |
-| 组件测试 | `go test ./cmd/billing/` | 需先 `make build-contracts` | < 30s |
-| 端到端测试 | `go test -tags e2e ./cmd/billing/` | 真实链 + Redis + Daytona | 数分钟 |
+| Unit tests | `go test ./...` | None | < 5 s |
+| Chain integration | `go test ./internal/chain/...` | `make build-contracts` first | < 5 s |
+| Component tests | `go test ./cmd/billing/` | `make build-contracts` first | < 30 s |
+| E2E tests | `go test -tags e2e ./cmd/billing/` | Live chain + Redis + Daytona | Minutes |
 
 ---
 
-## 一、单元测试
+## 1. Unit Tests
 
-无任何外部依赖，全部使用 httptest / miniredis 内存模拟。
+No external dependencies. Uses httptest, miniredis, and go-ethereum simulated backend entirely in-process.
 
 ```bash
 go test ./...
 ```
 
-覆盖的包：
-
-| 包 | 测试内容 |
+| Package | What is tested |
 |---|---|
-| `internal/auth` | EIP-191 签名验证、nonce 防重放、过期检查 |
-| `internal/billing` | OnCreate/OnStart/OnStop/OnDelete、voucher 生成、nonce 递增 |
-| `internal/daytona` | HTTP 客户端、认证头、错误处理 |
-| `internal/proxy` | 路由拦截、owner 注入/过滤、余额检查 |
-| `internal/settler` | 结算状态处理、persistStop、DLQ |
-| `internal/voucher` | EIP-712 签名、usageHash 构造 |
+| `internal/auth` | EIP-191 signature verification, nonce replay protection, expiry |
+| `internal/billing` | OnCreate/OnStart/OnStop/OnDelete handlers, voucher generation, nonce increment |
+| `internal/daytona` | HTTP client, auth headers, error handling |
+| `internal/proxy` | Request interception, owner label injection/filtering, balance check |
+| `internal/settler` | Settlement status handling, persistStop, DLQ |
+| `internal/voucher` | EIP-712 signing, usageHash construction |
 
 ---
 
-## 二、链集成测试
+## 2. Chain Integration Tests
 
-使用 go-ethereum 模拟后端（无网络），需要编译好的合约产物。
+Uses the go-ethereum simulated backend (no network). Requires compiled contract artifacts.
 
-**前置条件**
+**Prerequisite**
 
 ```bash
-make build-contracts   # Docker 编译 Solidity，输出到 contracts/out/
+make build-contracts   # Compiles Solidity via Docker, outputs to contracts/out/
 ```
 
-**运行**
+**Run**
 
 ```bash
 go test ./internal/chain/... -v
 ```
 
-测试内容：在模拟链上部署完整的 impl + beacon + proxy 三件套，验证
-`GetLastNonce`、`SettleFeesWithTEE`、`GetAccount` 等链上操作。
+Deploys the full impl + beacon + proxy stack on a simulated chain and verifies
+`GetLastNonce`, `SettleFeesWithTEE`, `GetAccount`, and related on-chain operations.
 
 ---
 
-## 三、组件测试
+## 3. Component Tests
 
-在内存中运行完整计费管道（auth → proxy → billing → settler），
-使用模拟链 + miniredis + mock Daytona httptest，不访问任何外部服务。
+Runs the complete billing pipeline (auth → proxy → billing → settler) in-process
+using a simulated chain + miniredis + mock Daytona httptest server. No real external services.
 
-**前置条件**
+**Prerequisite**
 
 ```bash
-make build-contracts   # 同上，组件测试需要合约字节码来部署
+make build-contracts   # Component tests need contract bytecode for deployment
 ```
 
-**运行**
+**Run**
 
 ```bash
 go test ./cmd/billing/ -v -run TestComponent
 ```
 
-测试用例：
-
-| 测试 | 场景 |
+| Test | Scenario |
 |---|---|
-| `TestComponent_HappyPath` | 创建 sandbox → create-fee 结算 → 链上 lastNonce == 1 |
-| `TestComponent_InsufficientBalance` | 余额为 0 → InsufficientBalance → Daytona 自动停止 |
-| `TestComponent_OwnershipFiltering` | owner 标签注入、列表过滤、跨用户 403 |
+| `TestComponent_HappyPath` | Create sandbox → create-fee settled → on-chain lastNonce == 1 |
+| `TestComponent_InsufficientBalance` | Zero balance → InsufficientBalance → Daytona auto-stop |
+| `TestComponent_OwnershipFiltering` | Owner label injection, list filtering, cross-user 403 |
 
 ---
 
-## 四、端到端测试（E2E）
+## 4. End-to-End (E2E) Tests
 
-连接真实 0G Galileo 测试网、真实 Redis 和真实 Daytona 实例。
-需要 `-tags e2e` 编译标签才会编译。
+Connects to the real 0G Galileo testnet, real Redis, and real Daytona instance.
+Requires the `-tags e2e` build tag.
 
-### 前置条件
+### Prerequisites
 
-1. **账户准备**
+**1. Account setup**
 
-   TEE 私钥对应的地址必须已完成：
-   ```
-   contract.AddOrUpdateService(...)     # 注册 provider
-   contract.Deposit(providerAddr)       # 充值（建议 ≥ 100 neuron 用于测试）
-   contract.AcknowledgeTEESigner(...)   # 确认 TEE 签名者
-   ```
-   可使用 `cmd/setup` 工具完成：
-   ```bash
-   go run ./cmd/setup/ --rpc https://evmrpc-testnet.0g.ai \
-     --key 0x<TEE_PRIVATE_KEY> \
-     --contract 0x24cD979DBd0Ae924a3f0c832a724CF4C58E5C210 \
-     --chain-id 16602
-   ```
+The TEE key address must have completed the following on-chain steps:
 
-2. **本地服务**
-   - Redis 在 `localhost:6379`（或通过 `REDIS_ADDR` 指定）
-   - Daytona 在 `localhost:3000`（或通过 `INTEGRATION_DAYTONA_URL` 指定）
+```
+contract.AddOrUpdateService(...)    # register provider service
+contract.Deposit(...)               # fund the user account (≥ 100 neuron recommended)
+contract.AcknowledgeTEESigner(...)  # acknowledge TEE signer
+```
 
-### 环境变量
+Use `cmd/setup` to do this in one command:
 
-| 变量 | 默认值 | 说明 |
+```bash
+MOCK_APP_PRIVATE_KEY=0x<TEE_PRIVATE_KEY> \
+go run ./cmd/setup/ \
+  --rpc      https://evmrpc-testnet.0g.ai \
+  --contract 0x24cD979DBd0Ae924a3f0c832a724CF4C58E5C210 \
+  --chain-id 16602 \
+  --deposit  0.01
+```
+
+**2. Local services**
+- Redis at `localhost:6379` (override with `REDIS_ADDR`)
+- Daytona at `localhost:3000` (override with `INTEGRATION_DAYTONA_URL`)
+
+### Environment Variables
+
+| Variable | Default | Description |
 |---|---|---|
-| `MOCK_TEE` | — | 必须设为 `true`（启用 mock TEE 模式） |
-| `MOCK_APP_PRIVATE_KEY` | — | **必填**，TEE 私钥（`0x` 前缀可选） |
-| `INTEGRATION_RPC_URL` | `https://evmrpc-testnet.0g.ai` | 链 RPC |
-| `INTEGRATION_CONTRACT` | `0x24cD979DBd0Ae924a3f0c832a724CF4C58E5C210` | 合约地址 |
-| `INTEGRATION_DAYTONA_URL` | `http://localhost:3000` | Daytona API 地址 |
+| `MOCK_TEE` | — | **Required.** Set to `true` to use mock TEE mode |
+| `MOCK_APP_PRIVATE_KEY` | — | **Required.** TEE private key (`0x` prefix optional) |
+| `INTEGRATION_RPC_URL` | `https://evmrpc-testnet.0g.ai` | Chain RPC endpoint |
+| `INTEGRATION_CONTRACT` | `0x24cD979DBd0Ae924a3f0c832a724CF4C58E5C210` | Settlement contract address |
+| `INTEGRATION_DAYTONA_URL` | `http://localhost:3000` | Daytona API endpoint |
 | `INTEGRATION_DAYTONA_KEY` | `daytona_admin_key` | Daytona admin key |
-| `REDIS_ADDR` | `localhost:6379` | Redis 地址 |
-| `REDIS_PASSWORD` | — | Redis 密码（可选） |
-| `INTEGRATION_USER_KEY` | 同 `MOCK_APP_PRIVATE_KEY` | 用户私钥（默认与 TEE 共用） |
-| `INTEGRATION_VOUCHER_INTERVAL_SEC` | `5` | voucher 生成周期（秒） |
-| `INTEGRATION_CREATE_FEE` | `1` | 创建费（neuron） |
-| `INTEGRATION_COMPUTE_PRICE` | `1` | 计算费单价（neuron/sec） |
+| `REDIS_ADDR` | `localhost:6379` | Redis address |
+| `REDIS_PASSWORD` | — | Redis password (optional) |
+| `INTEGRATION_USER_KEY` | same as `MOCK_APP_PRIVATE_KEY` | User wallet key (defaults to TEE key) |
+| `INTEGRATION_VOUCHER_INTERVAL_SEC` | `5` | Voucher generation interval (seconds) |
+| `INTEGRATION_CREATE_FEE` | `1` | Create fee (neuron) |
+| `INTEGRATION_COMPUTE_PRICE` | `1` | Compute price (neuron/sec) |
 
-### 运行
+### Run
 
 ```bash
 MOCK_TEE=true \
@@ -136,7 +137,7 @@ MOCK_APP_PRIVATE_KEY=0xYOUR_PRIVATE_KEY_HERE \
 go test -v -tags e2e ./cmd/billing/ -run TestE2E -timeout 10m
 ```
 
-运行单个测试：
+Run a single test:
 
 ```bash
 MOCK_TEE=true \
@@ -144,7 +145,7 @@ MOCK_APP_PRIVATE_KEY=0xYOUR_PRIVATE_KEY_HERE \
 go test -v -tags e2e ./cmd/billing/ -run TestE2E_AutoStopInsufficientBalance -timeout 10m
 ```
 
-自定义计费参数：
+Custom billing parameters:
 
 ```bash
 MOCK_TEE=true \
@@ -155,27 +156,32 @@ INTEGRATION_COMPUTE_PRICE=50 \
 go test -v -tags e2e ./cmd/billing/ -run TestE2E -timeout 10m
 ```
 
-### 端到端测试用例
+### E2E Test Cases
 
-| 测试 | 场景 | 预期结果 |
+| Test | Scenario | Expected |
 |---|---|---|
-| `TestE2E_CreateFeeSettled` | 创建 sandbox | 链上 lastNonce +1 |
-| `TestE2E_ComputeFeeSettled` | 运行 6 个计费周期后停止 | 链上 lastNonce +2 |
-| `TestE2E_InsufficientBalance` | 余额为 0 的账号创建 sandbox | 代理返回 HTTP 402 |
-| `TestE2E_AutoStopInsufficientBalance` | 余额仅够一个周期，自动耗尽 | `stop:sandbox:<id>` 出现后被清理，sandbox 被停止 |
+| `TestE2E_CreateFeeSettled` | Create a sandbox | On-chain nonce +1 (create-fee voucher) |
+| `TestE2E_ComputeFeeSettled` | Run sandbox for 6 voucher intervals then stop | Nonce advances by ≥ 8 (create-fee + periodic compute × 6 + OnStop); exact delta depends on generator timing |
+| `TestE2E_InsufficientBalance` | Wallet with no deposit tries to create sandbox | Proxy returns HTTP 402 before Daytona is called |
+| `TestE2E_AutoStopInsufficientBalance` | Ephemeral wallet funded for exactly one compute period | `stop:sandbox:<id>` key appears then is cleaned up; sandbox stopped via Daytona |
 
-> `TestMain` 负责启动共享环境（settler + generator + proxy server），
-> 所有 `TestE2E_*` 共用同一环境顺序执行，无需重复启动。
+> `TestMain` starts the shared environment (settler + generator + proxy) once.
+> All `TestE2E_*` functions share it and run sequentially — no restart between tests.
+>
+> **Nonce delta note:** `TestE2E_ComputeFeeSettled` uses `t.Cleanup` to stop the
+> sandbox after the test body returns. The resulting OnStop compute voucher settles
+> asynchronously and may appear within the next test's observation window. This is
+> expected — on-chain settlement is async and nonces accumulate correctly across tests.
 
 ---
 
-## 附：Daytona 客户端集成测试
+## Appendix: Daytona Client Integration Tests
 
-`internal/daytona` 包含 3 个真实 Daytona 测试，在 `go test ./...` 时自动运行。
-若 Daytona 不可达（`GET /api/health` 失败），这 3 个测试会自动 skip，不影响 CI。
+`internal/daytona` includes 3 real-Daytona tests that run as part of `go test ./...`.
+If Daytona is unreachable (`GET /api/health` fails), these skip automatically — safe for CI.
 
 ```bash
-# 覆盖 Daytona 地址（默认 localhost:3000）
+# Override Daytona address (default localhost:3000)
 DAYTONA_API_URL=http://localhost:3000 \
 DAYTONA_ADMIN_KEY=daytona_admin_key \
 go test ./internal/daytona/... -v -run TestIntegration
