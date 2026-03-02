@@ -3,614 +3,554 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>0G Sandbox — Billing Dashboard</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>0G Sandbox Billing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-  :root {
-    --bg:       #060810;
-    --surface:  #0d1120;
-    --card:     #111827;
-    --border:   rgba(255,255,255,0.07);
-    --purple:   #9200E1;
-    --purple2:  #b44cf0;
-    --blue:     #4d65ff;
-    --cyan:     #00d4ff;
-    --green:    #00e5a0;
-    --yellow:   #f5c842;
-    --red:      #ff4d6a;
-    --text:     #f0f2ff;
-    --muted:    rgba(240,242,255,0.45);
-    --dimmer:   rgba(240,242,255,0.18);
-  }
+:root {
+  --primary:   #1e3de4;
+  --primary-h: #0f23bd;
+  --primary-bg:#edf3ff;
+  --blue2:     #4665f0;
+  --text:      #333;
+  --text-2:    rgba(0,0,0,.65);
+  --muted:     #74798c;
+  --border:    #d9d9d9;
+  --bg:        #f5f5f5;
+  --surface:   #fff;
+  --green:     #52c41a;
+  --green-bg:  #f6ffed;
+  --green-bd:  #b7eb8f;
+  --red:       #e15c56;
+  --red-bg:    #fff2f0;
+  --red-bd:    #fab8af;
+  --orange:    #fa8c16;
+  --orange-bg: #fff7e6;
+  --yellow:    #faad14;
+  --mono:      'Roboto Mono', monospace;
+}
 
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: 'Inter', sans-serif;
-    font-size: 14px;
-    min-height: 100vh;
-    display: flex;
-  }
+body {
+  font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--bg);
+  min-height: 100vh;
+}
 
-  /* ── Sidebar ── */
-  .sidebar {
-    width: 220px;
-    flex-shrink: 0;
-    background: var(--surface);
-    border-right: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    padding: 24px 16px;
-    gap: 6px;
-  }
-  .logo {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 4px 8px 20px;
-    font-family: 'Space Grotesk', sans-serif;
-    font-size: 18px;
-    font-weight: 700;
-    letter-spacing: -0.3px;
-  }
-  .logo-icon {
-    width: 32px; height: 32px;
-    background: linear-gradient(135deg, var(--purple), var(--blue));
-    border-radius: 8px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 15px; font-weight: 800; color: #fff;
-    font-family: 'Space Grotesk', sans-serif;
-  }
-  .nav-section {
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--dimmer);
-    padding: 12px 8px 4px;
-  }
-  .nav-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 9px 12px;
-    border-radius: 8px;
-    cursor: pointer;
-    color: var(--muted);
-    font-weight: 500;
-    transition: all 0.15s;
-    font-size: 13.5px;
-  }
-  .nav-item:hover { background: rgba(146,0,225,0.1); color: var(--text); }
-  .nav-item.active {
-    background: rgba(146,0,225,0.15);
-    color: var(--text);
-    border: 1px solid rgba(146,0,225,0.3);
-  }
-  .nav-item .icon { width: 16px; text-align: center; opacity: 0.85; }
-  .badge {
-    margin-left: auto;
-    background: var(--purple);
-    color: #fff;
-    font-size: 10px;
-    font-weight: 600;
-    padding: 1px 6px;
-    border-radius: 999px;
-  }
-  .sidebar-bottom {
-    margin-top: auto;
-    padding-top: 16px;
-    border-top: 1px solid var(--border);
-  }
-  .avatar-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 10px;
-    border-radius: 10px;
-    background: rgba(255,255,255,0.04);
-  }
-  .avatar {
-    width: 32px; height: 32px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, var(--purple), var(--blue));
-    display: flex; align-items: center; justify-content: center;
-    font-size: 12px; font-weight: 700;
-  }
-  .avatar-name { font-size: 12.5px; font-weight: 600; }
-  .avatar-addr { font-size: 10px; color: var(--muted); font-family: monospace; }
+/* ── Topbar ── */
+.topbar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  height: 56px;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  gap: 0;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 1px 4px rgba(0,0,0,.06);
+}
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text);
+  text-decoration: none;
+  margin-right: 32px;
+  white-space: nowrap;
+}
+.logo-mark {
+  width: 28px; height: 28px;
+  background: var(--primary);
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: -0.5px;
+}
+.nav-links { display: flex; align-items: center; gap: 2px; }
+.nav-link {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 13.5px;
+  color: var(--text-2);
+  text-decoration: none;
+  font-weight: 500;
+  transition: all .15s;
+}
+.nav-link:hover { color: var(--primary); background: var(--primary-bg); }
+.nav-link.active { color: var(--primary); background: var(--primary-bg); }
+.topbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.chain-tag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--primary-bg);
+  color: var(--primary);
+  border: 1px solid rgba(30,61,228,.2);
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.dot-live {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 0 2px var(--green-bg);
+}
 
-  /* ── Main ── */
-  .main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
+/* ── Layout ── */
+.page { max-width: 1200px; margin: 0 auto; padding: 24px 24px 48px; }
+.page-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 20px;
+  color: var(--text);
+}
 
-  /* ── Topbar ── */
-  .topbar {
-    height: 60px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    padding: 0 28px;
-    gap: 16px;
-    background: rgba(6,8,16,0.8);
-    backdrop-filter: blur(12px);
-    flex-shrink: 0;
-  }
-  .topbar-title { font-family: 'Space Grotesk', sans-serif; font-size: 16px; font-weight: 600; }
-  .topbar-sub { color: var(--muted); font-size: 12.5px; }
-  .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
-  .chain-pill {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    background: rgba(0,212,255,0.08);
-    border: 1px solid rgba(0,212,255,0.2);
-    color: var(--cyan);
-    font-size: 11.5px;
-    font-weight: 600;
-    padding: 5px 12px;
-    border-radius: 999px;
-  }
-  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); }
-  .btn-outline {
-    padding: 7px 16px;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    background: transparent;
-    color: var(--text);
-    font-size: 12.5px;
-    font-weight: 500;
-    cursor: pointer;
-    font-family: inherit;
-  }
-  .btn-primary {
-    padding: 7px 18px;
-    border-radius: 999px;
-    border: none;
-    background: linear-gradient(135deg, var(--purple), var(--blue));
-    color: #fff;
-    font-size: 12.5px;
-    font-weight: 600;
-    cursor: pointer;
-    font-family: inherit;
-    letter-spacing: 0.01em;
-  }
+/* ── Stat cards ── */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px 20px 16px;
+}
+.stat-label {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 500;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.stat-value {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.2;
+  font-family: var(--mono);
+}
+.stat-unit { font-size: 13px; color: var(--muted); font-weight: 400; margin-left: 4px; }
+.stat-footer {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.change {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.change.up   { color: var(--green);  background: var(--green-bg); }
+.change.down { color: var(--red);    background: var(--red-bg); }
+.change.warn { color: var(--orange); background: var(--orange-bg); }
 
-  /* ── Content ── */
-  .content {
-    flex: 1;
-    overflow-y: auto;
-    padding: 28px;
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-  }
+/* ── Two-column ── */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
 
-  /* ── Stat cards ── */
-  .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-  .stat-card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 20px;
-    position: relative;
-    overflow: hidden;
-  }
-  .stat-card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0; height: 2px;
-    background: linear-gradient(90deg, var(--c1), var(--c2));
-  }
-  .stat-label { font-size: 11px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
-  .stat-value { font-family: 'Space Grotesk', sans-serif; font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
-  .stat-sub { font-size: 11.5px; color: var(--muted); margin-top: 6px; display: flex; align-items: center; gap: 4px; }
-  .stat-change { font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 4px; }
-  .stat-change.up { background: rgba(0,229,160,0.12); color: var(--green); }
-  .stat-change.down { background: rgba(255,77,106,0.12); color: var(--red); }
+/* ── Card ── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.card-head {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #fafafa;
+}
+.card-title { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.card-action {
+  font-size: 12px;
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 500;
+}
+.card-action:hover { color: var(--primary-h); }
 
-  /* ── Section row ── */
-  .section-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-  .panel {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    overflow: hidden;
-  }
-  .panel-head {
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-  .panel-title { font-size: 13.5px; font-weight: 600; }
-  .panel-action { font-size: 11.5px; color: var(--purple2); cursor: pointer; font-weight: 500; }
+/* ── Bar chart ── */
+.chart-wrap { padding: 20px 20px 0; display: flex; align-items: flex-end; gap: 5px; height: 140px; }
+.bar {
+  flex: 1;
+  border-radius: 3px 3px 0 0;
+  background: var(--primary-bg);
+  border: 1px solid rgba(30,61,228,.15);
+  border-bottom: none;
+  min-height: 4px;
+  transition: background .15s;
+}
+.bar:hover { background: var(--blue2); }
+.bar.active { background: var(--primary); border-color: var(--primary); }
+.chart-labels { display: flex; gap: 5px; padding: 6px 20px 14px; }
+.chart-lbl { flex: 1; text-align: center; font-size: 10.5px; color: var(--muted); }
 
-  /* ── Chart ── */
-  .chart-area {
-    padding: 20px;
-    height: 180px;
-    display: flex;
-    align-items: flex-end;
-    gap: 6px;
-  }
-  .bar {
-    flex: 1;
-    border-radius: 4px 4px 0 0;
-    background: linear-gradient(180deg, var(--purple) 0%, rgba(146,0,225,0.25) 100%);
-    min-height: 8px;
-  }
-  .bar.dim {
-    background: linear-gradient(180deg, rgba(77,101,255,0.55) 0%, rgba(77,101,255,0.12) 100%);
-  }
-  .chart-labels {
-    display: flex;
-    gap: 6px;
-    padding: 0 20px 14px;
-  }
-  .chart-label { flex: 1; text-align: center; font-size: 10px; color: var(--dimmer); }
+/* ── Table ── */
+table { width: 100%; border-collapse: collapse; }
+thead th {
+  padding: 10px 16px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  background: #fafafa;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+tbody td {
+  padding: 11px 16px;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 13px;
+  vertical-align: middle;
+}
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover td { background: #fafafa; }
+.mono { font-family: var(--mono); font-size: 12px; color: var(--text-2); }
+.link { color: var(--primary); text-decoration: none; font-family: var(--mono); font-size: 12px; }
+.link:hover { color: var(--primary-h); text-decoration: underline; }
 
-  /* ── Table ── */
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  thead th {
-    padding: 10px 20px;
-    text-align: left;
-    font-size: 10.5px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--muted);
-    background: rgba(255,255,255,0.025);
-    border-bottom: 1px solid var(--border);
-  }
-  tbody tr { border-bottom: 1px solid rgba(255,255,255,0.04); transition: background 0.15s; }
-  tbody tr:last-child { border-bottom: none; }
-  tbody tr:hover { background: rgba(255,255,255,0.03); }
-  td { padding: 12px 20px; vertical-align: middle; }
-  .mono { font-family: monospace; font-size: 12px; color: var(--muted); }
-  .status-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 3px 10px;
-    border-radius: 999px;
-    font-size: 11px;
-    font-weight: 600;
-  }
-  .status-pill.running { background: rgba(0,229,160,0.1); color: var(--green); border: 1px solid rgba(0,229,160,0.2); }
-  .status-pill.stopped { background: rgba(255,255,255,0.05); color: var(--muted); border: 1px solid var(--border); }
-  .status-pill.settling { background: rgba(146,0,225,0.1); color: var(--purple2); border: 1px solid rgba(146,0,225,0.25); }
-  .dot-sm { width: 5px; height: 5px; border-radius: 50%; background: var(--green); }
+/* ── Status tags ── */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.tag.running { background: var(--green-bg); color: #389e0d; border-color: var(--green-bd); }
+.tag.stopped { background: #fafafa; color: var(--muted); border-color: var(--border); }
+.tag.settling { background: var(--primary-bg); color: var(--primary); border-color: rgba(30,61,228,.25); }
+.tag .dot-tag { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 
-  /* ── Bottom row ── */
-  .bottom-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+/* ── Activity feed ── */
+.feed-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #f0f0f0;
+}
+.feed-item:last-child { border-bottom: none; }
+.feed-icon {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.feed-icon.settled  { background: var(--green-bg); }
+.feed-icon.created  { background: var(--primary-bg); }
+.feed-icon.signed   { background: #f0f0ff; }
+.feed-icon.stopped  { background: var(--red-bg); }
+.feed-icon.deposit  { background: var(--orange-bg); }
+.feed-text { font-size: 13px; line-height: 1.5; color: var(--text); }
+.feed-text .hl { color: var(--primary); font-family: var(--mono); font-size: 12px; }
+.feed-time { margin-top: 2px; font-size: 11.5px; color: var(--muted); }
 
-  /* ── Activity feed ── */
-  .feed-item {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 12px 20px;
-    border-bottom: 1px solid rgba(255,255,255,0.04);
-  }
-  .feed-item:last-child { border-bottom: none; }
-  .feed-dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    margin-top: 5px;
-    flex-shrink: 0;
-  }
-  .feed-text { font-size: 12.5px; line-height: 1.5; }
-  .feed-time { margin-top: 2px; font-size: 11px; color: var(--dimmer); }
-
-  /* ── Contract info ── */
-  .info-grid { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
-  .info-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .info-key { font-size: 11.5px; color: var(--muted); font-weight: 500; white-space: nowrap; }
-  .info-val { font-size: 12px; font-family: monospace; text-align: right; }
-  .info-val.highlight { color: var(--purple2); }
-  .info-val.green { color: var(--green); }
-  .copy-icon { color: var(--dimmer); cursor: pointer; font-size: 11px; flex-shrink: 0; }
-  .divider { height: 1px; background: var(--border); }
-
-  /* ── Glow decorations ── */
-  .glow {
-    position: fixed;
-    width: 600px; height: 600px;
-    border-radius: 50%;
-    pointer-events: none;
-    z-index: 0;
-    filter: blur(140px);
-    opacity: 0.055;
-  }
-  .glow-1 { background: var(--purple); top: -200px; right: 100px; }
-  .glow-2 { background: var(--blue); bottom: -100px; left: 300px; }
+/* ── Info list ── */
+.info-list { padding: 4px 0; }
+.info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid #f0f0f0;
+  gap: 12px;
+}
+.info-row:last-child { border-bottom: none; }
+.info-key {
+  font-size: 12.5px;
+  color: var(--muted);
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.info-val {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  text-align: right;
+  word-break: break-all;
+}
+.info-val.blue { color: var(--primary); }
+.info-val.green { color: var(--green); }
+.info-sep {
+  height: 1px;
+  background: #f0f0f0;
+  margin: 0 16px;
+}
+.copy-btn {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  padding: 2px;
+  line-height: 1;
+}
+.copy-btn:hover { color: var(--primary); }
 </style>
 </head>
 <body>
 
-<div class="glow glow-1"></div>
-<div class="glow glow-2"></div>
+<!-- Topbar -->
+<header class="topbar">
+  <a class="logo" href="#">
+    <div class="logo-mark">0G</div>
+    Sandbox Billing
+  </a>
+  <nav class="nav-links">
+    <a class="nav-link active" href="#">Overview</a>
+    <a class="nav-link" href="#">Sandboxes</a>
+    <a class="nav-link" href="#">Vouchers</a>
+    <a class="nav-link" href="#">Settlement</a>
+  </nav>
+  <div class="topbar-right">
+    <div class="chain-tag">
+      <div class="dot-live"></div>
+      0G Galileo · 16602
+    </div>
+  </div>
+</header>
 
-<!-- ── Sidebar ── -->
-<nav class="sidebar">
-  <div class="logo">
-    <div class="logo-icon">0G</div>
-    Sandbox
-  </div>
+<!-- Page -->
+<main class="page">
+  <div class="page-title">Overview</div>
 
-  <div class="nav-section">Overview</div>
-  <div class="nav-item active">
-    <span class="icon">▦</span> Dashboard
-  </div>
-  <div class="nav-item">
-    <span class="icon">◈</span> Sandboxes
-    <span class="badge">3</span>
-  </div>
-
-  <div class="nav-section">Billing</div>
-  <div class="nav-item">
-    <span class="icon">◎</span> Balance
-  </div>
-  <div class="nav-item">
-    <span class="icon">⬡</span> Vouchers
-  </div>
-  <div class="nav-item">
-    <span class="icon">⟳</span> Settlement
-  </div>
-
-  <div class="nav-section">Chain</div>
-  <div class="nav-item">
-    <span class="icon">⬡</span> Contract
-  </div>
-  <div class="nav-item">
-    <span class="icon">⚿</span> Provider
-  </div>
-
-  <div class="nav-section">System</div>
-  <div class="nav-item">
-    <span class="icon">◫</span> Logs
-  </div>
-  <div class="nav-item">
-    <span class="icon">⚙</span> Settings
-  </div>
-
-  <div class="sidebar-bottom">
-    <div class="avatar-row">
-      <div class="avatar">0x</div>
-      <div>
-        <div class="avatar-name">Provider</div>
-        <div class="avatar-addr">0xB831…CEd7</div>
+  <!-- Stats -->
+  <div class="stats-grid">
+    <div class="stat">
+      <div class="stat-label">Total Balance</div>
+      <div class="stat-value">0.02350 <span class="stat-unit">0G</span></div>
+      <div class="stat-footer">23,500,000,000,000,000 neuron</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Active Sandboxes</div>
+      <div class="stat-value">3</div>
+      <div class="stat-footer">
+        <span class="change up">+1</span> since yesterday
+      </div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Settled This Epoch</div>
+      <div class="stat-value">0.00024 <span class="stat-unit">0G</span></div>
+      <div class="stat-footer">
+        Next flush in <span class="change warn">42 min</span>
+      </div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Compute / hr</div>
+      <div class="stat-value">0.00018 <span class="stat-unit">0G</span></div>
+      <div class="stat-footer">
+        <span class="change down">↑12%</span> vs last hour
       </div>
     </div>
   </div>
-</nav>
 
-<!-- ── Main ── -->
-<div class="main">
+  <!-- Chart + Sandbox table -->
+  <div class="two-col">
 
-  <!-- Topbar -->
-  <div class="topbar">
-    <div>
-      <div class="topbar-title">Billing Dashboard</div>
-      <div class="topbar-sub">Real-time billing &amp; settlement overview</div>
-    </div>
-    <div class="topbar-right">
-      <div class="chain-pill">
-        <div class="dot"></div>
-        0G Galileo · Chain 16602
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">Settlement History (7d)</span>
+        <a class="card-action" href="#">View all</a>
       </div>
-      <button class="btn-outline">Deposit 0G</button>
-      <button class="btn-primary">+ New Sandbox</button>
+      <div class="chart-wrap">
+        <div class="bar" style="height:33%"></div>
+        <div class="bar" style="height:50%"></div>
+        <div class="bar" style="height:40%"></div>
+        <div class="bar" style="height:66%"></div>
+        <div class="bar" style="height:54%"></div>
+        <div class="bar" style="height:71%"></div>
+        <div class="bar active" style="height:87%"></div>
+      </div>
+      <div class="chart-labels">
+        <div class="chart-lbl">Mon</div>
+        <div class="chart-lbl">Tue</div>
+        <div class="chart-lbl">Wed</div>
+        <div class="chart-lbl">Thu</div>
+        <div class="chart-lbl">Fri</div>
+        <div class="chart-lbl">Sat</div>
+        <div class="chart-lbl">Sun</div>
+      </div>
     </div>
+
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">Sandboxes</span>
+        <a class="card-action" href="#">Manage</a>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Sandbox ID</th>
+            <th>Owner</th>
+            <th>Status</th>
+            <th>Accrued</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><a class="link" href="#">9c1d0f45</a></td>
+            <td><span class="mono">0xdAc1…1023</span></td>
+            <td><span class="tag running"><span class="dot-tag"></span>Running</span></td>
+            <td><span class="mono">0.00008 0G</span></td>
+          </tr>
+          <tr>
+            <td><a class="link" href="#">3a72be91</a></td>
+            <td><span class="mono">0x128D…58f2</span></td>
+            <td><span class="tag settling">Settling</span></td>
+            <td><span class="mono">0.00012 0G</span></td>
+          </tr>
+          <tr>
+            <td><a class="link" href="#">f0c4d218</a></td>
+            <td><span class="mono">0xdAc1…1023</span></td>
+            <td><span class="tag running"><span class="dot-tag"></span>Running</span></td>
+            <td><span class="mono">0.00004 0G</span></td>
+          </tr>
+          <tr>
+            <td><a class="link" href="#">7e9a1b44</a></td>
+            <td><span class="mono">0xfA92…9c3e</span></td>
+            <td><span class="tag stopped">Stopped</span></td>
+            <td><span class="mono" style="color:var(--muted)">—</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
   </div>
 
-  <!-- Content -->
-  <div class="content">
+  <!-- Activity + Contract info -->
+  <div class="two-col">
 
-    <!-- Stat cards -->
-    <div class="stats-row">
-      <div class="stat-card" style="--c1:#9200E1;--c2:#4d65ff;">
-        <div class="stat-label">Total Balance</div>
-        <div class="stat-value">0.0235 <span style="font-size:14px;color:var(--muted)">0G</span></div>
-        <div class="stat-sub">23,500,000,000,000,000 neuron</div>
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">Recent Activity</span>
+        <a class="card-action" href="#">View logs</a>
       </div>
-      <div class="stat-card" style="--c1:#00e5a0;--c2:#00d4ff;">
-        <div class="stat-label">Active Sandboxes</div>
-        <div class="stat-value">3</div>
-        <div class="stat-sub">
-          <span class="stat-change up">+1</span>&nbsp;since yesterday
+      <div class="feed-item">
+        <div class="feed-icon settled">✓</div>
+        <div>
+          <div class="feed-text">Voucher settled — nonce <strong>#7</strong> for <span class="hl">0xdAc1…1023</span></div>
+          <div class="feed-time">2 min ago · tx <span class="hl">0x4a3f…e192</span></div>
         </div>
       </div>
-      <div class="stat-card" style="--c1:#4d65ff;--c2:#9200E1;">
-        <div class="stat-label">Settled This Epoch</div>
-        <div class="stat-value">0.00024 <span style="font-size:14px;color:var(--muted)">0G</span></div>
-        <div class="stat-sub">Next flush in <strong style="color:var(--purple2)">42 min</strong></div>
+      <div class="feed-item">
+        <div class="feed-icon created">+</div>
+        <div>
+          <div class="feed-text">Sandbox <span class="hl">3a72be91</span> created by <span class="hl">0x128D…58f2</span></div>
+          <div class="feed-time">18 min ago</div>
+        </div>
       </div>
-      <div class="stat-card" style="--c1:#f5c842;--c2:#ff8c42;">
-        <div class="stat-label">Compute Spend / hr</div>
-        <div class="stat-value">0.00018 <span style="font-size:14px;color:var(--muted)">0G</span></div>
-        <div class="stat-sub">
-          <span class="stat-change down">↑ 12%</span>&nbsp;vs last hour
+      <div class="feed-item">
+        <div class="feed-icon signed">✎</div>
+        <div>
+          <div class="feed-text">EIP-712 voucher signed — 60,001,200 neuron</div>
+          <div class="feed-time">1 hr ago · TEE <span class="hl">0x61BE…6E3</span></div>
+        </div>
+      </div>
+      <div class="feed-item">
+        <div class="feed-icon stopped">✕</div>
+        <div>
+          <div class="feed-text">Sandbox <span class="hl">7e9a1b44</span> auto-stopped — <span style="color:var(--red)">insufficient balance</span></div>
+          <div class="feed-time">2 hr ago</div>
+        </div>
+      </div>
+      <div class="feed-item">
+        <div class="feed-icon deposit">↓</div>
+        <div>
+          <div class="feed-text">Deposit 0.01 0G from <span class="hl">0xfA92…9c3e</span></div>
+          <div class="feed-time">3 hr ago</div>
         </div>
       </div>
     </div>
 
-    <!-- Chart + Sandboxes table -->
-    <div class="section-row">
-
-      <div class="panel">
-        <div class="panel-head">
-          <div class="panel-title">Settlement History (7d)</div>
-          <div class="panel-action">View all →</div>
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">Contract &amp; Provider</span>
+        <a class="card-action" href="https://chainscan-galileo.0g.ai/" target="_blank">Explorer ↗</a>
+      </div>
+      <div class="info-list">
+        <div class="info-row">
+          <span class="info-key">Settlement Contract</span>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span class="info-val blue">0x24cD979DBd0Ae924a3f0c832a724CF4C58E5C210</span>
+            <button class="copy-btn" title="Copy">⎘</button>
+          </div>
         </div>
-        <div class="chart-area">
-          <div class="bar dim" style="height:35%"></div>
-          <div class="bar dim" style="height:52%"></div>
-          <div class="bar dim" style="height:41%"></div>
-          <div class="bar dim" style="height:68%"></div>
-          <div class="bar dim" style="height:55%"></div>
-          <div class="bar dim" style="height:72%"></div>
-          <div class="bar"     style="height:88%"></div>
+        <div class="info-sep"></div>
+        <div class="info-row">
+          <span class="info-key">Beacon</span>
+          <span class="info-val">0x8f3A…d701</span>
         </div>
-        <div class="chart-labels">
-          <div class="chart-label">Mon</div>
-          <div class="chart-label">Tue</div>
-          <div class="chart-label">Wed</div>
-          <div class="chart-label">Thu</div>
-          <div class="chart-label">Fri</div>
-          <div class="chart-label">Sat</div>
-          <div class="chart-label">Sun</div>
+        <div class="info-row">
+          <span class="info-key">Implementation</span>
+          <span class="info-val">0xe12B…5c34</span>
+        </div>
+        <div class="info-sep"></div>
+        <div class="info-row">
+          <span class="info-key">Provider</span>
+          <span class="info-val blue">0xB831371eb2703305f1d9F8542163633D0675CEd7</span>
+        </div>
+        <div class="info-row">
+          <span class="info-key">TEE Signer</span>
+          <span class="info-val">0x61BEb835D1935Eec8cC04efa2f4e2B3cC8B8B6E3</span>
+        </div>
+        <div class="info-sep"></div>
+        <div class="info-row">
+          <span class="info-key">Price / sec</span>
+          <span class="info-val green">16,667 neuron</span>
+        </div>
+        <div class="info-row">
+          <span class="info-key">Create Fee</span>
+          <span class="info-val green">5,000,000 neuron</span>
+        </div>
+        <div class="info-row">
+          <span class="info-key">Voucher Interval</span>
+          <span class="info-val">3,600 s (1 hr)</span>
         </div>
       </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <div class="panel-title">Active Sandboxes</div>
-          <div class="panel-action">Manage →</div>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Owner</th>
-              <th>Status</th>
-              <th>Accrued</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td class="mono">9c1d0f45</td>
-              <td class="mono">0xdAc1…1023</td>
-              <td><span class="status-pill running"><span class="dot-sm"></span>Running</span></td>
-              <td style="color:var(--yellow);font-size:12px;">0.00008 0G</td>
-            </tr>
-            <tr>
-              <td class="mono">3a72be91</td>
-              <td class="mono">0x128D…58f2</td>
-              <td><span class="status-pill settling">Settling</span></td>
-              <td style="color:var(--yellow);font-size:12px;">0.00012 0G</td>
-            </tr>
-            <tr>
-              <td class="mono">f0c4d218</td>
-              <td class="mono">0xdAc1…1023</td>
-              <td><span class="status-pill running"><span class="dot-sm"></span>Running</span></td>
-              <td style="color:var(--yellow);font-size:12px;">0.00004 0G</td>
-            </tr>
-            <tr>
-              <td class="mono">7e9a1b44</td>
-              <td class="mono">0xfA92…9c3e</td>
-              <td><span class="status-pill stopped">Stopped</span></td>
-              <td style="color:var(--muted);font-size:12px;">— —</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
     </div>
 
-    <!-- Bottom row -->
-    <div class="bottom-row">
-
-      <div class="panel">
-        <div class="panel-head">
-          <div class="panel-title">Recent Activity</div>
-          <div class="panel-action">View logs →</div>
-        </div>
-        <div class="feed-item">
-          <div class="feed-dot" style="background:var(--green)"></div>
-          <div>
-            <div class="feed-text">Voucher settled — nonce <strong>#7</strong> for <span style="color:var(--purple2)">0xdAc1…1023</span></div>
-            <div class="feed-time">2 minutes ago · tx 0x4a3f…e192</div>
-          </div>
-        </div>
-        <div class="feed-item">
-          <div class="feed-dot" style="background:var(--blue)"></div>
-          <div>
-            <div class="feed-text">Sandbox <strong>3a72be91</strong> created by <span style="color:var(--purple2)">0x128D…58f2</span></div>
-            <div class="feed-time">18 minutes ago</div>
-          </div>
-        </div>
-        <div class="feed-item">
-          <div class="feed-dot" style="background:var(--purple)"></div>
-          <div>
-            <div class="feed-text">EIP-712 voucher signed — 60,001,200 neuron</div>
-            <div class="feed-time">1 hour ago · TEE 0x61BE…6E3</div>
-          </div>
-        </div>
-        <div class="feed-item">
-          <div class="feed-dot" style="background:var(--red)"></div>
-          <div>
-            <div class="feed-text">Sandbox <strong>7e9a1b44</strong> auto-stopped — <span style="color:var(--red)">insufficient balance</span></div>
-            <div class="feed-time">2 hours ago</div>
-          </div>
-        </div>
-        <div class="feed-item">
-          <div class="feed-dot" style="background:var(--yellow)"></div>
-          <div>
-            <div class="feed-text">Deposit 0.01 0G received from <span style="color:var(--purple2)">0xfA92…9c3e</span></div>
-            <div class="feed-time">3 hours ago</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <div class="panel-title">Contract &amp; Provider</div>
-          <div class="panel-action">Explorer →</div>
-        </div>
-        <div class="info-grid">
-          <div class="info-row">
-            <div class="info-key">Settlement Contract</div>
-            <div style="display:flex;align-items:center;gap:6px;">
-              <div class="info-val highlight">0x24cD…C210</div>
-              <div class="copy-icon">⎘</div>
-            </div>
-          </div>
-          <div class="divider"></div>
-          <div class="info-row">
-            <div class="info-key">Beacon</div>
-            <div class="info-val" style="color:var(--muted)">0x8f3A…d701</div>
-          </div>
-          <div class="info-row">
-            <div class="info-key">Implementation</div>
-            <div class="info-val" style="color:var(--muted)">0xe12B…5c34</div>
-          </div>
-          <div class="divider"></div>
-          <div class="info-row">
-            <div class="info-key">Provider Address</div>
-            <div class="info-val highlight">0xB831…CEd7</div>
-          </div>
-          <div class="info-row">
-            <div class="info-key">TEE Signer</div>
-            <div class="info-val" style="color:var(--muted)">0x61BE…6E3</div>
-          </div>
-          <div class="divider"></div>
-          <div class="info-row">
-            <div class="info-key">Price / sec</div>
-            <div class="info-val green">16,667 neuron</div>
-          </div>
-          <div class="info-row">
-            <div class="info-key">Create Fee</div>
-            <div class="info-val green">5,000,000 neuron</div>
-          </div>
-          <div class="info-row">
-            <div class="info-key">Voucher Interval</div>
-            <div class="info-val" style="color:var(--text)">3,600 s (1 hr)</div>
-          </div>
-        </div>
-      </div>
-
-    </div>
-  </div><!-- /content -->
-</div><!-- /main -->
+  </div>
+</main>
 
 </body>
 </html>

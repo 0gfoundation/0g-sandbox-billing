@@ -146,11 +146,24 @@ go run ./cmd/billing/
 
 The server starts on port 8080 (`PORT` env var) and exposes:
 - `GET /healthz` — liveness probe
+- `GET /dashboard` — static operator dashboard (embedded from `web/dashboard.html`)
 - `POST /api/sandbox` — create sandbox (billing hook: create-fee voucher)
 - `GET /api/sandbox` — list sandboxes (filtered to caller's own)
 - `GET /api/sandbox/:id` — get sandbox (403 if not owner)
 - `POST /api/sandbox/:id/stop` — stop sandbox (billing hook: final compute voucher)
 - `DELETE /api/sandbox/:id` — delete sandbox (billing hook: final compute voucher)
+
+### Dashboard
+
+`web/dashboard.html` is embedded into the billing binary at build time via `//go:embed` in
+`web/static.go` and served at `GET /dashboard`. The page currently shows static mock data.
+
+**Style guide**: follows [chainscan-galileo.0g.ai](https://chainscan-galileo.0g.ai/) — light theme,
+`#1e3de4` blue primary, `#f5f5f5` background, white cards, `Roboto Mono` for addresses/numbers,
+Inter for body text.
+
+**Tracked issue**: [#14 — connect dashboard to real billing data](https://github.com/0gfoundation/0g-sandbox-billing/issues/14)
+(add `/admin/*` endpoints returning live Redis data; update dashboard to `fetch()` them).
 
 ---
 
