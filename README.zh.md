@@ -155,6 +155,30 @@ go run ./cmd/billing/
 | `MOCK_TEE` | — | 设为 `true` 用于本地开发（使用 `MOCK_APP_PRIVATE_KEY` 代替 TDX gRPC）|
 | `MOCK_APP_PRIVATE_KEY` | — | `MOCK_TEE=true` 时使用的十六进制私钥 |
 
+### SSH 网关密钥生成
+
+SSH 网关需要两个 ed25519 密钥对，以 base64 编码存入 `.env`。
+每次部署时生成一次：
+
+```bash
+# 生成网关私钥（SSH 网关服务使用）
+ssh-keygen -t ed25519 -C "daytona-gateway" -f /tmp/daytona_gw -N ""
+DAYTONA_SSH_GATEWAY_PRIVATE_KEY=$(base64 -w0 < /tmp/daytona_gw)
+
+# 生成主机密钥（向 SSH 客户端标识服务器身份）
+ssh-keygen -t ed25519 -C "daytona-gateway-host" -f /tmp/daytona_host -N ""
+DAYTONA_SSH_GATEWAY_HOST_KEY=$(base64 -w0 < /tmp/daytona_host)
+
+# 打印值，粘贴到 .env
+echo "DAYTONA_SSH_GATEWAY_PRIVATE_KEY=$DAYTONA_SSH_GATEWAY_PRIVATE_KEY"
+echo "DAYTONA_SSH_GATEWAY_HOST_KEY=$DAYTONA_SSH_GATEWAY_HOST_KEY"
+
+# 清理临时文件
+rm -f /tmp/daytona_gw /tmp/daytona_gw.pub /tmp/daytona_host /tmp/daytona_host.pub
+```
+
+这些值不得提交到代码仓库（`.gitignore` 已覆盖 `*.key`/`*.pem`；base64 值仅保存在 `.env` 中）。
+
 ---
 
 ## 开发

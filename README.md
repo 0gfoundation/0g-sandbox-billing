@@ -176,6 +176,31 @@ go run ./cmd/billing/
 | `MOCK_TEE` | — | Set to `true` for local dev (uses `MOCK_APP_PRIVATE_KEY` instead of TDX gRPC) |
 | `MOCK_APP_PRIVATE_KEY` | — | Hex private key used when `MOCK_TEE=true` |
 
+### SSH Gateway Key Generation
+
+The SSH gateway requires two ed25519 key pairs stored as base64 in `.env`.
+Generate them once per deployment:
+
+```bash
+# Generate the gateway private key (used by the SSH gateway service)
+ssh-keygen -t ed25519 -C "daytona-gateway" -f /tmp/daytona_gw -N ""
+DAYTONA_SSH_GATEWAY_PRIVATE_KEY=$(base64 -w0 < /tmp/daytona_gw)
+
+# Generate the host key (identifies the server to SSH clients)
+ssh-keygen -t ed25519 -C "daytona-gateway-host" -f /tmp/daytona_host -N ""
+DAYTONA_SSH_GATEWAY_HOST_KEY=$(base64 -w0 < /tmp/daytona_host)
+
+# Print values to paste into .env
+echo "DAYTONA_SSH_GATEWAY_PRIVATE_KEY=$DAYTONA_SSH_GATEWAY_PRIVATE_KEY"
+echo "DAYTONA_SSH_GATEWAY_HOST_KEY=$DAYTONA_SSH_GATEWAY_HOST_KEY"
+
+# Clean up temp files
+rm -f /tmp/daytona_gw /tmp/daytona_gw.pub /tmp/daytona_host /tmp/daytona_host.pub
+```
+
+These values must never be committed to source control (`.gitignore` covers `*.key`/`*.pem`;
+the base64 values live only in `.env`).
+
 ### Docker Compose
 
 ```bash
