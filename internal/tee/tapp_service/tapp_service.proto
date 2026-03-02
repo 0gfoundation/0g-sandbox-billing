@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package tapp_service;
+
+option go_package = "github.com/0gfoundation/0g-sandbox-billing/internal/tee/tapp_service";
+
+service TappService {
+  rpc GetAppSecretKey(GetAppSecretKeyRequest) returns (GetAppSecretKeyResponse);
+}
+
+message GetAppSecretKeyRequest {
+  string app_id   = 1;
+  string key_type = 2;
+  bool   x25519   = 3;
+}
+
+message GetAppSecretKeyResponse {
+  bool   success          = 1;
+  string message          = 2;
+  bytes  private_key      = 3;
+  bytes  public_key       = 4;
+  bytes  eth_address      = 5;
+  bytes  x25519_public_key = 6;
+}

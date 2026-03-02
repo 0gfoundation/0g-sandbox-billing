@@ -16,7 +16,7 @@ import (
 // RunGenerator periodically scans all billing sessions and emits signed vouchers.
 func RunGenerator(ctx context.Context, cfg *config.Config, rdb *redis.Client, signer VoucherSigner, log *zap.Logger) {
 	interval := time.Duration(cfg.Billing.VoucherIntervalSec) * time.Second
-	computePricePerMin, _ := new(big.Int).SetString(cfg.Billing.ComputePricePerMin, 10)
+	computePricePerSec, _ := new(big.Int).SetString(cfg.Billing.ComputePricePerSec, 10)
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -29,7 +29,7 @@ func RunGenerator(ctx context.Context, cfg *config.Config, rdb *redis.Client, si
 			log.Info("voucher generator stopped")
 			return
 		case <-ticker.C:
-			runGeneration(ctx, cfg, rdb, signer, computePricePerMin, log)
+			runGeneration(ctx, cfg, rdb, signer, computePricePerSec, log)
 		}
 	}
 }
@@ -39,7 +39,7 @@ func runGeneration(
 	cfg *config.Config,
 	rdb *redis.Client,
 	signer VoucherSigner,
-	computePricePerMin *big.Int,
+	computePricePerSec *big.Int,
 	log *zap.Logger,
 ) {
 	sessions, err := ScanAllSessions(ctx, rdb)
@@ -60,8 +60,8 @@ func runGeneration(
 				periodEnd = now
 			}
 
-			computeMinutes := ceilMinutes(periodEnd - periodStart)
-			if computeMinutes == 0 {
+			elapsedSec := periodEnd - periodStart
+			if elapsedSec <= 0 {
 				return
 			}
 
@@ -71,14 +71,14 @@ func runGeneration(
 				return
 			}
 
-			totalFee := new(big.Int).Mul(big.NewInt(computeMinutes), computePricePerMin)
+			totalFee := new(big.Int).Mul(big.NewInt(elapsedSec), computePricePerSec)
 			v := &voucher.SandboxVoucher{
 				SandboxID: s.SandboxID,
 				User:      common.HexToAddress(s.Owner),
 				Provider:  common.HexToAddress(s.Provider),
 				TotalFee:  totalFee,
 				Nonce:     nonce,
-				UsageHash: voucher.BuildUsageHash(s.SandboxID, periodStart, periodEnd, computeMinutes),
+				UsageHash: voucher.BuildUsageHash(s.SandboxID, periodStart, periodEnd, elapsedSec),
 			}
 
 			if err := signer.SignAndEnqueue(ctx, v); err != nil {

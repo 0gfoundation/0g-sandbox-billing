@@ -16,6 +16,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
+	"github.com/ethereum/go-ethereum/crypto"
+
 	"github.com/0gfoundation/0g-sandbox-billing/internal/auth"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/billing"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/chain"
@@ -23,6 +25,7 @@ import (
 	"github.com/0gfoundation/0g-sandbox-billing/internal/daytona"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/proxy"
 	"github.com/0gfoundation/0g-sandbox-billing/internal/settler"
+	"github.com/0gfoundation/0g-sandbox-billing/internal/tee"
 )
 
 func main() {
@@ -46,6 +49,26 @@ func main() {
 		log.Fatal("redis ping failed", zap.Error(err))
 	}
 
+	// ── TEE signing key ───────────────────────────────────────────────────────
+	// Fetched from the tapp-daemon via gRPC in a real TDX environment, or from
+	// MOCK_APP_PRIVATE_KEY when MOCK_TEE is set.
+	appKey, err := tee.Get(ctx)
+	if err != nil {
+		log.Fatal("failed to retrieve TEE signing key", zap.Error(err))
+	}
+	cfg.Chain.TEEPrivateKey = appKey.PrivateKeyHex
+
+	// Derive provider address from the TEE key if not explicitly configured.
+	if cfg.Chain.ProviderAddress == "" {
+		privKey, err := crypto.HexToECDSA(appKey.PrivateKeyHex)
+		if err != nil {
+			log.Fatal("invalid TEE private key", zap.Error(err))
+		}
+		cfg.Chain.ProviderAddress = crypto.PubkeyToAddress(privKey.PublicKey).Hex()
+		log.Info("provider address derived from TEE key",
+			zap.String("address", cfg.Chain.ProviderAddress))
+	}
+
 	// ── Chain client (TEE private key + ABI binding) ──────────────────────────
 	onchain, err := chain.NewClient(cfg)
 	if err != nil {
@@ -53,9 +76,9 @@ func main() {
 	}
 
 	// ── VoucherSigner (TEE key → sign → Redis queue) ──────────────────────────
-	computePricePerMin, ok := new(big.Int).SetString(cfg.Billing.ComputePricePerMin, 10)
+	computePricePerSec, ok := new(big.Int).SetString(cfg.Billing.ComputePricePerSec, 10)
 	if !ok {
-		log.Fatal("invalid COMPUTE_PRICE_PER_MIN")
+		log.Fatal("invalid COMPUTE_PRICE_PER_SEC")
 	}
 	createFee, ok := new(big.Int).SetString(cfg.Billing.CreateFee, 10)
 	if !ok {
@@ -79,11 +102,14 @@ func main() {
 	billingHandler := billing.NewEventHandler(
 		rdb,
 		cfg.Chain.ProviderAddress,
-		computePricePerMin,
+		computePricePerSec,
 		createFee,
 		signer,
 		log,
 	)
+
+	// Minimum balance = createFee + one voucher interval of compute fees (per-second pricing).
+	minBalance := new(big.Int).Add(createFee, new(big.Int).Mul(computePricePerSec, big.NewInt(cfg.Billing.VoucherIntervalSec)))
 
 	// ── Stop channel (settler → stop handler, buffered) ───────────────────────
 	stopCh := make(chan settler.StopSignal, 100)
@@ -103,7 +129,7 @@ func main() {
 	})
 
 	api := r.Group("/api", auth.Middleware(rdb))
-	proxy.NewHandler(dtona, billingHandler, log).Register(api)
+	proxy.NewHandler(dtona, billingHandler, onchain, minBalance, log).Register(api)
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),

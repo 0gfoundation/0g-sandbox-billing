@@ -116,7 +116,20 @@ func toContractVouchers(vs []voucher.SandboxVoucher) []SandboxServingSandboxVouc
 	return out
 }
 
-// SettleFeesWithTEE submits a batch of signed vouchers to the contract.
+// voucherSettledTopic is keccak256("VoucherSettled(address,address,uint256,bytes32,uint256,uint8)").
+// Used to identify VoucherSettled logs in a tx receipt.
+var voucherSettledTopic = crypto.Keccak256Hash([]byte("VoucherSettled(address,address,uint256,bytes32,uint256,uint8)"))
+
+// SettleFeesWithTEE submits a batch of signed vouchers to the contract and
+// returns per-voucher settlement statuses.
+//
+// Statuses are recovered in two steps:
+//  1. Parse VoucherSettled events from the receipt — the contract emits these
+//     for SUCCESS and INSUFFICIENT_BALANCE (after the nonce is committed).
+//  2. For vouchers that emitted no event (PROVIDER_MISMATCH, NOT_ACKNOWLEDGED,
+//     INVALID_NONCE, INVALID_SIGNATURE — all return before the nonce commit),
+//     call PreviewSettlementResults with the original vouchers.  Because the
+//     nonce was never committed, the view function still evaluates correctly.
 func (c *Client) SettleFeesWithTEE(ctx context.Context, vouchers []voucher.SandboxVoucher) ([]SettlementStatus, error) {
 	opts, err := c.transactOpts(ctx)
 	if err != nil {
@@ -128,7 +141,6 @@ func (c *Client) SettleFeesWithTEE(ctx context.Context, vouchers []voucher.Sandb
 		return nil, fmt.Errorf("SettleFeesWithTEE tx: %w", err)
 	}
 
-	// Wait for receipt
 	receipt, err := bind.WaitMined(ctx, c.eth, tx)
 	if err != nil {
 		return nil, fmt.Errorf("wait mined: %w", err)
@@ -137,13 +149,57 @@ func (c *Client) SettleFeesWithTEE(ctx context.Context, vouchers []voucher.Sandb
 		return nil, fmt.Errorf("tx reverted: %s", tx.Hash().Hex())
 	}
 
-	// Re-read statuses via the view function after the tx confirms
-	return c.PreviewSettlementResults(ctx, vouchers)
+	// Step 1: parse VoucherSettled events → (user, nonce) → status.
+	type voucherKey struct{ user, nonce string }
+	fromEvent := make(map[voucherKey]SettlementStatus)
+	for _, log := range receipt.Logs {
+		if log.Address != c.contractAddr {
+			continue
+		}
+		if len(log.Topics) == 0 || log.Topics[0] != voucherSettledTopic {
+			continue
+		}
+		ev, err := c.contract.ParseVoucherSettled(*log)
+		if err != nil {
+			continue
+		}
+		fromEvent[voucherKey{ev.User.Hex(), ev.Nonce.String()}] = SettlementStatus(ev.Status)
+	}
+
+	// Step 2: assign statuses; collect vouchers that emitted no event.
+	statuses := make([]SettlementStatus, len(vouchers))
+	var missingIdx []int
+	var missingVouchers []voucher.SandboxVoucher
+	for i, v := range vouchers {
+		key := voucherKey{v.User.Hex(), v.Nonce.String()}
+		if s, ok := fromEvent[key]; ok {
+			statuses[i] = s
+		} else {
+			missingIdx = append(missingIdx, i)
+			missingVouchers = append(missingVouchers, v)
+		}
+	}
+
+	// Step 3: preview the no-event vouchers to get the specific failure reason.
+	if len(missingVouchers) > 0 {
+		fallback, err := c.PreviewSettlementResults(ctx, missingVouchers)
+		if err != nil {
+			return nil, fmt.Errorf("preview no-event vouchers: %w", err)
+		}
+		for j, i := range missingIdx {
+			statuses[i] = fallback[j]
+		}
+	}
+
+	return statuses, nil
 }
 
-// PreviewSettlementResults calls the view function to pre-check statuses.
+// PreviewSettlementResults calls the view function to check expected statuses
+// without submitting a transaction.  From must be set to the provider address
+// so msg.sender passes the provider check inside _previewOne.
 func (c *Client) PreviewSettlementResults(ctx context.Context, vouchers []voucher.SandboxVoucher) ([]SettlementStatus, error) {
-	opts := &bind.CallOpts{Context: ctx}
+	providerAddr := crypto.PubkeyToAddress(c.providerKey.PublicKey)
+	opts := &bind.CallOpts{Context: ctx, From: providerAddr}
 	raw, err := c.contract.PreviewSettlementResults(opts, toContractVouchers(vouchers))
 	if err != nil {
 		return nil, fmt.Errorf("PreviewSettlementResults: %w", err)
@@ -163,6 +219,12 @@ func (c *Client) GetLastNonce(ctx context.Context, user, provider common.Address
 		return nil, fmt.Errorf("GetLastNonce: %w", err)
 	}
 	return n, nil
+}
+
+// GetBalance returns only the on-chain balance for a user (satisfies proxy.BalanceChecker).
+func (c *Client) GetBalance(ctx context.Context, user common.Address) (*big.Int, error) {
+	balance, _, _, err := c.GetAccount(ctx, user)
+	return balance, err
 }
 
 // GetAccount returns a user's balance, pendingRefund, and refundUnlockAt.

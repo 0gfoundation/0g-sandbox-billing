@@ -16,7 +16,7 @@ import (
 type EventHandler struct {
 	rdb                *redis.Client
 	providerAddress    string
-	computePricePerMin *big.Int
+	computePricePerSec *big.Int
 	createFee          *big.Int
 	signer             VoucherSigner
 	log                *zap.Logger
@@ -31,7 +31,7 @@ type VoucherSigner interface {
 func NewEventHandler(
 	rdb *redis.Client,
 	providerAddress string,
-	computePricePerMin *big.Int,
+	computePricePerSec *big.Int,
 	createFee *big.Int,
 	signer VoucherSigner,
 	log *zap.Logger,
@@ -39,14 +39,15 @@ func NewEventHandler(
 	return &EventHandler{
 		rdb:                rdb,
 		providerAddress:    providerAddress,
-		computePricePerMin: computePricePerMin,
+		computePricePerSec: computePricePerSec,
 		createFee:          createFee,
 		signer:             signer,
 		log:                log,
 	}
 }
 
-// OnCreate handles POST /sandbox success: generate createFee voucher.
+// OnCreate handles POST /sandbox success: generate createFee voucher and start
+// compute session immediately (Daytona auto-starts sandboxes on create).
 func (h *EventHandler) OnCreate(ctx context.Context, sandboxID, ownerAddr string) {
 	nonce, err := h.signer.IncrNonce(ctx, ownerAddr, h.providerAddress)
 	if err != nil {
@@ -64,11 +65,31 @@ func (h *EventHandler) OnCreate(ctx context.Context, sandboxID, ownerAddr string
 	}
 	if err := h.signer.SignAndEnqueue(ctx, v); err != nil {
 		h.log.Error("OnCreate: sign/enqueue", zap.String("sandbox", sandboxID), zap.Error(err))
+		return
+	}
+	s := Session{
+		SandboxID:     sandboxID,
+		Owner:         ownerAddr,
+		Provider:      h.providerAddress,
+		StartTime:     now,
+		LastVoucherAt: now,
+	}
+	if err := CreateSession(ctx, h.rdb, s); err != nil {
+		h.log.Error("OnCreate: create session", zap.String("sandbox", sandboxID), zap.Error(err))
 	}
 }
 
-// OnStart handles POST /sandbox/:id/start success: create billing session.
+// OnStart handles POST /sandbox/:id/start success: create billing session if
+// none exists (idempotent — OnCreate already opens a session on initial start).
 func (h *EventHandler) OnStart(ctx context.Context, sandboxID, ownerAddr string) {
+	existing, err := GetSession(ctx, h.rdb, sandboxID)
+	if err != nil {
+		h.log.Error("OnStart: get session", zap.String("sandbox", sandboxID), zap.Error(err))
+		return
+	}
+	if existing != nil {
+		return // session already open (created by OnCreate or a previous start)
+	}
 	now := time.Now().Unix()
 	s := Session{
 		SandboxID:     sandboxID,
@@ -116,12 +137,12 @@ func (h *EventHandler) generateFinalVoucher(ctx context.Context, sandboxID strin
 	now := time.Now().Unix()
 	periodStart := sess.LastVoucherAt
 	periodEnd := now
-	computeMinutes := ceilMinutes(periodEnd - periodStart)
-	if computeMinutes == 0 {
+	elapsedSec := periodEnd - periodStart
+	if elapsedSec <= 0 {
 		return
 	}
 
-	totalFee := new(big.Int).Mul(big.NewInt(computeMinutes), h.computePricePerMin)
+	totalFee := new(big.Int).Mul(big.NewInt(elapsedSec), h.computePricePerSec)
 	nonce, err := h.signer.IncrNonce(ctx, sess.Owner, h.providerAddress)
 	if err != nil {
 		h.log.Error("generateFinalVoucher: incr nonce", zap.String("sandbox", sandboxID), zap.Error(err))
@@ -134,16 +155,10 @@ func (h *EventHandler) generateFinalVoucher(ctx context.Context, sandboxID strin
 		Provider:  common.HexToAddress(h.providerAddress),
 		TotalFee:  totalFee,
 		Nonce:     nonce,
-		UsageHash: voucher.BuildUsageHash(sandboxID, periodStart, periodEnd, computeMinutes),
+		UsageHash: voucher.BuildUsageHash(sandboxID, periodStart, periodEnd, elapsedSec),
 	}
 	if err := h.signer.SignAndEnqueue(ctx, v); err != nil {
 		h.log.Error("generateFinalVoucher: sign/enqueue", zap.String("sandbox", sandboxID), zap.Error(err))
 	}
 }
 
-func ceilMinutes(secs int64) int64 {
-	if secs <= 0 {
-		return 0
-	}
-	return (secs + 59) / 60
-}

@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
 	"strings"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
@@ -27,15 +29,23 @@ type BillingHooks interface {
 	OnArchive(ctx context.Context, sandboxID string)
 }
 
-// Handler wires up all proxy routes onto a Gin engine.
-type Handler struct {
-	dtona   *daytona.Client
-	billing BillingHooks
-	rp      *httputil.ReverseProxy
-	log     *zap.Logger
+// BalanceChecker looks up the on-chain balance for a wallet address.
+// A nil implementation disables the balance pre-check on create.
+type BalanceChecker interface {
+	GetBalance(ctx context.Context, addr common.Address) (*big.Int, error)
 }
 
-func NewHandler(dtona *daytona.Client, bh BillingHooks, log *zap.Logger) *Handler {
+// Handler wires up all proxy routes onto a Gin engine.
+type Handler struct {
+	dtona      *daytona.Client
+	billing    BillingHooks
+	rp         *httputil.ReverseProxy
+	balCheck   BalanceChecker // nil = no check
+	minBalance *big.Int       // minimum balance required to create a sandbox
+	log        *zap.Logger
+}
+
+func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, minBalance *big.Int, log *zap.Logger) *Handler {
 	target, _ := url.Parse(dtona.BaseURL())
 	rp := httputil.NewSingleHostReverseProxy(target)
 
@@ -47,7 +57,7 @@ func NewHandler(dtona *daytona.Client, bh BillingHooks, log *zap.Logger) *Handle
 		req.Host = target.Host
 	}
 
-	return &Handler{dtona: dtona, billing: bh, rp: rp, log: log}
+	return &Handler{dtona: dtona, billing: bh, rp: rp, balCheck: balCheck, minBalance: minBalance, log: log}
 }
 
 // Register mounts all routes. authMiddleware should already be applied to the group.
@@ -82,6 +92,24 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 
 func (h *Handler) handleCreate(c *gin.Context) {
 	wallet := c.GetString("wallet_address")
+
+	// Pre-check: reject if on-chain balance is below the minimum required.
+	if h.balCheck != nil && h.minBalance != nil {
+		balance, err := h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet))
+		if err != nil {
+			h.log.Error("balance check", zap.String("wallet", wallet), zap.Error(err))
+			c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
+			return
+		}
+		if balance.Cmp(h.minBalance) < 0 {
+			c.JSON(http.StatusPaymentRequired, gin.H{
+				"error":    "insufficient balance",
+				"balance":  balance.String(),
+				"required": h.minBalance.String(),
+			})
+			return
+		}
+	}
 
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {

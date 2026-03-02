@@ -16,11 +16,11 @@ import (
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // testConfig builds the minimal *config.Config that runGeneration needs.
-func testConfig(intervalSec int64, pricePerMin string) *config.Config {
+func testConfig(intervalSec int64, pricePerSec string) *config.Config {
 	return &config.Config{
 		Billing: config.BillingConfig{
 			VoucherIntervalSec: intervalSec,
-			ComputePricePerMin: pricePerMin,
+			ComputePricePerSec: pricePerSec,
 		},
 	}
 }
@@ -47,7 +47,7 @@ func TestRunGeneration_SessionTooRecent_NoVoucher(t *testing.T) {
 	cfg := testConfig(3600, "100")
 	ctx := context.Background()
 
-	// LastVoucherAt = now → periodEnd = now → elapsed = 0 → ceilMinutes(0) = 0
+	// LastVoucherAt = now → periodEnd = now → elapsed = 0 → no voucher
 	now := time.Now().Unix()
 	CreateSession(ctx, rdb, Session{ //nolint:errcheck
 		SandboxID: "sb-fresh", Owner: testOwner, Provider: testProvider,
@@ -66,11 +66,11 @@ func TestRunGeneration_SessionTooRecent_NoVoucher(t *testing.T) {
 func TestRunGeneration_SessionWithinInterval_CorrectFee(t *testing.T) {
 	rdb, _ := newTestRedis(t)
 	ms := &mockSigner{}
-	// intervalSec = 7200 (2 h), pricePerMin = 50, session = 120 s ago
-	// periodEnd = now (capped), elapsed = 120 s, ceilMinutes = 2, fee = 2*50 = 100
+	// intervalSec = 7200 (2 h), pricePerSec = 50, session = 120 s ago
+	// periodEnd = now (capped), elapsed = 120 s, fee = 120 * 50 = 6000
 	cfg := testConfig(7200, "50")
 	ctx := context.Background()
-	const pricePerMin = int64(50)
+	const pricePerSec = int64(50)
 
 	pastTime := time.Now().Unix() - 120
 	CreateSession(ctx, rdb, Session{ //nolint:errcheck
@@ -78,7 +78,7 @@ func TestRunGeneration_SessionWithinInterval_CorrectFee(t *testing.T) {
 		StartTime: pastTime, LastVoucherAt: pastTime,
 	})
 
-	runGeneration(ctx, cfg, rdb, ms, big.NewInt(pricePerMin), zap.NewNop())
+	runGeneration(ctx, cfg, rdb, ms, big.NewInt(pricePerSec), zap.NewNop())
 
 	v := ms.last()
 	if v == nil {
@@ -87,7 +87,7 @@ func TestRunGeneration_SessionWithinInterval_CorrectFee(t *testing.T) {
 	if v.SandboxID != "sb-partial" {
 		t.Errorf("SandboxID: got %q want %q", v.SandboxID, "sb-partial")
 	}
-	want := int64(2 * pricePerMin) // 2 mins * 50
+	want := int64(120 * pricePerSec) // 120 secs * 50 neuron/sec = 6000
 	if v.TotalFee.Int64() != want {
 		t.Errorf("TotalFee: got %d want %d", v.TotalFee.Int64(), want)
 	}
@@ -99,26 +99,26 @@ func TestRunGeneration_HardCap_OneIntervalMax(t *testing.T) {
 	rdb, _ := newTestRedis(t)
 	ms := &mockSigner{}
 	const intervalSec = int64(3600)
-	const pricePerMin = int64(100)
+	const pricePerSec = int64(100)
 	cfg := testConfig(intervalSec, "100")
 	ctx := context.Background()
 
 	// Session is 2 intervals old; generator should only cover one interval
 	// periodStart = now - 2*3600, periodEnd = periodStart + 3600 = now - 3600
-	// elapsed = 3600, ceilMinutes = 60, fee = 60 * 100 = 6000
+	// elapsed = 3600 s, fee = 3600 * 100 = 360000
 	old := time.Now().Unix() - 2*intervalSec
 	CreateSession(ctx, rdb, Session{ //nolint:errcheck
 		SandboxID: "sb-old", Owner: testOwner, Provider: testProvider,
 		StartTime: old, LastVoucherAt: old,
 	})
 
-	runGeneration(ctx, cfg, rdb, ms, big.NewInt(pricePerMin), zap.NewNop())
+	runGeneration(ctx, cfg, rdb, ms, big.NewInt(pricePerSec), zap.NewNop())
 
 	v := ms.last()
 	if v == nil {
 		t.Fatal("expected voucher, got none")
 	}
-	want := int64(60 * pricePerMin) // 60 min * 100
+	want := intervalSec * pricePerSec // 3600 secs * 100 neuron/sec = 360000
 	if v.TotalFee.Int64() != want {
 		t.Errorf("TotalFee: got %d want %d (hard-cap check)", v.TotalFee.Int64(), want)
 	}
@@ -338,7 +338,7 @@ func TestRunGeneration_AfterUpdate_NoDoubleVoucher(t *testing.T) {
 	}
 
 	// Second run immediately after → LastVoucherAt just updated to ~now,
-	// so elapsed ≈ 0, ceilMinutes = 0 → no new voucher
+	// so elapsed ≈ 0 → no new voucher
 	runGeneration(ctx, cfg, rdb, ms, big.NewInt(100), zap.NewNop())
 	if ms.count() != 1 {
 		t.Errorf("second run: expected still 1 voucher total, got %d", ms.count())

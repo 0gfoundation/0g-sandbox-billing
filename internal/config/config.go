@@ -27,7 +27,7 @@ type RedisConfig struct {
 
 type BillingConfig struct {
 	VoucherIntervalSec int64  `mapstructure:"voucher_interval_sec"`
-	ComputePricePerMin string `mapstructure:"compute_price_per_min"`
+	ComputePricePerSec string `mapstructure:"compute_price_per_sec"`
 	CreateFee          string `mapstructure:"create_fee"`
 }
 
@@ -49,7 +49,7 @@ func Load() (*Config, error) {
 	// Defaults
 	v.SetDefault("server.port", 8080)
 	v.SetDefault("billing.voucher_interval_sec", 3600)
-	v.SetDefault("billing.compute_price_per_min", "1000000")
+	v.SetDefault("billing.compute_price_per_sec", "16667")
 	v.SetDefault("billing.create_fee", "5000000")
 	v.SetDefault("redis.addr", "redis:6379")
 
@@ -70,7 +70,7 @@ func Load() (*Config, error) {
 		"redis.addr":                   "REDIS_ADDR",
 		"redis.password":               "REDIS_PASSWORD",
 		"billing.voucher_interval_sec": "VOUCHER_INTERVAL_SEC",
-		"billing.compute_price_per_min": "COMPUTE_PRICE_PER_MIN",
+		"billing.compute_price_per_sec": "COMPUTE_PRICE_PER_SEC",
 		"billing.create_fee":           "CREATE_FEE",
 		"chain.rpc_url":                "RPC_URL",
 		"chain.contract_address":       "SETTLEMENT_CONTRACT",
@@ -98,13 +98,14 @@ func (c *Config) validate() error {
 		val  string
 		name string
 	}
+	// TEE_SIGNING_KEY and PROVIDER_ADDRESS are optional here: if absent they
+	// are populated at startup by tee.Get() (gRPC call to the tapp-daemon in
+	// a real TDX environment, or MOCK_APP_PRIVATE_KEY in mock mode).
 	for _, r := range []req{
 		{c.Daytona.APIURL, "DAYTONA_API_URL"},
 		{c.Daytona.AdminKey, "DAYTONA_ADMIN_KEY"},
 		{c.Chain.RPCURL, "RPC_URL"},
 		{c.Chain.ContractAddress, "SETTLEMENT_CONTRACT"},
-		{c.Chain.TEEPrivateKey, "TEE_SIGNING_KEY"},
-		{c.Chain.ProviderAddress, "PROVIDER_ADDRESS"},
 	} {
 		if r.val == "" {
 			return fmt.Errorf("required config missing: %s", r.name)

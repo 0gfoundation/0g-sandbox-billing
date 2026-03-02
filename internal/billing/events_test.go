@@ -65,8 +65,8 @@ const (
 	testProvider   = "0x1111111111111111111111111111111111111111"
 	testOwner      = "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	testSandbox    = "sb-events-001"
-	pricePerMin    = int64(100) // 100 wei/min
-	createFeeVal   = int64(500) // 500 wei flat create fee
+	pricePerSec    = int64(100) // 100 neuron/sec
+	createFeeVal   = int64(500) // 500 neuron flat create fee
 )
 
 func newEventHandler(ms *mockSigner, rdb interface {
@@ -82,7 +82,7 @@ func newTestHandler(t *testing.T, ms *mockSigner) (*EventHandler, func(sandboxID
 	h := NewEventHandler(
 		rdb,
 		testProvider,
-		big.NewInt(pricePerMin),
+		big.NewInt(pricePerSec),
 		big.NewInt(createFeeVal),
 		ms,
 		zap.NewNop(),
@@ -91,39 +91,16 @@ func newTestHandler(t *testing.T, ms *mockSigner) (*EventHandler, func(sandboxID
 	return h, get
 }
 
-// ── ceilMinutes ───────────────────────────────────────────────────────────────
-
-func TestCeilMinutes(t *testing.T) {
-	cases := []struct {
-		secs int64
-		want int64
-	}{
-		{0, 0},
-		{-60, 0},
-		{1, 1},
-		{59, 1},
-		{60, 1},
-		{61, 2},
-		{120, 2},
-		{121, 3},
-		{3600, 60},
-	}
-	for _, tc := range cases {
-		got := ceilMinutes(tc.secs)
-		if got != tc.want {
-			t.Errorf("ceilMinutes(%d) = %d, want %d", tc.secs, got, tc.want)
-		}
-	}
-}
-
 // ── OnCreate ─────────────────────────────────────────────────────────────────
 
 func TestOnCreate_EmitsVoucher(t *testing.T) {
 	ms := &mockSigner{}
-	h, _ := newTestHandler(t, ms)
+	h, get := newTestHandler(t, ms)
 	ctx := context.Background()
 
+	before := time.Now().Unix()
 	h.OnCreate(ctx, testSandbox, testOwner)
+	after := time.Now().Unix()
 
 	v := ms.last()
 	if v == nil {
@@ -145,6 +122,20 @@ func TestOnCreate_EmitsVoucher(t *testing.T) {
 	}
 	if v.Provider.Hex() == zeroAddr {
 		t.Error("Provider address is zero")
+	}
+	// OnCreate must also open a compute session immediately.
+	sess, err := get(testSandbox)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if sess == nil {
+		t.Fatal("expected compute session after OnCreate, got nil")
+	}
+	if sess.Owner != testOwner {
+		t.Errorf("session Owner: got %q want %q", sess.Owner, testOwner)
+	}
+	if sess.StartTime < before || sess.StartTime > after {
+		t.Errorf("session StartTime %d not in [%d, %d]", sess.StartTime, before, after)
 	}
 }
 
@@ -224,18 +215,29 @@ func TestOnStart_CreatesSession(t *testing.T) {
 	}
 }
 
-func TestOnStart_OverwritesExistingSession(t *testing.T) {
+func TestOnStart_IdempotentIfSessionExists(t *testing.T) {
 	ms := &mockSigner{}
 	h, get := newTestHandler(t, ms)
 	ctx := context.Background()
 
 	h.OnStart(ctx, testSandbox, testOwner)
-	time.Sleep(2 * time.Millisecond) // tiny gap so timestamps differ
+	sess1, _ := get(testSandbox)
+	if sess1 == nil {
+		t.Fatal("expected session after first OnStart")
+	}
+	origStart := sess1.StartTime
+
+	time.Sleep(2 * time.Millisecond) // ensure clock would differ if overwritten
 	h.OnStart(ctx, testSandbox, testOwner)
 
-	sess, _ := get(testSandbox)
-	if sess == nil {
-		t.Fatal("expected session after second OnStart")
+	sess2, _ := get(testSandbox)
+	if sess2 == nil {
+		t.Fatal("expected session still present after second OnStart")
+	}
+	// StartTime must not be reset — OnStart is a no-op when session exists.
+	if sess2.StartTime != origStart {
+		t.Errorf("OnStart overwrote existing session StartTime: got %d want %d",
+			sess2.StartTime, origStart)
 	}
 }
 
@@ -256,10 +258,10 @@ func TestOnStop_NoSession_NoVoucher(t *testing.T) {
 func TestOnStop_EmitsFinalVoucher(t *testing.T) {
 	ms := &mockSigner{}
 	rdb, _ := newTestRedis(t)
-	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerMin), big.NewInt(createFeeVal), ms, zap.NewNop())
+	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(createFeeVal), ms, zap.NewNop())
 	ctx := context.Background()
 
-	// Session started 3 minutes ago
+	// Session started 180 seconds ago
 	periodStart := time.Now().Unix() - 180
 	err := CreateSession(ctx, rdb, Session{
 		SandboxID:     testSandbox,
@@ -281,16 +283,16 @@ func TestOnStop_EmitsFinalVoucher(t *testing.T) {
 	if v.SandboxID != testSandbox {
 		t.Errorf("SandboxID: got %q want %q", v.SandboxID, testSandbox)
 	}
-	// 180 seconds → ceilMinutes = 3 → TotalFee = 3 * 100 = 300
-	if v.TotalFee.Int64() != 300 {
-		t.Errorf("TotalFee: got %d want 300", v.TotalFee.Int64())
+	// 180 seconds × 100 neuron/sec = 18000 neuron
+	if v.TotalFee.Int64() != 18000 {
+		t.Errorf("TotalFee: got %d want 18000", v.TotalFee.Int64())
 	}
 }
 
 func TestOnStop_DeletesSession(t *testing.T) {
 	ms := &mockSigner{}
 	rdb, _ := newTestRedis(t)
-	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerMin), big.NewInt(createFeeVal), ms, zap.NewNop())
+	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(createFeeVal), ms, zap.NewNop())
 	ctx := context.Background()
 
 	CreateSession(ctx, rdb, Session{ //nolint:errcheck
@@ -312,10 +314,10 @@ func TestOnStop_DeletesSession(t *testing.T) {
 func TestOnStop_ZeroMinutes_NoVoucher(t *testing.T) {
 	ms := &mockSigner{}
 	rdb, _ := newTestRedis(t)
-	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerMin), big.NewInt(createFeeVal), ms, zap.NewNop())
+	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(createFeeVal), ms, zap.NewNop())
 	ctx := context.Background()
 
-	// LastVoucherAt = now → elapsed ≈ 0 s → ceilMinutes(0) = 0 → no voucher
+	// LastVoucherAt = now → elapsed ≈ 0 s → no voucher
 	now := time.Now().Unix()
 	CreateSession(ctx, rdb, Session{ //nolint:errcheck
 		SandboxID: testSandbox, Owner: testOwner, Provider: testProvider,
@@ -337,7 +339,7 @@ func TestOnStop_ZeroMinutes_NoVoucher(t *testing.T) {
 func TestOnStop_SignEnqueueError_StillDeletesSession(t *testing.T) {
 	ms := &mockSigner{enqErr: errors.New("enqueue failed")}
 	rdb, _ := newTestRedis(t)
-	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerMin), big.NewInt(createFeeVal), ms, zap.NewNop())
+	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(createFeeVal), ms, zap.NewNop())
 	ctx := context.Background()
 
 	CreateSession(ctx, rdb, Session{ //nolint:errcheck
@@ -358,7 +360,7 @@ func TestOnStop_SignEnqueueError_StillDeletesSession(t *testing.T) {
 func TestOnDelete_BehavesLikeOnStop(t *testing.T) {
 	ms := &mockSigner{}
 	rdb, _ := newTestRedis(t)
-	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerMin), big.NewInt(createFeeVal), ms, zap.NewNop())
+	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(createFeeVal), ms, zap.NewNop())
 	ctx := context.Background()
 
 	CreateSession(ctx, rdb, Session{ //nolint:errcheck
@@ -384,7 +386,7 @@ func TestOnDelete_BehavesLikeOnStop(t *testing.T) {
 func TestOnArchive_DelegatesToDelete(t *testing.T) {
 	ms := &mockSigner{}
 	rdb, _ := newTestRedis(t)
-	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerMin), big.NewInt(createFeeVal), ms, zap.NewNop())
+	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(createFeeVal), ms, zap.NewNop())
 	ctx := context.Background()
 
 	CreateSession(ctx, rdb, Session{ //nolint:errcheck

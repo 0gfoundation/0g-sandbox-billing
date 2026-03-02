@@ -1,20 +1,27 @@
 package main
 
-// End-to-end tests for the full billing pipeline.
+// Component tests for the billing pipeline.
+//
+// These tests wire up the full billing stack (auth → proxy → billing → settler)
+// but replace external dependencies with lightweight in-process fakes:
+//   - Chain:   go-ethereum simulated backend (deterministic, no network)
+//   - Daytona: httptest.Server mock
+//   - Redis:   miniredis (in-process)
 //
 // Tests skip gracefully when compiled contract artifacts are absent
 // (run `make build-contracts` to produce contracts/out/).
 //
-// Two scenarios are covered:
+//  1. TestComponent_HappyPath
+//     Signed POST /sandbox → mock Daytona creates sandbox → billing enqueues
+//     create-fee voucher → settler settles on simulated chain → lastNonce == 1.
 //
-//  1. TestE2E_SandboxCreated_VoucherSettled
-//     Happy path: signed POST /sandbox → Daytona receives create → billing
-//     enqueues create-fee voucher → settler settles on-chain → lastNonce == 1.
+//  2. TestComponent_InsufficientBalance
+//     User has no balance → settler gets StatusInsufficientBalance →
+//     runStopHandler stops sandbox → Redis stop key cleaned up.
 //
-//  2. TestE2E_InsufficientBalance_StopsSandbox
-//     Sad path: user has no on-chain balance → settler gets
-//     StatusInsufficientBalance → runStopHandler calls Daytona stop →
-//     Redis stop key cleaned up.
+//  3. TestComponent_OwnershipFiltering
+//     Proxy injects daytona-owner label → list filtered by caller →
+//     cross-owner GET returns 403.
 
 import (
 	"context"
@@ -23,6 +30,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -89,7 +97,7 @@ func deployE2EFixture(t *testing.T) *e2eFixture {
 	providerAddr := crypto.PubkeyToAddress(providerKey.PublicKey)
 	userAddr := crypto.PubkeyToAddress(userKey.PublicKey)
 
-	balance, _ := new(big.Int).SetString("1000000000000000000000", 10) // 1000 ETH
+	balance, _ := new(big.Int).SetString("1000000000000000000000", 10) // 1000 0G
 	alloc := types.GenesisAlloc{
 		providerAddr: {Balance: balance},
 		userAddr:     {Balance: balance},
@@ -143,7 +151,7 @@ func deployE2EFixture(t *testing.T) *e2eFixture {
 		t.Fatalf("bind contract: %v", err)
 	}
 
-	// Register service (TEE signer == providerAddr, price 100 wei/min, no create fee)
+	// Register service (TEE signer == providerAddr, price 100 neuron/min, no create fee)
 	_, err = contract.AddOrUpdateService(providerAuth, "https://provider.test",
 		providerAddr, big.NewInt(100), big.NewInt(0))
 	if err != nil {
@@ -353,7 +361,7 @@ func buildServer(t *testing.T, dtona *daytona.Client, bh proxy.BillingHooks, rdb
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	api := r.Group("/api", auth.Middleware(rdb))
-	proxy.NewHandler(dtona, bh, zap.NewNop()).Register(api)
+	proxy.NewHandler(dtona, bh, nil, nil, zap.NewNop()).Register(api)
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
 	return srv
@@ -391,19 +399,19 @@ func (r *e2eNonceReader) GetLastNonce(ctx context.Context, user, provider common
 
 // ── Test 1: happy path ────────────────────────────────────────────────────────
 
-// TestE2E_SandboxCreated_VoucherSettled exercises the full happy-path flow:
+// TestComponent_HappyPath exercises the full happy-path flow on a simulated chain:
 //
 //  1. POST /api/sandbox → Daytona mock receives create request, returns sandbox ID.
 //  2. billing.OnCreate enqueues a create-fee voucher into Redis.
 //  3. settler.Run settles the voucher on-chain.
 //  4. On-chain lastNonce advances to 1.
-func TestE2E_SandboxCreated_VoucherSettled(t *testing.T) {
+func TestComponent_HappyPath(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	fix := deployE2EFixture(t)
 
-	// User deposits 10 ETH and acknowledges the TEE signer.
+	// User deposits 10 0G and acknowledges the TEE signer.
 	fix.userAuth.Value, _ = new(big.Int).SetString("10000000000000000000", 10)
 	if _, err := fix.contract.Deposit(fix.userAuth, fix.userAddr); err != nil {
 		t.Fatalf("deposit: %v", err)
@@ -422,7 +430,7 @@ func TestE2E_SandboxCreated_VoucherSettled(t *testing.T) {
 	mock := newE2EMockDaytona(t)
 	dtona := daytona.NewClient(mock.srv.URL, "test-key")
 
-	// Billing: createFee=100 wei so OnCreate enqueues a non-trivial voucher.
+	// Billing: createFee=100 neuron so OnCreate enqueues a non-trivial voucher.
 	signer := billing.NewSigner(fix.providerKey, e2eChainID, fix.proxyAddr, fix.providerAddr,
 		rdb, &e2eNonceReader{fix.contract}, zap.NewNop())
 	bh := billing.NewEventHandler(rdb, fix.providerAddr.Hex(),
@@ -478,14 +486,14 @@ func TestE2E_SandboxCreated_VoucherSettled(t *testing.T) {
 
 // ── Test 2: insufficient balance → auto-stop ─────────────────────────────────
 
-// TestE2E_InsufficientBalance_StopsSandbox exercises the sad-path flow:
+// TestComponent_InsufficientBalance exercises the sad-path flow on a simulated chain:
 //
 //  1. POST /api/sandbox → Daytona mock creates sandbox, billing enqueues voucher.
 //  2. settler.Run settles → StatusInsufficientBalance (user never deposited).
 //  3. settler calls persistStop → runStopHandler calls Daytona stop endpoint.
 //  4. Daytona mock confirms it received the stop request for the correct sandbox.
 //  5. Redis stop:sandbox key is cleaned up.
-func TestE2E_InsufficientBalance_StopsSandbox(t *testing.T) {
+func TestComponent_InsufficientBalance(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -504,7 +512,7 @@ func TestE2E_InsufficientBalance_StopsSandbox(t *testing.T) {
 	mock := newE2EMockDaytona(t)
 	dtona := daytona.NewClient(mock.srv.URL, "test-key")
 
-	// createFee=100 wei: OnCreate enqueues a voucher that will fail due to
+	// createFee=100 neuron: OnCreate enqueues a voucher that will fail due to
 	// the user's zero balance.
 	signer := billing.NewSigner(fix.providerKey, e2eChainID, fix.proxyAddr, fix.providerAddr,
 		rdb, &e2eNonceReader{fix.contract}, zap.NewNop())
@@ -565,4 +573,233 @@ func TestE2E_InsufficientBalance_StopsSandbox(t *testing.T) {
 		return n == 0
 	})
 	t.Logf("Redis cleanup confirmed: %q deleted", stopKey)
+}
+
+// ── noopBillingHooks ─────────────────────────────────────────────────────────
+
+// noopBillingHooks satisfies proxy.BillingHooks with no-op methods.
+// Used by tests that only care about proxy/ownership behavior, not billing.
+type noopBillingHooks struct{}
+
+func (n *noopBillingHooks) OnCreate(_ context.Context, _, _ string) {}
+func (n *noopBillingHooks) OnStart(_ context.Context, _, _ string)  {}
+func (n *noopBillingHooks) OnStop(_ context.Context, _ string)      {}
+func (n *noopBillingHooks) OnDelete(_ context.Context, _ string)    {}
+func (n *noopBillingHooks) OnArchive(_ context.Context, _ string)   {}
+
+// ── ownerMockDaytona ─────────────────────────────────────────────────────────
+
+// ownerMockDaytona is a stateful mock Daytona server that stores sandboxes with
+// their labels so the proxy's ownership-filter and ownership-check logic can be
+// exercised without a real Daytona instance.
+type ownerMockDaytona struct {
+	mu        sync.Mutex
+	sandboxes map[string]daytona.Sandbox
+	nextID    int
+	srv       *httptest.Server
+}
+
+func newOwnerMockDaytona(t *testing.T) *ownerMockDaytona {
+	t.Helper()
+	m := &ownerMockDaytona{sandboxes: make(map[string]daytona.Sandbox)}
+	m.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path, method := r.URL.Path, r.Method
+		w.Header().Set("Content-Type", "application/json")
+
+		// POST /api/sandbox → create sandbox, extract injected labels
+		if method == http.MethodPost && path == "/api/sandbox" {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			labels := map[string]string{}
+			if ls, ok := body["labels"].(map[string]any); ok {
+				for k, v := range ls {
+					if s, ok := v.(string); ok {
+						labels[k] = s
+					}
+				}
+			}
+			m.mu.Lock()
+			m.nextID++
+			id := fmt.Sprintf("sb-owner-%d", m.nextID)
+			sb := daytona.Sandbox{ID: id, State: "running", Labels: labels}
+			m.sandboxes[id] = sb
+			m.mu.Unlock()
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(sb)
+			return
+		}
+
+		// GET /api/sandbox → list all (proxy does the owner-label filtering)
+		if method == http.MethodGet && path == "/api/sandbox" {
+			m.mu.Lock()
+			list := make([]daytona.Sandbox, 0, len(m.sandboxes))
+			for _, s := range m.sandboxes {
+				list = append(list, s)
+			}
+			m.mu.Unlock()
+			_ = json.NewEncoder(w).Encode(list)
+			return
+		}
+
+		// GET /api/sandbox/:id → single sandbox lookup
+		// path = "/api/sandbox/<id>" → trim leading "/" → split into 3 parts
+		parts := strings.SplitN(strings.TrimPrefix(path, "/"), "/", 4)
+		if method == http.MethodGet && len(parts) == 3 &&
+			parts[0] == "api" && parts[1] == "sandbox" {
+			id := parts[2]
+			m.mu.Lock()
+			sb, ok := m.sandboxes[id]
+			m.mu.Unlock()
+			if !ok {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(sb)
+			return
+		}
+
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(m.srv.Close)
+	return m
+}
+
+// ── ownership helpers ─────────────────────────────────────────────────────────
+
+// postSandboxGetID sends an authenticated POST /api/sandbox and returns the
+// created sandbox ID extracted from the JSON response body.
+func postSandboxGetID(t *testing.T, ctx context.Context, srvURL, privKeyHex string) string {
+	t.Helper()
+	walletAddr, msgB64, sigHex := e2eSignedHeaders(t, privKeyHex)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		srvURL+"/api/sandbox", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Wallet-Address", walletAddr)
+	req.Header.Set("X-Signed-Message", msgB64)
+	req.Header.Set("X-Wallet-Signature", sigHex)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /api/sandbox: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST /api/sandbox: got HTTP %d, want 201; body: %s", resp.StatusCode, body)
+	}
+	var result struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil || result.ID == "" {
+		t.Fatalf("POST /api/sandbox: cannot extract ID from %q", body)
+	}
+	return result.ID
+}
+
+// getSandboxList sends GET /api/sandbox with auth headers and returns the
+// (already owner-filtered) list returned by the proxy.
+func getSandboxList(t *testing.T, ctx context.Context, srvURL, privKeyHex string) []daytona.Sandbox {
+	t.Helper()
+	walletAddr, msgB64, sigHex := e2eSignedHeaders(t, privKeyHex)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srvURL+"/api/sandbox", nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("X-Wallet-Address", walletAddr)
+	req.Header.Set("X-Signed-Message", msgB64)
+	req.Header.Set("X-Wallet-Signature", sigHex)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/sandbox: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/sandbox: got HTTP %d, want 200", resp.StatusCode)
+	}
+	var list []daytona.Sandbox
+	_ = json.NewDecoder(resp.Body).Decode(&list)
+	return list
+}
+
+// getSandboxStatus sends GET /api/sandbox/:id with auth headers and returns
+// the HTTP status code.  Used to verify 200 (owner) or 403 (non-owner).
+func getSandboxStatus(t *testing.T, ctx context.Context, srvURL, sandboxID, privKeyHex string) int {
+	t.Helper()
+	walletAddr, msgB64, sigHex := e2eSignedHeaders(t, privKeyHex)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		srvURL+"/api/sandbox/"+sandboxID, nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("X-Wallet-Address", walletAddr)
+	req.Header.Set("X-Signed-Message", msgB64)
+	req.Header.Set("X-Wallet-Signature", sigHex)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/sandbox/%s: %v", sandboxID, err)
+	}
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+// ── Test 3: ownership filtering ───────────────────────────────────────────────
+
+// TestComponent_OwnershipFiltering verifies the proxy's owner-isolation guarantees:
+//
+//  1. POST /api/sandbox injects the caller's wallet address into labels["daytona-owner"].
+//  2. GET /api/sandbox returns only the requesting user's sandboxes.
+//  3. GET /api/sandbox/:id returns 403 when accessed by a non-owner.
+//  4. GET /api/sandbox/:id returns 200 for the owner.
+func TestComponent_OwnershipFiltering(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+
+	mock := newOwnerMockDaytona(t)
+	dtona := daytona.NewClient(mock.srv.URL, "test-key")
+	srv := buildServer(t, dtona, &noopBillingHooks{}, rdb)
+
+	// Two distinct Anvil test wallets.
+	const (
+		userAKey = "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+		userBKey = "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
+	)
+
+	// ── 1. Each user creates one sandbox ─────────────────────────────────────
+	sbAID := postSandboxGetID(t, ctx, srv.URL, userAKey)
+	sbBID := postSandboxGetID(t, ctx, srv.URL, userBKey)
+	t.Logf("userA sandbox: %s | userB sandbox: %s", sbAID, sbBID)
+
+	// ── 2. List: each user sees only their own sandbox ────────────────────────
+	listA := getSandboxList(t, ctx, srv.URL, userAKey)
+	if len(listA) != 1 || listA[0].ID != sbAID {
+		t.Fatalf("userA GET /sandbox: expected [{%s}], got %+v", sbAID, listA)
+	}
+	listB := getSandboxList(t, ctx, srv.URL, userBKey)
+	if len(listB) != 1 || listB[0].ID != sbBID {
+		t.Fatalf("userB GET /sandbox: expected [{%s}], got %+v", sbBID, listB)
+	}
+	t.Log("list filtering: PASS")
+
+	// ── 3. Cross-owner GET returns 403 ───────────────────────────────────────
+	if got := getSandboxStatus(t, ctx, srv.URL, sbBID, userAKey); got != http.StatusForbidden {
+		t.Fatalf("GET /sandbox/%s as userA: expected 403, got %d", sbBID, got)
+	}
+	if got := getSandboxStatus(t, ctx, srv.URL, sbAID, userBKey); got != http.StatusForbidden {
+		t.Fatalf("GET /sandbox/%s as userB: expected 403, got %d", sbAID, got)
+	}
+	t.Log("cross-owner access control: PASS")
+
+	// ── 4. Owner GET returns 200 ──────────────────────────────────────────────
+	if got := getSandboxStatus(t, ctx, srv.URL, sbAID, userAKey); got != http.StatusOK {
+		t.Fatalf("GET /sandbox/%s as userA: expected 200, got %d", sbAID, got)
+	}
+	if got := getSandboxStatus(t, ctx, srv.URL, sbBID, userBKey); got != http.StatusOK {
+		t.Fatalf("GET /sandbox/%s as userB: expected 200, got %d", sbBID, got)
+	}
+	t.Log("owner access: PASS")
 }

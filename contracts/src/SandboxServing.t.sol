@@ -174,7 +174,7 @@ contract SandboxServingTest is Test {
 
     function test_Settle_InsufficientBalance() public {
         vm.prank(user);
-        serving.deposit{value: 100}(user); // only 100 wei
+        serving.deposit{value: 100}(user); // only 100 neuron
         vm.prank(user);
         serving.acknowledgeTEESigner(provider, true);
 

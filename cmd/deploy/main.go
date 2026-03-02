@@ -6,7 +6,7 @@
 //   3. Deploy BeaconProxy(beacon, initialize(providerStake)) — this is the stable address
 //
 // Usage:
-//   go run ./cmd/deploy/ --rpc <url> --key <hex> --chain-id <id> [--stake <wei>]
+//   go run ./cmd/deploy/ --rpc <url> --key <hex> --chain-id <id> [--stake <neuron>]
 package main
 
 import (
@@ -32,7 +32,7 @@ func main() {
 	rpcURL  := flag.String("rpc",      "https://evmrpc-testnet.0g.ai", "EVM RPC endpoint")
 	keyHex  := flag.String("key",      "",    "deployer private key (hex, with or without 0x)")
 	chainID := flag.Int64("chain-id",  16602, "chain ID")
-	stake   := flag.String("stake",    "0",   "providerStake for initialize() (wei)")
+	stake   := flag.String("stake",    "0",   "providerStake for initialize() (neuron)")
 	flag.Parse()
 
 	if *keyHex == "" {
@@ -156,7 +156,7 @@ func main() {
 	fmt.Printf("  Beacon  : %s\n", beaconAddr.Hex())
 
 	// ── Step 3: Deploy BeaconProxy(beacon, initialize(providerStake)) ─────────
-	fmt.Printf("\n[3/3] Deploying BeaconProxy(beacon=%s, stake=%s wei)...\n",
+	fmt.Printf("\n[3/3] Deploying BeaconProxy(beacon=%s, stake=%s neuron)...\n",
 		beaconAddr.Hex(), providerStake)
 
 	// Build initialize(providerStake) calldata

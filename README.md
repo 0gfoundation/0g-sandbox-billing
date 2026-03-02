@@ -1,6 +1,11 @@
 # 0G Sandbox Billing
 
-On-chain billing settlement for 0G Sandbox (TEE-based voucher model).
+A Go billing proxy server that sits in front of Daytona (sandbox runtime) and charges users
+in 0G tokens via TEE-signed on-chain vouchers. Users deposit funds into a Solidity settlement
+contract; the proxy creates EIP-712-signed vouchers and settles them on-chain periodically.
+
+> **New here?** Start with [`CLAUDE.md`](CLAUDE.md) for architecture, key concepts,
+> billing flow, and how to run the server.
 
 ---
 
@@ -63,7 +68,7 @@ Flags:
 | `--rpc` | `https://evmrpc-testnet.0g.ai` | EVM RPC endpoint |
 | `--key` | (required) | Deployer private key (hex, with or without 0x) |
 | `--chain-id` | `16602` | Chain ID |
-| `--stake` | `0` | `providerStake` passed to `initialize()` (wei) |
+| `--stake` | `0` | `providerStake` passed to `initialize()` (neuron) |
 
 ---
 
@@ -124,6 +129,33 @@ Optional flags:
 | `--proxy` | (required) | BeaconProxy address |
 | `--rpc` | `https://evmrpc-testnet.0g.ai` | EVM RPC endpoint |
 | `--api` | `https://chainscan-galileo.0g.ai/open/api` | Etherscan-compatible API |
+
+---
+
+## Running the Server
+
+Copy `.env.example` to `.env`, fill in the required values, then:
+
+```bash
+go run ./cmd/billing/
+```
+
+Key environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DAYTONA_API_URL` | (required) | Daytona API endpoint |
+| `DAYTONA_ADMIN_KEY` | (required) | Daytona admin key |
+| `SETTLEMENT_CONTRACT` | (required) | BeaconProxy address |
+| `RPC_URL` | (required) | EVM RPC endpoint |
+| `CHAIN_ID` | (required) | Chain ID (e.g. 16602) |
+| `REDIS_ADDR` | `redis:6379` | Redis address |
+| `COMPUTE_PRICE_PER_SEC` | `16667` | neuron/sec per sandbox (≈ 1M neuron/min) |
+| `CREATE_FEE` | `5000000` | neuron flat fee per sandbox creation |
+| `VOUCHER_INTERVAL_SEC` | `3600` | voucher flush interval (seconds) |
+| `PORT` | `8080` | HTTP server port |
+| `MOCK_TEE` | — | Set `true` for local dev (use `MOCK_APP_PRIVATE_KEY` instead of TDX gRPC) |
+| `MOCK_APP_PRIVATE_KEY` | — | Hex private key used when `MOCK_TEE=true` |
 
 ---
 

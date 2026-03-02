@@ -32,13 +32,14 @@ func domainSeparator(chainID *big.Int, contractAddr common.Address) [32]byte {
 	return crypto.Keccak256Hash(encoded)
 }
 
-// BuildUsageHash builds keccak256(sandboxID, periodStart, periodEnd, computeMinutes).
-func BuildUsageHash(sandboxID string, periodStart, periodEnd, computeMinutes int64) [32]byte {
+// BuildUsageHash builds keccak256(sandboxID, periodStart, periodEnd, usageUnits).
+// usageUnits is the elapsed seconds for compute periods (or 0 for create-fee vouchers).
+func BuildUsageHash(sandboxID string, periodStart, periodEnd, usageUnits int64) [32]byte {
 	data := make([]byte, 0, len(sandboxID)+8+8+8)
 	data = append(data, []byte(sandboxID)...)
 	data = appendInt64(data, periodStart)
 	data = appendInt64(data, periodEnd)
-	data = appendInt64(data, computeMinutes)
+	data = appendInt64(data, usageUnits)
 	return crypto.Keccak256Hash(data)
 }
 
