@@ -44,9 +44,12 @@ func InjectOwner(body []byte, walletAddr string) ([]byte, error) {
 	labels[ownerLabel] = walletAddr
 	m["labels"] = labels
 
-	// Force autostop / autoarchive to 0 (billing proxy owns shutdown)
-	m["autostopInterval"] = 0
-	m["autoarchiveInterval"] = 0
+	// autoStopInterval=0: disable Daytona's autostop; billing proxy owns shutdown.
+	// autoArchiveInterval=60: fallback safety net — if billing proxy crashes and
+	// fails to archive the sandbox, Daytona archives it after 60 minutes so it
+	// does not occupy runner resources indefinitely.
+	m["autoStopInterval"] = 0
+	m["autoArchiveInterval"] = 60
 
 	return json.Marshal(m)
 }
