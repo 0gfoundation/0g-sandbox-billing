@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"strings"
 	"os/signal"
 	"syscall"
 	"time"
@@ -131,7 +132,8 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 	r.GET("/dashboard", func(c *gin.Context) {
-		c.Data(http.StatusOK, "text/html; charset=utf-8", web.DashboardHTML)
+		html := strings.ReplaceAll(string(web.DashboardHTML), "{{ADMIN_KEY}}", cfg.Daytona.AdminKey)
+		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
 	})
 
 	adminGroup := r.Group("/admin", admin.AuthMiddleware(cfg.Daytona.AdminKey))

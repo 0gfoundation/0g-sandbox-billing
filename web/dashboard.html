@@ -99,39 +99,6 @@ body {
 /* ── Layout ── */
 .page { max-width: 1200px; margin: 0 auto; padding: 24px 24px 48px; }
 
-/* ── Auth overlay ── */
-.auth-overlay {
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,.45);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 200;
-}
-.auth-box {
-  background: var(--surface);
-  border-radius: 12px;
-  padding: 32px;
-  width: 360px;
-  box-shadow: 0 8px 32px rgba(0,0,0,.15);
-}
-.auth-title { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
-.auth-sub { font-size: 13px; color: var(--muted); margin-bottom: 20px; }
-.auth-input {
-  width: 100%; padding: 9px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 13px; font-family: var(--mono);
-  outline: none; margin-bottom: 12px;
-}
-.auth-input:focus { border-color: var(--primary); }
-.btn-primary {
-  width: 100%; padding: 9px;
-  background: var(--primary);
-  color: #fff; border: none; border-radius: 6px;
-  font-size: 13.5px; font-weight: 600;
-  cursor: pointer; font-family: inherit;
-}
-.btn-primary:hover { background: var(--primary-d); }
-.auth-err { font-size: 12px; color: var(--red); margin-top: 8px; display: none; }
 
 /* ── Stat cards ── */
 .stats-grid {
@@ -261,17 +228,6 @@ tbody tr:hover td { background: #fafafa; }
 </head>
 <body>
 
-<!-- Auth overlay -->
-<div class="auth-overlay" id="authOverlay">
-  <div class="auth-box">
-    <div class="auth-title">0G Sandbox Billing</div>
-    <div class="auth-sub">Enter the admin key to access the dashboard</div>
-    <input class="auth-input" type="password" id="keyInput" placeholder="DAYTONA_ADMIN_KEY" autocomplete="off">
-    <button class="btn-primary" onclick="login()">Continue</button>
-    <div class="auth-err" id="authErr">Invalid admin key</div>
-  </div>
-</div>
-
 <!-- Topbar -->
 <header class="topbar">
   <div class="logo">
@@ -294,7 +250,7 @@ tbody tr:hover td { background: #fafafa; }
 </header>
 
 <!-- Page -->
-<main class="page" id="mainPage" style="display:none">
+<main class="page" id="mainPage">
 
   <!-- Stats -->
   <div class="stats-grid">
@@ -384,41 +340,8 @@ tbody tr:hover td { background: #fafafa; }
 </main>
 
 <script>
-// ── Auth ──────────────────────────────────────────────────────────────────
-let adminKey = localStorage.getItem('adminKey') || '';
-
-async function login() {
-  const key = document.getElementById('keyInput').value.trim();
-  if (!key) return;
-  // Probe /admin/status with this key
-  const r = await fetch('/admin/status', { headers: { 'X-Admin-Key': key } });
-  if (r.ok) {
-    adminKey = key;
-    localStorage.setItem('adminKey', key);
-    document.getElementById('authOverlay').style.display = 'none';
-    document.getElementById('mainPage').style.display = '';
-    loadAll();
-    startAutoRefresh();
-  } else {
-    document.getElementById('authErr').style.display = 'block';
-  }
-}
-
-document.getElementById('keyInput').addEventListener('keydown', e => {
-  if (e.key === 'Enter') login();
-});
-
-// Auto-login if key is stored
-if (adminKey) {
-  fetch('/admin/status', { headers: { 'X-Admin-Key': adminKey } }).then(r => {
-    if (r.ok) {
-      document.getElementById('authOverlay').style.display = 'none';
-      document.getElementById('mainPage').style.display = '';
-      loadAll();
-      startAutoRefresh();
-    }
-  });
-}
+// Admin key injected server-side — never enters the browser manually
+const adminKey = '{{ADMIN_KEY}}';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 const api = path => fetch(path, { headers: { 'X-Admin-Key': adminKey } }).then(r => r.json());
@@ -574,10 +497,10 @@ async function refresh() {
   btn.innerHTML = '⟳ Refresh';
 }
 
-let autoRefreshTimer;
-function startAutoRefresh() {
-  autoRefreshTimer = setInterval(refresh, 30000);
-}
+setInterval(refresh, 30000);
+
+// Initial load
+loadAll();
 </script>
 
 </body>
