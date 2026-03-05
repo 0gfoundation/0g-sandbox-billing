@@ -52,6 +52,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -86,6 +87,12 @@ func main() {
 		runExec(os.Args[2:])
 	case "toolbox":
 		runToolbox(os.Args[2:])
+	case "start":
+		runStart(os.Args[2:])
+	case "ssh-access":
+		runSSHAccess(os.Args[2:])
+	case "providers":
+		runProviders(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
 		printUsage()
@@ -96,7 +103,7 @@ func main() {
 func printUsage() {
 	fmt.Fprintln(os.Stderr, "usage: user <subcommand> [flags]")
 	fmt.Fprintln(os.Stderr, "  chain:  balance | deposit | acknowledge")
-	fmt.Fprintln(os.Stderr, "  api:    create | list | stop | delete | exec | toolbox")
+	fmt.Fprintln(os.Stderr, "  api:    providers | create | list | start | stop | delete | exec | toolbox | ssh-access")
 }
 
 // ── Shared chain flags ───────────────────────────────────────────────────────
@@ -139,13 +146,20 @@ func runBalance(args []string) {
 	eth, contract := mustDialContract(ctx, cf.rpc, cf.contract)
 	defer eth.Close()
 
+	// Native wallet balance (gas)
+	nativeBal, err := eth.BalanceAt(ctx, walletAddr, nil)
+	if err != nil {
+		fatalf("BalanceAt: %v", err)
+	}
+
 	opts := &bind.CallOpts{Context: ctx}
 	acct, err := contract.GetAccount(opts, walletAddr)
 	if err != nil {
 		fatalf("GetAccount: %v", err)
 	}
-	fmt.Printf("Address: %s\n", walletAddr.Hex())
-	fmt.Printf("Balance: %s neuron  (%.6f 0G)\n", acct.Balance, neuronTo0G(acct.Balance))
+	fmt.Printf("Address:         %s\n", walletAddr.Hex())
+	fmt.Printf("Wallet balance:  %s neuron  (%.6f 0G)  ← for gas\n", nativeBal, neuronTo0G(nativeBal))
+	fmt.Printf("Contract balance:%s neuron  (%.6f 0G)  ← for sandbox\n", acct.Balance, neuronTo0G(acct.Balance))
 
 	if *providerHex != "" {
 		providerAddr := common.HexToAddress(*providerHex)
@@ -258,6 +272,61 @@ func runAcknowledge(args []string) {
 		fatalf("wait mined: %v", err)
 	}
 	fmt.Println("      confirmed ✓")
+}
+
+// ── providers ────────────────────────────────────────────────────────────────
+
+// runProviders lists available providers from the billing proxy.
+func runProviders(args []string) {
+	fs := flag.NewFlagSet("providers", flag.ExitOnError)
+	apiURL := fs.String("api", "http://47.236.111.154:8080", "Billing proxy URL")
+	_ = fs.Parse(args)
+
+	resp, err := http.Get(*apiURL + "/api/providers")
+	if err != nil {
+		fatalf("providers: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		fatalf("providers: HTTP %d: %s", resp.StatusCode, body)
+	}
+
+	var providers []struct {
+		Address            string `json:"address"`
+		URL                string `json:"url"`
+		TEESigner          string `json:"tee_signer"`
+		ComputePricePerMin string `json:"compute_price_per_min"`
+		ComputePricePerSec string `json:"compute_price_per_sec"`
+		CreateFee          string `json:"create_fee"`
+		SignerVersion      string `json:"signer_version"`
+	}
+	if err := json.Unmarshal(body, &providers); err != nil {
+		fatalf("parse providers: %v", err)
+	}
+
+	if len(providers) == 0 {
+		fmt.Println("No providers available.")
+		return
+	}
+
+	fmt.Printf("Found %d provider(s):\n\n", len(providers))
+	for i, p := range providers {
+		createFee := neuronTo0G(mustParseBigInt(p.CreateFee))
+		pricePerSec := neuronTo0G(mustParseBigInt(p.ComputePricePerSec))
+		fmt.Printf("[%d] %s\n", i+1, p.Address)
+		fmt.Printf("    URL:          %s\n", p.URL)
+		fmt.Printf("    Create fee:   %.4f 0G\n", createFee)
+		fmt.Printf("    Compute:      %.6f 0G/sec  (%.4f 0G/min)\n", pricePerSec, pricePerSec*60)
+		fmt.Printf("    TEE signer:   %s (v%s)\n", p.TEESigner, p.SignerVersion)
+		fmt.Println()
+	}
+}
+
+func mustParseBigInt(s string) *big.Int {
+	n := new(big.Int)
+	n.SetString(s, 10)
+	return n
 }
 
 // ── create ───────────────────────────────────────────────────────────────────
@@ -475,10 +544,61 @@ func runExec(args []string) {
 		fmt.Print(string(respBody))
 		return
 	}
-	fmt.Print(result.Result)
+	printSandboxOutput(*id, *command, result.Result, result.ExitCode)
 	if result.ExitCode != 0 {
 		os.Exit(result.ExitCode)
 	}
+}
+
+// printSandboxOutput renders sandbox output in a bordered box with ANSI colors.
+func printSandboxOutput(id, command, output string, exitCode int) {
+	const (
+		cyan  = "\033[36m"
+		red   = "\033[31m"
+		reset = "\033[0m"
+		width = 80
+		inner = width - 2 // inside the borders
+	)
+
+	shortID := id
+	if len(id) > 8 {
+		shortID = id[:8]
+	}
+
+	runeWidth := utf8.RuneCountInString
+
+	// Truncate command if too long for header
+	label := fmt.Sprintf(" sandbox:%s  $ %s ", shortID, command)
+	for runeWidth(label) > inner {
+		runes := []rune(label)
+		label = string(runes[:len(runes)-1])
+	}
+	labelPadded := label + strings.Repeat(" ", inner-runeWidth(label))
+
+	statusMark := " ok "
+	borderColor := cyan
+	if exitCode != 0 {
+		statusMark = fmt.Sprintf(" exit %d ", exitCode)
+		borderColor = red
+	}
+	bottomFill := strings.Repeat("─", inner-runeWidth(statusMark))
+
+	fmt.Printf(cyan+"┌"+strings.Repeat("─", inner)+"┐"+reset+"\n")
+	fmt.Printf(cyan+"│"+reset+"%s"+cyan+"│"+reset+"\n", labelPadded)
+
+	if output != "" {
+		fmt.Printf(cyan+"├"+strings.Repeat("─", inner)+"┤"+reset+"\n")
+		lineWidth := inner - 2 // 1 space padding each side
+		for _, line := range strings.Split(strings.TrimRight(output, "\n"), "\n") {
+			runes := []rune(line)
+			for len(runes) > lineWidth {
+				fmt.Printf(cyan+"│"+reset+" %s "+cyan+"│"+reset+"\n", string(runes[:lineWidth]))
+				runes = runes[lineWidth:]
+			}
+			fmt.Printf(cyan+"│"+reset+" %-*s "+cyan+"│"+reset+"\n", lineWidth, string(runes))
+		}
+	}
+	fmt.Printf(borderColor+"└"+bottomFill+statusMark+"┘"+reset+"\n")
 }
 
 // ── toolbox ──────────────────────────────────────────────────────────────────
@@ -527,6 +647,101 @@ func runToolbox(args []string) {
 		fatalf("toolbox: HTTP %d: %s", resp.StatusCode, respBody)
 	}
 	fmt.Println(prettyJSON(json.RawMessage(respBody)))
+}
+
+// ── start ─────────────────────────────────────────────────────────────────────
+
+func runStart(args []string) {
+	fs := flag.NewFlagSet("start", flag.ExitOnError)
+	apiURL := fs.String("api", "http://localhost:8080", "Billing proxy URL")
+	keyHex := fs.String("key", "", "User private key (hex); or set USER_KEY env")
+	id     := fs.String("id",  "", "Sandbox ID (required)")
+	_ = fs.Parse(args)
+
+	if *id == "" {
+		fatalf("--id is required")
+	}
+
+	privKey := mustLoadKey(*keyHex)
+	msg, sig, walletAddr := signRequest(privKey, "start", *id, json.RawMessage(`{}`))
+
+	url := *apiURL + "/api/sandbox/" + *id + "/start"
+	req, err := http.NewRequest(http.MethodPost, url, nil)
+	if err != nil {
+		fatalf("build request: %v", err)
+	}
+	req.Header.Set("X-Wallet-Address", walletAddr)
+	req.Header.Set("X-Signed-Message", msg)
+	req.Header.Set("X-Wallet-Signature", sig)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fatalf("start: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		fatalf("start: HTTP %d: %s", resp.StatusCode, body)
+	}
+	fmt.Printf("Started sandbox %s\n", *id)
+}
+
+// ── ssh-access ────────────────────────────────────────────────────────────────
+
+// runSSHAccess fetches a temporary SSH token and prints the connect command.
+func runSSHAccess(args []string) {
+	fs := flag.NewFlagSet("ssh-access", flag.ExitOnError)
+	apiURL := fs.String("api", "http://localhost:8080", "Billing proxy URL")
+	keyHex := fs.String("key", "", "User private key (hex); or set USER_KEY env")
+	id     := fs.String("id",  "", "Sandbox ID (required)")
+	_ = fs.Parse(args)
+
+	if *id == "" {
+		fatalf("--id is required")
+	}
+
+	privKey := mustLoadKey(*keyHex)
+	msg, sig, walletAddr := signRequest(privKey, "ssh-access", *id, json.RawMessage(`{}`))
+
+	url := *apiURL + "/api/sandbox/" + *id + "/ssh-access"
+	req, err := http.NewRequest(http.MethodPost, url, nil)
+	if err != nil {
+		fatalf("build request: %v", err)
+	}
+	req.Header.Set("X-Wallet-Address", walletAddr)
+	req.Header.Set("X-Signed-Message", msg)
+	req.Header.Set("X-Wallet-Signature", sig)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fatalf("ssh-access: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		fatalf("ssh-access: HTTP %d: %s", resp.StatusCode, body)
+	}
+
+	var result struct {
+		Token      string `json:"token"`
+		ExpiresAt  string `json:"expiresAt"`
+		SSHCommand string `json:"sshCommand"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		fatalf("parse response: %v", err)
+	}
+
+	// Replace localhost with the actual host from the API URL
+	apiHost := strings.TrimPrefix(strings.TrimPrefix(*apiURL, "https://"), "http://")
+	apiHost = strings.Split(apiHost, ":")[0]
+	sshCmd := strings.ReplaceAll(result.SSHCommand, "localhost", apiHost)
+
+	fmt.Println(sshCmd)
+	if result.ExpiresAt != "" {
+		fmt.Fprintf(os.Stderr, "Token expires: %s\n", result.ExpiresAt)
+	}
+	fmt.Fprintf(os.Stderr, "Password: %s\n", result.Token)
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

@@ -504,7 +504,28 @@ USER_KEY=0x<key> go run ./cmd/user/ acknowledge \
 
 ### API Subcommands
 
-All API subcommands require `--api <billing-proxy-url>` and the `USER_KEY` environment variable.
+All API subcommands require `--api <billing-proxy-url>`. Most require `USER_KEY` env var except `providers`.
+
+#### `providers` — List available providers
+
+No authentication required.
+
+```bash
+go run ./cmd/user/ providers --api http://<proxy>:8080
+```
+
+Output:
+```
+Found 1 provider(s):
+
+[1] 0xB831371eb2703305f1d9F8542163633D0675CEd7
+    URL:          http://47.236.111.154:8080
+    Create fee:   0.0600 0G
+    Compute:      0.001000 0G/sec  (0.0600 0G/min)
+    TEE signer:   0x61BEb835D1935Eec8cC04efa2f4e2B3cC8B8B6E3 (v4)
+```
+
+Use the provider address shown here for `balance`, `acknowledge`, and `deposit`.
 
 #### `create` — Create a sandbox
 
@@ -518,6 +539,14 @@ USER_KEY=0x<key> go run ./cmd/user/ create \
 
 ```bash
 USER_KEY=0x<key> go run ./cmd/user/ list --api http://<proxy>:8080
+```
+
+#### `start` — Start a stopped sandbox
+
+```bash
+USER_KEY=0x<key> go run ./cmd/user/ start \
+  --api http://<proxy>:8080 \
+  --id <sandbox-id>
 ```
 
 #### `stop` — Stop a sandbox
@@ -570,6 +599,31 @@ USER_KEY=0x<key> go run ./cmd/user/ toolbox --api http://<proxy>:8080 --id <id> 
 # Execute process
 USER_KEY=0x<key> go run ./cmd/user/ toolbox --api http://<proxy>:8080 --id <id> \
   --action process/execute --method POST --body '{"command":"ls -la","timeout":10}'
+```
+
+#### `ssh-access` — Get temporary SSH access token
+
+Token valid for 60 minutes. The token is used as the **SSH username** (no password needed).
+
+```bash
+USER_KEY=0x<key> go run ./cmd/user/ ssh-access \
+  --api http://<proxy>:8080 \
+  --id <sandbox-id>
+# → prints: ssh -p 2222 TOKEN@<host>
+```
+
+Use for direct SSH or rsync sync:
+```bash
+SSH_CMD=$(USER_KEY=0x<key> go run ./cmd/user/ ssh-access --api http://<proxy>:8080 --id <id> 2>/dev/null)
+PORT=$(echo $SSH_CMD | awk '{print $3}')
+USER_HOST=$(echo $SSH_CMD | awk '{print $4}')
+
+# Direct SSH
+ssh -p $PORT -o StrictHostKeyChecking=no $USER_HOST
+
+# Rsync local directory to sandbox
+rsync -avz --delete -e "ssh -p $PORT -o StrictHostKeyChecking=no" \
+  ./my-project/ "${USER_HOST}:/home/daytona/project/"
 ```
 
 ---
