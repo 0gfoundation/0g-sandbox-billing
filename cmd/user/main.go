@@ -276,50 +276,68 @@ func runAcknowledge(args []string) {
 
 // ── providers ────────────────────────────────────────────────────────────────
 
-// runProviders lists available providers from the billing proxy.
+// runProviders discovers registered providers by scanning on-chain ServiceUpdated
+// events, then reads each provider's current service info from the contract.
+// No API URL required — only the RPC endpoint and contract address (both have
+// sensible defaults for 0G Galileo testnet).
 func runProviders(args []string) {
 	fs := flag.NewFlagSet("providers", flag.ExitOnError)
-	apiURL := fs.String("api", "http://47.236.111.154:8080", "Billing proxy URL")
+	cf := addChainFlags(fs)
 	_ = fs.Parse(args)
 
-	resp, err := http.Get(*apiURL + "/api/providers")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	eth, contract := mustDialContract(ctx, cf.rpc, cf.contract)
+	defer eth.Close()
+
+	// Scan ServiceUpdated events from genesis to collect all provider addresses.
+	iter, err := contract.FilterServiceUpdated(nil, nil)
 	if err != nil {
-		fatalf("providers: %v", err)
+		fatalf("filter ServiceUpdated: %v", err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 300 {
-		fatalf("providers: HTTP %d: %s", resp.StatusCode, body)
+	defer iter.Close()
+
+	seen := map[common.Address]struct{}{}
+	var providerAddrs []common.Address
+	for iter.Next() {
+		addr := iter.Event.Provider
+		if _, ok := seen[addr]; !ok {
+			seen[addr] = struct{}{}
+			providerAddrs = append(providerAddrs, addr)
+		}
+	}
+	if err := iter.Error(); err != nil {
+		fatalf("iterate events: %v", err)
 	}
 
-	var providers []struct {
-		Address            string `json:"address"`
-		URL                string `json:"url"`
-		TEESigner          string `json:"tee_signer"`
-		ComputePricePerMin string `json:"compute_price_per_min"`
-		ComputePricePerSec string `json:"compute_price_per_sec"`
-		CreateFee          string `json:"create_fee"`
-		SignerVersion      string `json:"signer_version"`
-	}
-	if err := json.Unmarshal(body, &providers); err != nil {
-		fatalf("parse providers: %v", err)
-	}
-
-	if len(providers) == 0 {
-		fmt.Println("No providers available.")
+	if len(providerAddrs) == 0 {
+		fmt.Println("No providers found on-chain.")
 		return
 	}
 
-	fmt.Printf("Found %d provider(s):\n\n", len(providers))
-	for i, p := range providers {
-		createFee := neuronTo0G(mustParseBigInt(p.CreateFee))
-		pricePerSec := neuronTo0G(mustParseBigInt(p.ComputePricePerSec))
-		fmt.Printf("[%d] %s\n", i+1, p.Address)
-		fmt.Printf("    URL:          %s\n", p.URL)
-		fmt.Printf("    Create fee:   %.4f 0G\n", createFee)
-		fmt.Printf("    Compute:      %.6f 0G/sec  (%.4f 0G/min)\n", pricePerSec, pricePerSec*60)
-		fmt.Printf("    TEE signer:   %s (v%s)\n", p.TEESigner, p.SignerVersion)
+	opts := &bind.CallOpts{Context: ctx}
+	fmt.Printf("Found %d provider(s) on-chain:\n\n", len(providerAddrs))
+	for i, addr := range providerAddrs {
+		svc, err := contract.Services(opts, addr)
+		if err != nil {
+			fmt.Printf("[%d] %s  (error reading service: %v)\n\n", i+1, addr.Hex(), err)
+			continue
+		}
+		pricePerSec := new(big.Int).Div(svc.ComputePricePerMin, big.NewInt(60))
+		fmt.Printf("[%d] %s\n", i+1, addr.Hex())
+		fmt.Printf("    URL:         %s\n", svc.Url)
+		fmt.Printf("    Create fee:  %.4f 0G\n", neuronTo0G(svc.CreateFee))
+		fmt.Printf("    Compute:     %.6f 0G/sec  (%.4f 0G/min)\n",
+			neuronTo0G(pricePerSec), neuronTo0G(svc.ComputePricePerMin))
+		fmt.Printf("    TEE signer:  %s (v%s)\n", svc.TeeSignerAddress.Hex(), svc.SignerVersion)
 		fmt.Println()
+	}
+	if len(providerAddrs) == 1 {
+		svc, _ := contract.Services(opts, providerAddrs[0])
+		fmt.Printf("# To use this provider:\n")
+		fmt.Printf("export PROVIDER=%s\n", providerAddrs[0].Hex())
+		fmt.Printf("export API=%s\n", svc.Url)
 	}
 }
 
