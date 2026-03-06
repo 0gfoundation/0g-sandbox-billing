@@ -1,13 +1,13 @@
 ---
-name: 0g-sandbox-billing
-description: Use this skill when working on the 0G Sandbox Billing project — deploying/redeploying the service, checking logs, running tests, operating the settlement contract, or using the provider/user CLIs. Covers the full dev and ops workflow for this repo.
+name: 0g-sandbox
+description: Use this skill when working on the 0G Sandbox project — deploying/redeploying the service, checking logs, running tests, operating the settlement contract, or using the provider/user CLIs. Covers the full dev and ops workflow for this repo.
 version: 1.0.0
 author: 0G Labs
 tags: [0g, billing, sandbox, daytona, tee, settlement, go, solidity]
-repository: https://github.com/0gfoundation/0g-sandbox-billing
+repository: https://github.com/0gfoundation/0g-sandbox
 ---
 
-# 0G Sandbox Billing Skill
+# 0G Sandbox Skill
 
 ---
 

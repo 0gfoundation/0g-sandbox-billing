@@ -1,4 +1,4 @@
-# 0G Sandbox Billing — SDK & API Reference
+# 0G Sandbox — SDK & API Reference
 
 > Billing proxy that authenticates users via EIP-191 wallet signatures, manages Daytona sandboxes,
 > and settles usage fees on-chain in 0G tokens.

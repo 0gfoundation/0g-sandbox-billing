@@ -1,4 +1,4 @@
-# 0G Sandbox Billing — Provider Skill
+# 0G Sandbox — Provider Skill
 
 ---
 
