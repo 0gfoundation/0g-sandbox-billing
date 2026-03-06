@@ -196,11 +196,11 @@ Key env vars:
 docker build -t billing:latest .
 
 # Deploy / redeploy
-tapp-cli stop-app  -s http://47.236.111.154:50051 --app-id billing
-tapp-cli start-app -s http://47.236.111.154:50051 --app-id billing -f docker-compose.yml
+tapp-cli stop-app  -s http://47.236.111.154:50051 --app-id 0g-sandbox
+tapp-cli start-app -s http://47.236.111.154:50051 --app-id 0g-sandbox -f docker-compose.yml
 
 # Logs
-tapp-cli get-app-logs -s http://47.236.111.154:50051 --app-id billing -n 100
+tapp-cli get-app-logs -s http://47.236.111.154:50051 --app-id 0g-sandbox -n 100
 ```
 
 ---

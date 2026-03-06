@@ -98,7 +98,7 @@ The settlement contract requires `msg.sender == v.provider` in `SettleFeesWithTE
 
 To find the TEE signer address:
 ```bash
-tapp-cli -s http://<server>:50051 get-app-key --app-id billing
+tapp-cli -s http://<server>:50051 get-app-key --app-id 0g-sandbox
 # → Ethereum Address: 0x61beb835...
 ```
 
@@ -184,7 +184,7 @@ See [`CLI.md`](CLI.md) for full details.
 
 ```bash
 # Get TEE signer address from tapp-daemon
-tapp-cli -s http://<server>:50051 get-app-key --app-id billing
+tapp-cli -s http://<server>:50051 get-app-key --app-id 0g-sandbox
 # → Ethereum Address: 0x61beb835...
 
 PROVIDER_KEY=0x<provider-key> go run ./cmd/provider/ init-service \
@@ -268,21 +268,21 @@ The billing server runs inside a 0G Tapp TEE enclave. Deploy via `tapp-cli`:
 docker build -t billing:latest .
 
 # Deploy (or redeploy after changes)
-tapp-cli -s http://<tapp-server>:50051 stop-app  --app-id billing
-tapp-cli -s http://<tapp-server>:50051 start-app --app-id billing -f docker-compose.yml
+tapp-cli -s http://<tapp-server>:50051 stop-app  --app-id 0g-sandbox
+tapp-cli -s http://<tapp-server>:50051 start-app --app-id 0g-sandbox -f docker-compose.yml
 
 # Check container status
-tapp-cli -s http://<tapp-server>:50051 get-app-container-status --app-id billing
+tapp-cli -s http://<tapp-server>:50051 get-app-container-status --app-id 0g-sandbox
 
 # Tail logs
-tapp-cli -s http://<tapp-server>:50051 get-app-logs --app-id billing -n 100
+tapp-cli -s http://<tapp-server>:50051 get-app-logs --app-id 0g-sandbox -n 100
 ```
 
 The TEE key is automatically generated and managed by the tapp-daemon. Retrieve the
 Ethereum address for provider registration:
 
 ```bash
-tapp-cli -s http://<tapp-server>:50051 get-app-key --app-id billing
+tapp-cli -s http://<tapp-server>:50051 get-app-key --app-id 0g-sandbox
 # → Ethereum Address: 0x...  ← use as --tee-signer when registering the provider
 ```
 

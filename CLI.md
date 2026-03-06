@@ -21,7 +21,7 @@ Must be called by the provider address (the key that will sign settlement transa
 ```bash
 PROVIDER_KEY=0x<hex> go run ./cmd/provider/ init-service \
   --tee-signer <TEE-signer-address> \
-  --url        <billing-proxy-url> \
+  --url        <0g-sandbox-url> \
   [--price     <neuron-per-minute>] \
   [--fee       <create-fee-neuron>] \
   [--rpc       <rpc-url>] \
@@ -34,7 +34,7 @@ PROVIDER_KEY=0x<hex> go run ./cmd/provider/ init-service \
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--key` | `PROVIDER_KEY` env | Provider private key (hex) |
-| `--tee-signer` | (required) | Address derived from the TEE key (`tapp-cli get-app-key --app-id billing`) |
+| `--tee-signer` | (required) | Address derived from the TEE key (`tapp-cli get-app-key --app-id 0g-sandbox`) |
 | `--url` | (required) | Public URL of the billing proxy (e.g. `http://1.2.3.4:8080`) |
 | `--price` | `1000020` | Compute price in neuron/minute |
 | `--fee` | `5000000` | Flat fee in neuron per sandbox creation |
@@ -46,7 +46,7 @@ PROVIDER_KEY=0x<hex> go run ./cmd/provider/ init-service \
 
 ```bash
 # Get TEE signer address first:
-tapp-cli -s http://<server>:50051 get-app-key --app-id billing
+tapp-cli -s http://<server>:50051 get-app-key --app-id 0g-sandbox
 # → Ethereum Address: 0x61beb835...
 
 PROVIDER_KEY=0x859c3bd1... go run ./cmd/provider/ init-service \
@@ -87,12 +87,11 @@ These interact directly with the settlement contract on-chain.
 
 #### `balance`
 
-Show a user's on-chain balance and optionally their nonce and provider earnings.
+Show a user's on-chain wallet balance. With `--provider`, also shows the contract balance for that provider, last nonce, and the provider's total accumulated earnings.
 
 ```bash
 go run ./cmd/user/ balance \
-  [--key      <hex>] \
-  [--address  <wallet-address>] \
+  (--key <hex> | --address <wallet-address>) \
   [--provider <provider-address>] \
   [--rpc      <rpc-url>] \
   [--contract <proxy-address>]
@@ -101,8 +100,10 @@ go run ./cmd/user/ balance \
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--key` | `USER_KEY` env | User private key; address is derived from it |
-| `--address` | (derived from `--key`) | Wallet address to check (use without `--key`) |
-| `--provider` | — | If set, also shows last nonce and provider earnings |
+| `--address` | — | Wallet address to check (alternative to `--key`) |
+| `--provider` | — | If set, shows contract balance, nonce, and provider total earnings |
+
+> `--key` or `--address` is required. `--provider` is strongly recommended — without it only the native wallet balance is shown.
 
 **Example**
 
@@ -112,10 +113,11 @@ USER_KEY=0x<hex> go run ./cmd/user/ balance \
 ```
 
 ```
-Address: 0xdAc113A24f4c7c57792B67127D99Fdda258e1023
-Balance: 10000000000000000 neuron  (0.010000 0G)
-Nonce (vs provider 0xB831...):  3
-Provider earnings: 9000000 neuron  (0.000009 0G)
+Address:          0xdAc113A24f4c7c57792B67127D99Fdda258e1023
+Wallet balance:   10000000000000000 neuron  (0.010000 0G)  ← for gas
+Contract balance: 9000000000000000 neuron   (0.009000 0G)  ← for sandbox (provider 0xB831...)
+Nonce (vs provider): 3
+Provider earnings: 50000000000000000 neuron  (0.050000 0G)  ← provider's total, all users
 ```
 
 ---
@@ -126,34 +128,39 @@ Deposit 0G tokens into the settlement contract to fund sandbox usage.
 
 ```bash
 go run ./cmd/user/ deposit \
-  [--key     <hex>] \
-  [--amount  <float-0g>] \
-  [--rpc     <rpc-url>] \
+  --provider <provider-address> \
+  [--key      <hex>] \
+  [--amount   <float-0g>] \
+  [--rpc      <rpc-url>] \
   [--contract <proxy-address>] \
   [--chain-id <chain-id>]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--provider` | (required) | Provider address to deposit for |
 | `--key` | `USER_KEY` env | User private key |
 | `--amount` | `0.01` | Amount to deposit **in 0G** (e.g. `0.01` = 10¹⁶ neuron) |
 
 **Example**
 
 ```bash
-USER_KEY=0x<hex> go run ./cmd/user/ deposit --amount 0.01
+USER_KEY=0x<hex> go run ./cmd/user/ deposit \
+  --provider 0xB831371eb2703305f1d9F8542163633D0675CEd7 \
+  --amount 0.1
 ```
 
 ```
 User:     0xdAc113A24f4c7c57792B67127D99Fdda258e1023
-Amount:   0.010000 0G (10000000000000000 neuron)
+Provider: 0xB831371eb2703305f1d9F8542163633D0675CEd7
+Amount:   0.100000 0G (100000000000000000 neuron)
 Contract: 0x24cD979DBd0Ae924a3f0c832a724CF4C58E5C210
 
 [1/1] Deposit...
       tx: 0x...
       confirmed ✓
 
-New balance: 10000000000000000 neuron  (0.010000 0G)
+New balance (for provider 0xB831...): 100000000000000000 neuron  (0.100000 0G)
 ```
 
 ---
@@ -201,7 +208,7 @@ Provider: 0xB831371eb2703305f1d9F8542163633D0675CEd7
 ### API subcommands
 
 These call the billing proxy over HTTP using EIP-191 signed requests.
-All require `--api` (the billing proxy URL) and the user's private key.
+All require `--api` (the 0G Sandbox service URL) and the user's private key.
 
 Authentication uses three HTTP headers injected automatically by the CLI:
 
@@ -219,14 +226,14 @@ Create a new sandbox. Requires sufficient on-chain balance and prior `acknowledg
 
 ```bash
 go run ./cmd/user/ create \
-  --api   <billing-proxy-url> \
+  --api   <0g-sandbox-url> \
   [--key  <hex>] \
   [--image <snapshot>]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--api` | `http://localhost:8080` | Billing proxy URL |
+| `--api` | `http://localhost:8080` | 0G Sandbox service URL |
 | `--key` | `USER_KEY` env | User private key |
 | `--image` | — | Custom sandbox snapshot (optional) |
 
@@ -244,7 +251,7 @@ List your sandboxes (filtered by owner — you only see your own).
 
 ```bash
 go run ./cmd/user/ list \
-  --api  <billing-proxy-url> \
+  --api  <0g-sandbox-url> \
   [--key <hex>]
 ```
 
@@ -270,7 +277,7 @@ Stop a running sandbox. Only the sandbox owner can stop it.
 
 ```bash
 go run ./cmd/user/ stop \
-  --api  <billing-proxy-url> \
+  --api  <0g-sandbox-url> \
   --id   <sandbox-id> \
   [--key <hex>]
 ```
@@ -291,7 +298,7 @@ Delete a sandbox. Only the sandbox owner can delete it.
 
 ```bash
 go run ./cmd/user/ delete \
-  --api  <billing-proxy-url> \
+  --api  <0g-sandbox-url> \
   --id   <sandbox-id> \
   [--key <hex>]
 ```
@@ -305,21 +312,23 @@ Complete flow for a new user to start using sandboxes:
 ```bash
 # 1. Fund your wallet with 0G on testnet (faucet or transfer)
 
-# 2. Deposit into the settlement contract
-USER_KEY=0x<hex> go run ./cmd/user/ deposit --amount 0.01
+# 2. Deposit into the settlement contract (--provider required)
+USER_KEY=0x<hex> go run ./cmd/user/ deposit \
+  --provider 0xB831371eb2703305f1d9F8542163633D0675CEd7 \
+  --amount 0.1
 
 # 3. Acknowledge the TEE signer for the provider
 USER_KEY=0x<hex> go run ./cmd/user/ acknowledge \
   --provider 0xB831371eb2703305f1d9F8542163633D0675CEd7
 
 # 4. Create a sandbox
-USER_KEY=0x<hex> go run ./cmd/user/ create --api http://<billing-proxy>:8080
+USER_KEY=0x<hex> go run ./cmd/user/ create --api http://<0g-sandbox>:8080
 
 # 5. List your sandboxes
-USER_KEY=0x<hex> go run ./cmd/user/ list --api http://<billing-proxy>:8080
+USER_KEY=0x<hex> go run ./cmd/user/ list --api http://<0g-sandbox>:8080
 
 # 6. Stop when done
 USER_KEY=0x<hex> go run ./cmd/user/ stop \
-  --api http://<billing-proxy>:8080 \
+  --api http://<0g-sandbox>:8080 \
   --id  <sandbox-id>
 ```

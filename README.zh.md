@@ -230,20 +230,20 @@ rm -f /tmp/daytona_gw /tmp/daytona_gw.pub /tmp/daytona_host /tmp/daytona_host.pu
 docker build -t billing:latest .
 
 # 部署（或修改后重新部署）
-tapp-cli -s http://<tapp-server>:50051 stop-app  --app-id billing
-tapp-cli -s http://<tapp-server>:50051 start-app --app-id billing -f docker-compose.yml
+tapp-cli -s http://<tapp-server>:50051 stop-app  --app-id 0g-sandbox
+tapp-cli -s http://<tapp-server>:50051 start-app --app-id 0g-sandbox -f docker-compose.yml
 
 # 查看容器状态
-tapp-cli -s http://<tapp-server>:50051 get-app-container-status --app-id billing
+tapp-cli -s http://<tapp-server>:50051 get-app-container-status --app-id 0g-sandbox
 
 # 查看日志
-tapp-cli -s http://<tapp-server>:50051 get-app-logs --app-id billing -n 100
+tapp-cli -s http://<tapp-server>:50051 get-app-logs --app-id 0g-sandbox -n 100
 ```
 
 TEE 密钥由 tapp-daemon 自动生成和管理。注册 Provider 前先获取其以太坊地址：
 
 ```bash
-tapp-cli -s http://<tapp-server>:50051 get-app-key --app-id billing
+tapp-cli -s http://<tapp-server>:50051 get-app-key --app-id 0g-sandbox
 # → Ethereum Address: 0x...  ← 作为 --tee-signer 传给 cmd/provider register
 ```
 

@@ -45,14 +45,14 @@ USER_KEY=0x<your-private-key> go run ./cmd/user/ acknowledge \
 
 ```bash
 USER_KEY=0x<your-private-key> go run ./cmd/user/ create \
-  --api http://<billing-proxy>:8080
+  --api http://<0g-sandbox>:8080
 ```
 
 ### 4. Run a command in the sandbox
 
 ```bash
 USER_KEY=0x<your-private-key> go run ./cmd/user/ exec \
-  --api http://<billing-proxy>:8080 \
+  --api http://<0g-sandbox>:8080 \
   --id <sandbox-id> \
   --cmd "python3 --version"
 ```
@@ -504,7 +504,7 @@ USER_KEY=0x<key> go run ./cmd/user/ acknowledge \
 
 ### API Subcommands
 
-All API subcommands require `--api <billing-proxy-url>`. Most require `USER_KEY` env var except `providers`.
+All API subcommands require `--api <0g-sandbox-url>`. Most require `USER_KEY` env var except `providers`.
 
 #### `providers` — List available providers
 
