@@ -800,22 +800,16 @@ func runSSHAccess(args []string) {
 }
 
 // runListSnapshots lists available Daytona snapshots.
+// The /api/snapshots endpoint is public — no auth required.
 func runListSnapshots(args []string) {
 	fs := flag.NewFlagSet("snapshots", flag.ExitOnError)
 	apiURL := fs.String("api", "http://localhost:8080", "0G Sandbox service URL")
-	keyHex := fs.String("key", "",                     "User private key (hex); or set USER_KEY env")
 	_ = fs.Parse(args)
-
-	privKey := mustLoadKey(*keyHex)
-	msg, sig, walletAddr := signRequest(privKey, "list", "", json.RawMessage(`{}`))
 
 	req, err := http.NewRequest(http.MethodGet, *apiURL+"/api/snapshots", nil)
 	if err != nil {
 		fatalf("build request: %v", err)
 	}
-	req.Header.Set("X-Wallet-Address", walletAddr)
-	req.Header.Set("X-Signed-Message", msg)
-	req.Header.Set("X-Wallet-Signature", sig)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
