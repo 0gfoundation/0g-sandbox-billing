@@ -51,7 +51,7 @@ var defaultSnapshots = []struct{ name, image string }{
 func main() {
 	rpc := flag.String("rpc", "https://evmrpc-testnet.0g.ai", "RPC endpoint")
 	chainID := flag.Int64("chain-id", 16602, "Chain ID")
-	contractHex := flag.String("contract", "0x24cD979DBd0Ae924a3f0c832a724CF4C58E5C210", "Contract address")
+	contractHex := flag.String("contract", "0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3", "Contract address")
 	depositEth := flag.Float64("deposit", 0.01, "0G amount to deposit into the contract")
 	serviceURL        := flag.String("url",               "https://0g-sandbox.io", "Provider service URL")
 	pricePerCPUPerMin := flag.String("price-per-cpu-min", "0",                     "Price per CPU per minute in neuron")

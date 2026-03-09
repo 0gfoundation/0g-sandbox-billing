@@ -11,6 +11,36 @@ repository: https://github.com/0gfoundation/0g-sandbox
 
 ---
 
+## MANDATORY: Session setup (run before ANY action)
+
+Before running any command or proceeding with any task, you MUST ask the user:
+
+> "请问你使用的是哪个网络？
+> 1. 0G Galileo 测试网（默认）
+> 2. 0G 主网
+> 3. 自定义（需提供 RPC、Chain ID、合约地址）
+>
+> 直接回车或输入 1 使用默认测试网。"
+
+Wait for the answer, then set:
+
+| Choice | RPC | CHAIN_ID | SETTLEMENT_CONTRACT |
+|--------|-----|----------|-------------------|
+| 1 / testnet / enter | `https://evmrpc-testnet.0g.ai` | `16602` | `0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3` |
+| 2 / mainnet | `https://evmrpc.0g.ai` | `16661` | *(ask user to provide)* |
+| 3 / custom | *(ask user)* | *(ask user)* | *(ask user)* |
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+export RPC=<from-table>
+export CHAIN_ID=<from-table>
+export SETTLEMENT_CONTRACT=<from-table>
+```
+
+Do NOT skip this step even if the network seems obvious from context.
+
+---
+
 ## Quick Reference
 
 | | Value |
@@ -24,6 +54,7 @@ repository: https://github.com/0gfoundation/0g-sandbox
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin
+export SETTLEMENT_CONTRACT=0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3
 export API=http://47.236.111.154:8080
 export PROVIDER=0xB831371eb2703305f1d9F8542163633D0675CEd7
 export USER_KEY=0x<your-private-key>
@@ -34,6 +65,32 @@ export USER_KEY=0x<your-private-key>
 ## Agent: Guiding a New User (Vibe Coding Onboarding)
 
 When a user wants to use private sandbox for vibe coding, follow this flow:
+
+### 0. Network setup (REQUIRED — ask before anything else)
+
+**STOP. Before running any command, ask:**
+> "请问你使用的是哪个网络？
+> 1. 0G Galileo 测试网（默认）
+> 2. 0G 主网
+> 3. 自定义（需提供 RPC、Chain ID、合约地址）
+>
+> 直接回车或输入 1 使用默认测试网。"
+
+Do NOT proceed to Step A until the user answers. Based on the answer:
+
+| Choice | RPC | CHAIN_ID | SETTLEMENT_CONTRACT |
+|--------|-----|----------|-------------------|
+| 1 / testnet / 回车 | `https://evmrpc-testnet.0g.ai` | `16602` | `0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3` |
+| 2 / mainnet | `https://evmrpc.0g.ai` | `16661` | *(ask user to provide)* |
+| 3 / custom | *(ask user)* | *(ask user)* | *(ask user)* |
+
+Then export before continuing:
+```bash
+export PATH=$PATH:/usr/local/go/bin
+export RPC=<rpc>
+export CHAIN_ID=<chain-id>
+export SETTLEMENT_CONTRACT=<contract>
+```
 
 ### A. List available providers
 
@@ -411,11 +468,14 @@ USER_KEY=$USER_KEY go run ./cmd/user/ toolbox --api $API --id <id> --action git/
 
 ## Provider Operations
 
+Ask which network before starting (same as user onboarding Step 0). Then set:
+
 ```bash
 export PATH=$PATH:/usr/local/go/bin
+# testnet defaults (change if using mainnet or custom network)
 export RPC=https://evmrpc-testnet.0g.ai
 export CHAIN_ID=16602
-export CONTRACT=0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3
+export SETTLEMENT_CONTRACT=0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3
 export PROVIDER_KEY=0x<provider-private-key>
 ```
 
@@ -433,7 +493,7 @@ go run ./cmd/deploy/ \
 ```bash
 MOCK_TEE=true MOCK_APP_PRIVATE_KEY=$PROVIDER_KEY \
 go run ./cmd/setup/ \
-  --rpc $RPC --chain-id $CHAIN_ID --contract $CONTRACT \
+  --rpc $RPC --chain-id $CHAIN_ID --contract $SETTLEMENT_CONTRACT \
   --url https://your-provider-url:8080 \
   --price-per-min 1000000000000000 \   # neuron/min
   --create-fee 60000000000000000 \     # neuron per sandbox creation
@@ -446,7 +506,7 @@ go run ./cmd/setup/ \
 
 ```bash
 MOCK_TEE=true MOCK_APP_PRIVATE_KEY=$PROVIDER_KEY \
-go run ./cmd/checkbal/ --rpc $RPC --contract $CONTRACT
+go run ./cmd/checkbal/ --rpc $RPC --contract $SETTLEMENT_CONTRACT
 ```
 
 ### Withdraw earnings
@@ -459,14 +519,14 @@ PROVIDER_KEY=0x<key> go run ./cmd/provider/ withdraw \
 ### Admin: update required stake (owner only)
 
 ```bash
-cast send $CONTRACT "setProviderStake(uint256)" <neuron> \
+cast send $SETTLEMENT_CONTRACT "setProviderStake(uint256)" <neuron> \
   --rpc-url $RPC --private-key $OWNER_KEY
 ```
 
 ### Admin: transfer ownership
 
 ```bash
-cast send $CONTRACT "transferOwnership(address)" <newOwner> \
+cast send $SETTLEMENT_CONTRACT "transferOwnership(address)" <newOwner> \
   --rpc-url $RPC --private-key $OWNER_KEY
 ```
 
@@ -480,7 +540,7 @@ MOCK_APP_PRIVATE_KEY=$PROVIDER_KEY \
 PROVIDER_PRIVATE_KEY=$PROVIDER_KEY \
 DAYTONA_API_URL=http://localhost:3000 \
 DAYTONA_ADMIN_KEY=<key> \
-SETTLEMENT_CONTRACT=$CONTRACT \
+SETTLEMENT_CONTRACT=$SETTLEMENT_CONTRACT \
 RPC_URL=$RPC \
 CHAIN_ID=$CHAIN_ID \
 go run ./cmd/billing/
@@ -531,7 +591,7 @@ go run ./cmd/upgrade/ \
   --rpc https://evmrpc-testnet.0g.ai \
   --key 0x<deployer-key> \
   --chain-id 16602 \
-  --proxy 0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3
+  --proxy $SETTLEMENT_CONTRACT
 ```
 
 ---

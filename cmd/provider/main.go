@@ -56,7 +56,7 @@ import (
 const (
 	defaultRPC      = "https://evmrpc-testnet.0g.ai"
 	defaultChainID  = int64(16602)
-	defaultContract = "0x24cD979DBd0Ae924a3f0c832a724CF4C58E5C210"
+	defaultContract = "0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3"
 )
 
 func main() {

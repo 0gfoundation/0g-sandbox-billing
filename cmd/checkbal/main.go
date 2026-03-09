@@ -46,7 +46,7 @@ func main() {
 	fmt.Println()
 	fmt.Println("=== Recent VoucherSettled events (last 5000 blocks) ===")
 	ctx := context.Background()
-	chainClient := &chainReader{eth: eth, c: c, addr: common.HexToAddress("0x24cD979DBd0Ae924a3f0c832a724CF4C58E5C210")}
+	chainClient := &chainReader{eth: eth, c: c, addr: common.HexToAddress("0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3")}
 	_ = chainClient
 	_ = ctx
 }

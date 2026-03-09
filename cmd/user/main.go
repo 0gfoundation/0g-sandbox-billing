@@ -120,7 +120,7 @@ func addChainFlags(fs *flag.FlagSet) *chainFlags {
 	cf := &chainFlags{}
 	fs.StringVar(&cf.rpc,      "rpc",      "https://evmrpc-testnet.0g.ai",                "RPC endpoint")
 	fs.Int64Var(&cf.chainID,   "chain-id", 16602,                                          "Chain ID")
-	fs.StringVar(&cf.contract, "contract", "0x24cD979DBd0Ae924a3f0c832a724CF4C58E5C210", "Settlement contract address")
+	fs.StringVar(&cf.contract, "contract", "0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3", "Settlement contract address")
 	return cf
 }
 
@@ -371,6 +371,7 @@ func runCreate(args []string) {
 	apiURL   := fs.String("api",      "http://localhost:8080", "Billing proxy URL")
 	keyHex   := fs.String("key",      "",                     "User private key (hex); or set USER_KEY env")
 	snapshot := fs.String("snapshot", "",                     "Snapshot name to use as the sandbox base (optional)")
+	name     := fs.String("name",     "",                     "Sandbox display name (optional)")
 	class    := fs.String("class",    "",                     "Sandbox class: small | medium | large (optional)")
 	cpu      := fs.Int("cpu",         0,                      "CPU cores (optional, overrides class)")
 	memory   := fs.Int("memory",      0,                      "Memory in GB (optional, overrides class)")
@@ -384,6 +385,9 @@ func runCreate(args []string) {
 	privKey := mustLoadKey(*keyHex)
 
 	body := map[string]any{}
+	if *name != "" {
+		body["name"] = *name
+	}
 	if *snapshot != "" {
 		body["snapshot"] = *snapshot
 	}
