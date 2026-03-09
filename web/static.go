@@ -7,3 +7,6 @@ var DashboardHTML []byte
 
 //go:embed ethers.umd.min.js
 var EthersJS []byte
+
+//go:embed logo.svg
+var LogoSVG []byte
