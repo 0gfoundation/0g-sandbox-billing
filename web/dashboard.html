@@ -250,7 +250,10 @@ tbody tr:hover td{background:#fafafa}
 
       <div>
         <div class="card">
-          <div class="card-head"><span class="card-title">Service Status</span></div>
+          <div class="card-head">
+            <span class="card-title">Service Status</span>
+            <button class="btn btn-sm btn-prim" onclick="openModal('serviceModal')">Register / Update</button>
+          </div>
           <div class="card-body">
             <div class="info-row"><span class="ik">Registered</span><span id="svcRegistered">—</span></div>
             <div class="info-row"><span class="ik">Service URL</span><span class="iv" id="svcUrl">—</span></div>
@@ -261,16 +264,6 @@ tbody tr:hover td{background:#fafafa}
             <div class="info-row"><span class="ik">Required Stake</span><span class="iv" id="svcStake">—</span></div>
           </div>
         </div>
-        <div class="card">
-          <div class="card-head"><span class="card-title">Actions</span></div>
-          <div class="card-body">
-            <div style="display:flex;flex-direction:column;gap:10px">
-              <button class="btn btn-prim" onclick="openModal('serviceModal')">Register / Update Service</button>
-              <button class="btn btn-warn" id="archiveAllBtn" onclick="doArchiveAll()">Archive All (Pre-deploy)</button>
-              <div class="err" id="archiveAllErr"></div>
-            </div>
-          </div>
-        </div>
       </div>
 
       <div>
@@ -279,12 +272,7 @@ tbody tr:hover td{background:#fafafa}
           <div class="card-body">
             <div class="info-row"><span class="ik">Accumulated</span><span class="iv big" id="providerEarnings">—</span></div>
             <div class="info-row"><span class="ik">Staked</span><span class="iv" id="providerStaked">—</span></div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-head"><span class="card-title">Actions</span></div>
-          <div class="card-body">
-            <button class="btn btn-prim" onclick="withdrawEarnings()">Withdraw Earnings</button>
+            <button class="btn btn-sm btn-prim" style="margin-top:14px" onclick="withdrawEarnings()">Withdraw Earnings</button>
           </div>
         </div>
       </div>
@@ -308,7 +296,10 @@ tbody tr:hover td{background:#fafafa}
     <div class="card" style="margin-top:4px">
       <div class="card-head">
         <span class="card-title">All Sandboxes</span>
-        <button class="btn btn-sm btn-ghost" onclick="loadAllSandboxes()">Refresh</button>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm btn-warn" id="archiveAllBtn" onclick="doArchiveAll()">Archive All</button>
+          <button class="btn btn-sm btn-ghost" onclick="loadAllSandboxes()">↻</button>
+        </div>
       </div>
       <div class="card-body" style="padding:0">
         <div id="allSandboxTable"><div class="empty">Click Refresh to load.</div></div>
@@ -922,16 +913,16 @@ async function withdrawEarnings() {
 }
 
 async function doArchiveAll() {
-  setErr('archiveAllErr','');
-  if (!confirm('Archive all running sandboxes?\n\nThis stops all active sessions. Only do this before a server redeploy.')) return;
+  if (!confirm('Archive All Sandboxes\n\n此操作会停止所有正在运行的沙盒并将其状态备份到对象存储。\n\n• 用户的沙盒不会丢失，重新部署后可以恢复\n• 计费会话将被关闭\n• 仅在服务器重新部署前使用\n\n确认继续？')) return;
   const btn=document.getElementById('archiveAllBtn'); btn.disabled=true; btn.textContent='Archiving…';
   try {
     const resp=await signedFetch('POST','/api/archive-all'); const data=await resp.json().catch(()=>({}));
-    if (!resp.ok) { setErr('archiveAllErr',data.error||`HTTP ${resp.status}`); return; }
+    if (!resp.ok) { toast(data.error||`HTTP ${resp.status}`,'error'); return; }
     const n=(data.archived||[]).length,f=(data.failed||[]).length;
     toast(f>0?`Archived ${n}, failed ${f} — check logs`:`Archived ${n} sandbox(es). Safe to redeploy.`,f>0?'error':'success');
-  } catch(e) { setErr('archiveAllErr',e.message); }
-  finally { btn.disabled=false; btn.textContent='Archive All (Pre-deploy)'; }
+    await loadAllSandboxes();
+  } catch(e) { toast(e.message,'error'); }
+  finally { btn.disabled=false; btn.textContent='Archive All'; }
 }
 
 // ── Snapshot Management (Provider) ────────────────────────────────────────────
