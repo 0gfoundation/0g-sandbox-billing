@@ -193,6 +193,9 @@ func main() {
 	r.GET("/static/ethers.js", func(c *gin.Context) {
 		c.Data(http.StatusOK, "application/javascript; charset=utf-8", web.EthersJS)
 	})
+	r.GET("/static/logo.svg", func(c *gin.Context) {
+		c.Data(http.StatusOK, "image/svg+xml", web.LogoSVG)
+	})
 	// Public providers list — returns known providers with their on-chain service data.
 	r.GET("/api/providers", func(c *gin.Context) {
 		type ProviderInfo struct {
