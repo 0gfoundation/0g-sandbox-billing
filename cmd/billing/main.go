@@ -344,7 +344,7 @@ func main() {
 	admin.New(rdb, cfg, dtona, log).Register(adminGroup)
 
 	api := r.Group("/api", auth.Middleware(rdb))
-	proxy.NewHandler(dtona, billingHandler, onchain, onchain, onchain, minBalance, computePricePerSec, cfg.Chain.ProviderAddress, rdb, log).Register(api)
+	proxy.NewHandler(dtona, billingHandler, onchain, onchain, onchain, minBalance, computePricePerSec, cfg.Chain.ProviderAddress, cfg.Server.SSHGatewayHost, rdb, log).Register(api)
 
 	// Provider-only: pull an image from an external registry into the internal registry.
 	// The import runs synchronously (crane.Copy) — may take minutes for large images.

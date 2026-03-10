@@ -64,12 +64,13 @@ type Handler struct {
 	eventFetcher       EventFetcher   // nil = events endpoint disabled
 	minBalance         *big.Int       // minimum balance required to create a sandbox
 	providerAddress    string         // only this wallet may call provider-only endpoints
+	sshGatewayHost     string         // if set, replaces localhost in SSH commands
 	computePricePerSec *big.Int
 	rdb                *redis.Client
 	log                *zap.Logger
 }
 
-func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, ackCheck AckChecker, eventFetcher EventFetcher, minBalance, computePricePerSec *big.Int, providerAddress string, rdb *redis.Client, log *zap.Logger) *Handler {
+func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, ackCheck AckChecker, eventFetcher EventFetcher, minBalance, computePricePerSec *big.Int, providerAddress, sshGatewayHost string, rdb *redis.Client, log *zap.Logger) *Handler {
 	target, _ := url.Parse(dtona.BaseURL())
 	rp := httputil.NewSingleHostReverseProxy(target)
 
@@ -81,7 +82,7 @@ func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker,
 		req.Host = target.Host
 	}
 
-	return &Handler{dtona: dtona, billing: bh, rp: rp, balCheck: balCheck, ackCheck: ackCheck, eventFetcher: eventFetcher, minBalance: minBalance, computePricePerSec: computePricePerSec, providerAddress: providerAddress, rdb: rdb, log: log}
+	return &Handler{dtona: dtona, billing: bh, rp: rp, balCheck: balCheck, ackCheck: ackCheck, eventFetcher: eventFetcher, minBalance: minBalance, computePricePerSec: computePricePerSec, providerAddress: providerAddress, sshGatewayHost: sshGatewayHost, rdb: rdb, log: log}
 }
 
 // Register mounts all routes. authMiddleware should already be applied to the group.
@@ -275,8 +276,12 @@ func (h *Handler) handleSSHAccess(c *gin.Context) {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "ssh access failed"})
 		return
 	}
-	// Return sshCommand with localhost placeholder — the frontend replaces
-	// it with window.location.hostname so no server-side config is needed.
+	// If SSH_GATEWAY_HOST is configured, rewrite the host in the SSH command
+	// server-side. Otherwise leave localhost as a placeholder for the frontend
+	// to replace with window.location.hostname.
+	if h.sshGatewayHost != "" {
+		access.SSHCommand = strings.ReplaceAll(access.SSHCommand, "localhost", h.sshGatewayHost)
+	}
 	c.JSON(http.StatusOK, access)
 }
 

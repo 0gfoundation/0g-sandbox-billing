@@ -43,7 +43,8 @@ type ChainConfig struct {
 }
 
 type ServerConfig struct {
-	Port int `mapstructure:"port"`
+	Port           int    `mapstructure:"port"`
+	SSHGatewayHost string `mapstructure:"ssh_gateway_host"`
 }
 
 func Load() (*Config, error) {
@@ -86,6 +87,7 @@ func Load() (*Config, error) {
 		"chain.provider_address":       "PROVIDER_ADDRESS",
 		"chain.chain_id":               "CHAIN_ID",
 		"server.port":                  "PORT",
+		"server.ssh_gateway_host":       "SSH_GATEWAY_HOST",
 	}
 	for key, env := range bindings {
 		if err := v.BindEnv(key, env); err != nil {

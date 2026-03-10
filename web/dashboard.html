@@ -144,10 +144,10 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--text);ba
 
 /* ─ Provider cards ─ */
 .pv-subscribed{border-color:var(--gbd)!important}
-.pv-pricing-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px}
-.pv-price-box{background:var(--surf2);border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px}
-.pv-price-val{font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text);line-height:1.2;font-variant-numeric:tabular-nums}
-.pv-price-label{font-size:10px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:.05em;font-weight:500}
+.pv-pricing-row{display:flex;flex-wrap:wrap;gap:6px 16px;margin-bottom:12px;align-items:center}
+.pv-price-box{display:flex;align-items:baseline;gap:5px}
+.pv-price-val{font-size:13px;font-weight:700;font-family:var(--mono);color:var(--text);font-variant-numeric:tabular-nums}
+.pv-price-label{font-size:11px;color:var(--muted);font-weight:500}
 .pv-sandbox-section{border-top:1px solid var(--border);padding-top:14px;margin-top:4px}
 .pv-sandbox-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 .pv-sandbox-list{display:flex;flex-direction:column}
@@ -673,16 +673,20 @@ async function loadProviders() {
         <div class="card-body">
           <div class="pv-pricing-row">
             <div class="pv-price-box">
-              <div class="pv-price-val">${fmtNeuron(p.compute_price_per_min)}</div>
-              <div class="pv-price-label">per minute</div>
+              <span class="pv-price-label">CPU/min</span>
+              <span class="pv-price-val">${fmtNeuron(p.price_per_cpu_per_min)}</span>
             </div>
             <div class="pv-price-box">
-              <div class="pv-price-val">${fmtNeuron(p.create_fee)}</div>
-              <div class="pv-price-label">per sandbox</div>
+              <span class="pv-price-label">Mem/min</span>
+              <span class="pv-price-val">${fmtNeuron(p.price_per_mem_gb_per_min)}</span>
             </div>
             <div class="pv-price-box">
-              <div style="font-size:11px;color:var(--muted);margin-bottom:4px">TEE signer</div>
-              <div style="font-family:var(--mono);font-size:12px" title="${p.tee_signer}">${shortAddr(p.tee_signer)}</div>
+              <span class="pv-price-label">Create fee</span>
+              <span class="pv-price-val">${fmtNeuron(p.create_fee)}</span>
+            </div>
+            <div class="pv-price-box">
+              <span class="pv-price-label">TEE</span>
+              <span class="pv-price-val" style="font-size:12px" title="${p.tee_signer}">${shortAddr(p.tee_signer)}</span>
             </div>
           </div>
 
@@ -864,7 +868,10 @@ async function doSSH(id) {
     const resp=await signedFetch('POST',`/api/sandbox/${id}/ssh-access`);
     const data=await resp.json().catch(()=>({}));
     if (!resp.ok) { document.getElementById('sshCommand').textContent=data.error||'Failed'; return; }
-    document.getElementById('sshCommand').textContent=(data.sshCommand||'').replace('@localhost','@'+window.location.hostname);
+    const cmd=data.sshCommand||'';
+    // If the server already replaced localhost (SSH_GATEWAY_HOST configured), use as-is.
+    // Otherwise fall back to replacing with the current browser hostname.
+    document.getElementById('sshCommand').textContent=cmd.includes('@localhost')?cmd.replace('@localhost','@'+window.location.hostname):cmd;
   } catch(e) { document.getElementById('sshCommand').textContent=e.message; }
 }
 

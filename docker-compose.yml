@@ -2,7 +2,8 @@ services:
 
   # ── Billing proxy (this repo) ─────────────────────────────────────────────
   billing:
-    image: billing:latest
+    image: eliza-registry-vpc.ap-southeast-1.cr.aliyuncs.com/eliza/0g-sandbox:latest
+    pull_policy: always
     ports:
       - "${PORT:-8080}:8080"
     environment:
@@ -17,16 +18,16 @@ services:
       CHAIN_ID:                ${CHAIN_ID:-16602}
       RPC_URL:                 ${RPC_URL:-https://evmrpc-testnet.0g.ai}
       PROVIDER_ADDRESS:        ${PROVIDER_ADDRESS:-}
-      PROVIDER_PRIVATE_KEY:    ${PROVIDER_PRIVATE_KEY:-}
       # Billing parameters (neuron; 1 0G = 10^18 neuron)
       COMPUTE_PRICE_PER_SEC:   ${COMPUTE_PRICE_PER_SEC:-16667}
       CREATE_FEE:              ${CREATE_FEE:-5000000}
-      VOUCHER_INTERVAL_SEC:    ${VOUCHER_INTERVAL_SEC:-3600}
+      VOUCHER_INTERVAL_SEC:    ${VOUCHER_INTERVAL_SEC:-60}
+      SSH_GATEWAY_HOST:        ${SSH_GATEWAY_HOST:-}
       PORT:                    8080
       # TEE key — fetched from tapp-daemon via gRPC
       BACKEND_TAPP_IP:         ${BACKEND_TAPP_IP:-127.0.0.1}
       BACKEND_TAPP_PORT:       ${BACKEND_TAPP_PORT:-50051}
-      BACKEND_APP_NAME:        ${BACKEND_APP_NAME:-billing}
+      BACKEND_APP_NAME:        ${BACKEND_APP_NAME:-0g-sandbox}
       # Dev-only mock overrides (leave empty in production)
       MOCK_TEE:                ${MOCK_TEE:-}
       MOCK_APP_PRIVATE_KEY:    ${MOCK_APP_PRIVATE_KEY:-}
