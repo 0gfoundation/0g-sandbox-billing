@@ -144,11 +144,26 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--text);ba
 
 /* ─ Provider cards ─ */
 .pv-subscribed{border-color:var(--gbd)!important}
-.pv-pricing-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px}
+.pv-pricing-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:0}
 .pv-price-box{background:var(--surf2);border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px}
 .pv-price-val{font-size:14px;font-weight:700;font-family:var(--mono);color:var(--text);line-height:1.2;font-variant-numeric:tabular-nums}
-.pv-price-label{font-size:10px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:.05em;font-weight:500}
-.pv-sandbox-section{border-top:1px solid var(--border);padding-top:14px;margin-top:4px}
+.pv-price-label{font-size:10px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em;font-weight:600;display:flex;align-items:center;gap:4px}
+.pv-meta-label{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px;display:block}
+.pv-section-label{font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px}
+/* ─ Copyable address ─ */
+.addr-copy{position:relative;cursor:pointer;display:inline-block}
+.addr-copy-text{color:inherit;font:inherit}
+.addr-tip-popup{position:absolute;top:calc(100% + 5px);left:0;background:var(--text);color:#fff;border-radius:var(--r-sm);padding:7px 10px;white-space:nowrap;z-index:60;font-family:var(--mono);font-size:11px;line-height:1.5;pointer-events:none;opacity:0;visibility:hidden;transition:opacity var(--t-fast) ease;min-width:0}
+.addr-copy:hover .addr-tip-popup{opacity:1;visibility:visible;pointer-events:auto}
+.addr-tip-full{display:block;font-weight:500;word-break:break-all;white-space:normal;max-width:360px}
+.addr-tip-hint{display:block;font-size:10px;color:oklch(72% 0 0);margin-top:3px}
+/* ─ Info tooltip ─ */
+.info-tip{position:relative;display:inline-flex;align-items:center;cursor:default;line-height:1}
+.info-tip-icon{width:13px;height:13px;border-radius:50%;border:1.5px solid var(--muted);color:var(--muted);font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;font-family:var(--sans);font-style:normal;flex-shrink:0}
+.info-tip .tip-box{display:none;position:absolute;bottom:calc(100% + 7px);left:50%;transform:translateX(-50%);background:var(--text);color:#fff;font-size:11.5px;font-weight:400;padding:8px 11px;border-radius:var(--r-sm);white-space:nowrap;z-index:50;pointer-events:none;line-height:1.7;font-family:var(--sans)}
+.info-tip .tip-box::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:var(--text)}
+.info-tip:hover .tip-box{display:block}
+.pv-sandbox-section{border-top:1px solid var(--border);padding-top:14px;margin-top:20px}
 .pv-sandbox-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 .pv-sandbox-list{display:flex;flex-direction:column}
 .pv-sandbox-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)}
@@ -626,8 +641,10 @@ async function loadUserData() {
 let _pollTimer = null;
 
 async function loadProviders() {
-  if (!contract || !walletAddr) return;
+  if (!walletAddr) return;
   const section = document.getElementById('providerSection');
+
+  if (!contract) return;
   try {
     const [providers, sbxList] = await Promise.all([
       fetch('/api/providers').then(r=>r.json()).catch(()=>[]),
@@ -638,9 +655,10 @@ async function loadProviders() {
       return;
     }
     const sandboxes = sbxList || [];
-    const [ackedArr, balancesArr] = await Promise.all([
+    const [ackedArr, balancesArr, sessions] = await Promise.all([
       Promise.all(providers.map(p => contract.isTEEAcknowledged(walletAddr, p.address).catch(()=>false))),
       Promise.all(providers.map(p => contract.getBalance(walletAddr, p.address).catch(()=>[0n,0n,0n]))),
+      signedFetch('GET','/api/sessions').then(r=>r.ok?r.json():[]).catch(()=>[]),
     ]);
 
     section.innerHTML = '';
@@ -650,17 +668,28 @@ async function loadProviders() {
       const mySbx   = isThis ? sandboxes : [];
       const [bal, pendingRefund] = balancesArr[i];
       const balLow  = isAcked && info?.min_balance && BigInt(bal.toString()) < BigInt(info.min_balance) && BigInt(bal.toString()) > 0n;
+      const accrued = (sessions||[]).filter(s=>s.provider_address&&s.provider_address.toLowerCase()===p.address.toLowerCase()).reduce((sum,s)=>sum+BigInt(s.accrued_neuron||'0'),0n);
 
       const card = document.createElement('div');
       card.className = 'card' + (isAcked ? ' pv-subscribed' : '');
       card.id = 'pv-' + p.address.toLowerCase();
       card.innerHTML = `
         <div class="card-head">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <span class="card-title" title="${p.address}">${shortAddr(p.address)}</span>
-            <span class="badge purple">v${p.signer_version}</span>
-            ${isThis ? '<span class="badge green">This server</span>' : ''}
-            ${isAcked ? '<span class="badge green">✓ Subscribed</span>' : ''}
+          <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+            <div style="display:flex;flex-direction:column">
+              <span class="pv-meta-label">Provider Address</span>
+              <span style="font-size:13px;font-weight:600;font-family:var(--mono)">${addrTip(p.address)}</span>
+            </div>
+            <div style="width:1px;height:30px;background:var(--border);flex-shrink:0"></div>
+            <div style="display:flex;flex-direction:column">
+              <span class="pv-meta-label">TEE Signer</span>
+              <span style="font-size:13px;font-weight:500;font-family:var(--mono);color:var(--text2)">${addrTip(p.tee_signer)}</span>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <span class="badge purple">v${p.signer_version}</span>
+              ${isThis ? '<span class="badge green">This server</span>' : ''}
+              ${isAcked ? '<span class="badge green">✓ Subscribed</span>' : ''}
+            </div>
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
             <button class="btn btn-sm btn-ghost" onclick="loadProviders()">↻</button>
@@ -671,24 +700,28 @@ async function loadProviders() {
           </div>
         </div>
         <div class="card-body">
+          <div class="pv-section-label">Pricing</div>
           <div class="pv-pricing-row">
             <div class="pv-price-box">
-              <div class="pv-price-val">${fmtNeuron(p.compute_price_per_min)}</div>
-              <div class="pv-price-label">per minute</div>
+              <div class="pv-price-label">
+                Compute / min
+                <span class="info-tip">
+                  <span class="info-tip-icon">i</span>
+                  <span class="tip-box">${fmtNeuron(p.price_per_cpu_per_min)} per CPU / min<br>${fmtNeuron(p.price_per_mem_gb_per_min)} per GB mem / min<br>Billed by actual sandbox resources</span>
+                </span>
+              </div>
+              <div class="pv-price-val">${fmtNeuron(p.price_per_cpu_per_min)}<span style="font-size:11px;font-weight:500;color:var(--muted);margin-left:3px">/ CPU / min</span></div>
+              <div class="pv-price-val" style="margin-top:6px">${fmtNeuron(p.price_per_mem_gb_per_min)}<span style="font-size:11px;font-weight:500;color:var(--muted);margin-left:3px">/ GB / min</span></div>
             </div>
             <div class="pv-price-box">
+              <div class="pv-price-label">Create fee / sandbox</div>
               <div class="pv-price-val">${fmtNeuron(p.create_fee)}</div>
-              <div class="pv-price-label">per sandbox</div>
-            </div>
-            <div class="pv-price-box">
-              <div style="font-size:11px;color:var(--muted);margin-bottom:4px">TEE signer</div>
-              <div style="font-family:var(--mono);font-size:12px" title="${p.tee_signer}">${shortAddr(p.tee_signer)}</div>
             </div>
           </div>
 
           ${isAcked ? `
-          <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:18px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
               <span style="font-size:12px;font-weight:600;color:var(--text2)">Your Balance</span>
               <span style="font-size:15px;font-weight:700;font-family:var(--mono);color:${balLow?'var(--orange)':'var(--text)'}">${fmtNeuron(bal.toString())}</span>
             </div>
@@ -1132,6 +1165,15 @@ function fmtNeuron(s) {
 }
 function fmtTime(ts) { return ts?new Date(ts*1000).toLocaleString():'—'; }
 function shortAddr(a) { if(!a||a.length<12) return a||'—'; return a.slice(0,8)+'…'+a.slice(-6); }
+function addrTip(a,cls='') {
+  if(!a) return '—';
+  return `<span class="addr-copy${cls?' '+cls:''}" onclick="copyAddr('${a}',this)"><span class="addr-copy-text">${shortAddr(a)}</span><span class="addr-tip-popup"><span class="addr-tip-full">${a}</span><span class="addr-tip-hint">Click to copy</span></span></span>`;
+}
+function copyAddr(addr, el) {
+  navigator.clipboard.writeText(addr).catch(()=>{});
+  const hint = el.querySelector('.addr-tip-hint');
+  if (hint) { hint.textContent = 'Copied!'; setTimeout(()=>{ hint.textContent='Click to copy'; }, 1500); }
+}
 function stateTag(state) {
   const s=(state||'').toLowerCase();
   const cls=s==='started'?'running':s==='archived'?'archived':s==='stopped'?'stopped':s==='error'?'error':'starting';
