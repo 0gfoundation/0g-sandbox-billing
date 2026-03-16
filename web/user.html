@@ -464,7 +464,7 @@ async function loadProviders(forceChain=false) {
     const sbxByProvider = {};
     await Promise.all(providers.map(async p => {
       try {
-        const r = await fetch(`${p.url}/api/sandbox_list?wallet=${encodeURIComponent(walletAddr)}`);
+        const r = await fetch(`/proxy/${p.address}/api/sandbox_list?wallet=${encodeURIComponent(walletAddr)}`);
         sbxByProvider[p.address.toLowerCase()] = r.ok ? (await r.json() || []) : [];
       } catch(_) { sbxByProvider[p.address.toLowerCase()] = []; }
     }));
@@ -616,7 +616,7 @@ function _startPoll() {
   if (_pollTimer) return;
   _pollTimer = setInterval(async () => {
     if (!selectedProvider) { await loadProviders(); return; }
-    const r = await fetch(`${selectedProvider.url}/api/sandbox_list?wallet=${encodeURIComponent(walletAddr)}`).catch(()=>null);
+    const r = await fetch(`${providerProxyBase()}/api/sandbox_list?wallet=${encodeURIComponent(walletAddr)}`).catch(()=>null);
     if (!r?.ok) return;
     const list = await r.json().catch(()=>[]);
     if (!list.some(s=>['starting','archiving','stopping'].includes((s.state||'').toLowerCase()))) {
@@ -651,7 +651,7 @@ async function doRefund(providerAddr, btn) {
 
 async function fetchSandboxIds() {
   if (!selectedProvider) return new Set();
-  try { const r=await fetch(`${selectedProvider.url}/api/sandbox_list?wallet=${encodeURIComponent(walletAddr)}`); if(!r.ok) return new Set(); return new Set((await r.json()||[]).map(s=>s.id)); }
+  try { const r=await fetch(`${providerProxyBase()}/api/sandbox_list?wallet=${encodeURIComponent(walletAddr)}`); if(!r.ok) return new Set(); return new Set((await r.json()||[]).map(s=>s.id)); }
   catch(_) { return new Set(); }
 }
 
@@ -733,7 +733,7 @@ function copySSH() {
 async function loadSnapshots() {
   if (!selectedProvider) return;
   try {
-    const snaps=await fetch(`${selectedProvider.url}/api/snapshots`).then(r=>r.ok?r.json():[]).catch(()=>[]);
+    const snaps=await fetch(`${providerProxyBase()}/api/snapshots`).then(r=>r.ok?r.json():[]).catch(()=>[]);
     const sel=document.getElementById('snapshotSelect');
     sel.innerHTML='<option value="">— Default (no snapshot) —</option>';
     (snaps||[]).filter(s=>s.state==='active').forEach(s=>{
@@ -749,8 +749,11 @@ function genUUID() {
   if (crypto.randomUUID) return crypto.randomUUID();
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{ const r=crypto.getRandomValues(new Uint8Array(1))[0]&15; return(c==='x'?r:(r&0x3|0x8)).toString(16); });
 }
+function providerProxyBase() {
+  return selectedProvider ? `/proxy/${selectedProvider.address}` : '';
+}
 async function signedFetch(method, path, body=null, signal=null) {
-  const baseURL = selectedProvider ? selectedProvider.url : '';
+  const baseURL = providerProxyBase();
   const msg={action:method+':'+path,expires_at:Math.floor(Date.now()/1000)+300,nonce:genUUID(),payload:body||{},resource_id:''};
   const msgStr=JSON.stringify(msg), sig=await signer.signMessage(msgStr);
   return fetch(baseURL+path,{method,headers:{'Content-Type':'application/json','X-Wallet-Address':walletAddr,'X-Signed-Message':btoa(msgStr),'X-Wallet-Signature':sig},body:body?JSON.stringify(body):undefined,signal});

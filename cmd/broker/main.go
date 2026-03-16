@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/ethereum/go-ethereum/crypto"
@@ -108,10 +111,6 @@ func main() {
 		c.Header("Cache-Control", "no-store")
 		c.Data(http.StatusOK, "text/html; charset=utf-8", web.UserHTML)
 	})
-	r.GET("/provider", func(c *gin.Context) {
-		c.Header("Cache-Control", "no-store")
-		c.Data(http.StatusOK, "text/html; charset=utf-8", web.ProviderHTML)
-	})
 	r.GET("/static/ethers.js", func(c *gin.Context) {
 		c.Data(http.StatusOK, "application/javascript; charset=utf-8", web.EthersJS)
 	})
@@ -140,6 +139,26 @@ func main() {
 		})
 		log.Info("debug route enabled: GET /api/monitor")
 	}
+
+	// Provider reverse proxy — eliminates CORS: browser calls /proxy/:addr/* (same origin)
+	// and broker forwards server-side to the actual provider URL.
+	r.Any("/proxy/:providerAddr/*path", func(c *gin.Context) {
+		providerAddr := strings.ToLower(c.Param("providerAddr"))
+		rec, ok := idx.Get(providerAddr)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "provider not found"})
+			return
+		}
+		target, err := url.Parse(rec.URL)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "invalid provider URL"})
+			return
+		}
+		proxy := httputil.NewSingleHostReverseProxy(target)
+		c.Request.URL.Path = c.Param("path")
+		c.Request.URL.RawQuery = c.Request.URL.RawQuery
+		proxy.ServeHTTP(c.Writer, c.Request)
+	})
 
 	// Session endpoints — called by the billing proxy (TEE-signed requests).
 	sessionHandler := broker.NewSessionHandler(idx, onchain, payment, rdb, log, cfg.Broker.TopupIntervals)
