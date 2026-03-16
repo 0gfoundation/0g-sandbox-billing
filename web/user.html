@@ -307,6 +307,7 @@ tbody tr:hover td{background:var(--surf2)}
 // ── State ─────────────────────────────────────────────────────────────────────
 let walletAddr = null, signer = null, contract = null, info = null;
 let selectedProvider = null;
+let _chainCache = {}; // key: `${walletAddr}:${providerAddr}` → {acked, balance}
 const eip6963Providers = new Map();
 let _refreshTimer = null, _activeProvider = null;
 function _onAccountsChanged(a) {
@@ -423,7 +424,7 @@ async function logout() {
     try { _activeProvider.removeListener('accountsChanged',_onAccountsChanged); } catch(_){}
     _activeProvider = null;
   }
-  walletAddr=null; signer=null; contract=null; selectedProvider=null;
+  walletAddr=null; signer=null; contract=null; selectedProvider=null; _chainCache={};
   if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer=null; }
   localStorage.removeItem('walletUUID');
   document.querySelectorAll('.addr-chip,.logout-btn').forEach(el=>el.remove());
@@ -449,7 +450,7 @@ async function loadUserData() {
 // ── Providers + Sandboxes ─────────────────────────────────────────────────────
 let _pollTimer = null;
 
-async function loadProviders() {
+async function loadProviders(forceChain=false) {
   if (!contract || !walletAddr) return;
   const section = document.getElementById('providerSection');
   try {
@@ -459,7 +460,7 @@ async function loadProviders() {
       return;
     }
 
-    // Fetch sandboxes from each provider in parallel
+    // Fetch sandboxes from each provider in parallel (always fresh)
     const sbxByProvider = {};
     await Promise.all(providers.map(async p => {
       try {
@@ -468,16 +469,30 @@ async function loadProviders() {
       } catch(_) { sbxByProvider[p.address.toLowerCase()] = []; }
     }));
 
-    const [ackedArr, balancesArr] = await Promise.all([
-      Promise.all(providers.map(p => contract.isTEEAcknowledged(walletAddr, p.address).catch(()=>false))),
-      Promise.all(providers.map(p => contract.getBalance(walletAddr, p.address).catch(()=>[0n,0n,0n]))),
-    ]);
+    // On-chain data: use cache when possible to avoid slow RPC round-trips.
+    // Pass forceChain=true after deposit/subscribe to get fresh values.
+    const cacheKeys = providers.map(p => `${walletAddr}:${p.address}`);
+    const allCached = !forceChain && cacheKeys.every(k => _chainCache[k]);
+    let ackedArr, balancesArr;
+    if (allCached) {
+      ackedArr    = cacheKeys.map(k => _chainCache[k].acked);
+      balancesArr = cacheKeys.map(k => _chainCache[k].balance);
+    } else {
+      [ackedArr, balancesArr] = await Promise.all([
+        Promise.all(providers.map(p => contract.isTEEAcknowledged(walletAddr, p.address).catch(()=>false))),
+        Promise.all(providers.map(p => contract.getBalance(walletAddr, p.address).catch(()=>[0n,0n,0n]))),
+      ]);
+      providers.forEach((p, i) => {
+        _chainCache[`${walletAddr}:${p.address}`] = { acked: ackedArr[i], balance: balancesArr[i] };
+      });
+    }
 
     section.innerHTML = '';
     providers.forEach((p, i) => {
       const isAcked = ackedArr[i];
       const mySbx   = sbxByProvider[p.address.toLowerCase()] || [];
       const [bal, pendingRefund] = balancesArr[i];
+      const pJson = JSON.stringify(p).replace(/"/g, '&quot;');
 
       const card = document.createElement('div');
       card.className = 'card' + (isAcked ? ' pv-subscribed' : '');
@@ -490,7 +505,7 @@ async function loadProviders() {
             ${isAcked ? '<span class="badge green">✓ Subscribed</span>' : ''}
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
-            <button class="btn btn-sm btn-ghost" onclick="loadProviders()">↻</button>
+            <button class="btn btn-sm btn-ghost" onclick="loadProviders(true)">↻</button>
             ${isAcked
               ? `<button class="btn btn-sm btn-danger" onclick="doUnsubscribe('${p.address}',this)">Unsubscribe</button>`
               : `<button class="btn btn-sm btn-prim" onclick="doSubscribe('${p.address}',this)">Subscribe</button>`
@@ -536,7 +551,7 @@ async function loadProviders() {
           <div class="pv-sandbox-section">
             <div class="pv-sandbox-header">
               <span style="font-size:12.5px;font-weight:600">Sandboxes</span>
-              ${isAcked ? `<button class="btn btn-sm btn-prim" onclick="setSelectedProvider(${JSON.stringify(p)});openModal('createModal')">+ Create</button>` : ''}
+              ${isAcked ? `<button class="btn btn-sm btn-prim" data-p="${pJson}" onclick="setSelectedProvider(JSON.parse(this.dataset.p));openModal('createModal')">+ Create</button>` : ''}
             </div>
             <div class="pv-sandbox-list">
               ${renderSandboxRows(mySbx, p)}
@@ -584,7 +599,7 @@ function renderSandboxRows(sandboxes, p) {
 async function doSubscribe(addr, btn) {
   btn.disabled = true;
   await sendTx('Subscribe', () => contract.acknowledgeTEESigner(addr, true), {
-    onSuccess: () => loadProviders(),
+    onSuccess: () => loadProviders(true),
     onError:   () => { btn.disabled=false; },
   });
 }
@@ -592,7 +607,7 @@ async function doSubscribe(addr, btn) {
 async function doUnsubscribe(addr, btn) {
   btn.disabled = true;
   await sendTx('Unsubscribe', () => contract.acknowledgeTEESigner(addr, false), {
-    onSuccess: () => loadProviders(),
+    onSuccess: () => loadProviders(true),
     onError:   () => { btn.disabled=false; },
   });
 }
@@ -618,7 +633,7 @@ async function doDeposit(providerAddr, btn) {
   document.getElementById(`dep-err-${providerAddr}`).textContent='';
   if (btn) { btn.disabled=true; btn.textContent='…'; }
   await sendTx(`Deposit ${amt} 0G`, ()=>contract.deposit(walletAddr, providerAddr, {value:ethers.parseEther(amt)}), {
-    onSuccess: ()=>{ loadUserData(); loadProviders(); }, errEl:`dep-err-${providerAddr}`,
+    onSuccess: ()=>{ loadUserData(); loadProviders(true); }, errEl:`dep-err-${providerAddr}`,
   });
   if (btn) { btn.disabled=false; btn.textContent='⬆ Deposit'; }
 }
@@ -629,7 +644,7 @@ async function doRefund(providerAddr, btn) {
   document.getElementById(`dep-err-${providerAddr}`).textContent='';
   if (btn) { btn.disabled=true; btn.textContent='…'; }
   await sendTx('Refund request', ()=>contract.requestRefund(providerAddr, ethers.parseEther(amt)), {
-    onSuccess: ()=>{ loadUserData(); loadProviders(); }, errEl:`dep-err-${providerAddr}`,
+    onSuccess: ()=>{ loadUserData(); loadProviders(true); }, errEl:`dep-err-${providerAddr}`,
   });
   if (btn) { btn.disabled=false; btn.textContent='↩ Refund'; }
 }
@@ -671,8 +686,9 @@ async function doCreate() {
       if (created) { try{await signedFetch('POST',`/api/sandbox/${created}/ensure-billing`);}catch(_){} toast('Sandbox created!','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; await loadProviders(); return; }
       setErr('createErr','Request timed out — please try again.');
     } else { setErr('createErr',e.message); }
+  } finally {
+    btn.disabled=false; btn.textContent='Create & Start';
   }
-  btn.disabled=false; btn.textContent='Create & Start';
 }
 
 async function doStop(id, label) {

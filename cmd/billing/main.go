@@ -182,6 +182,7 @@ func main() {
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
+	r.RedirectTrailingSlash = false // prevent 307 redirect on CORS preflight for /sandbox/:id
 	r.Use(gin.Recovery())
 	r.Use(func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")

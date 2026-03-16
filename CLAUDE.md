@@ -224,13 +224,13 @@ go run ./cmd/checkbal/
 
 ## Tapp Production Deployment
 
-Deploying to a 0G Tapp TEE server via `tapp-cli`. Server: `43.106.147.28:50051`, app-id: `0g-sandbox`.
+Deploying to a 0G Tapp TEE server via `tapp-cli`. Server: `47.236.111.154:50051`, app-id: `0g-sandbox`.
 
 ### One-time setup
 
 ```bash
 export TAPP_PRIVATE_KEY=0x<key>
-TAPP_SERVER=http://43.106.147.28:50051
+TAPP_SERVER=http://47.236.111.154:50051
 
 # Login to Alibaba Cloud VPC registry (one-time per server)
 tapp-cli -s $TAPP_SERVER docker-login \
@@ -256,7 +256,7 @@ tapp-cli -s $TAPP_SERVER get-app-key --app-id 0g-sandbox
 
 # 4. Register provider service on-chain (use PROVIDER_KEY = provider wallet private key)
 PROVIDER_KEY=0x<provider-key> go run ./cmd/provider/ register \
-  --api http://43.106.147.28:8080 \
+  --api http://47.236.111.154:8080 \
   --tee-signer <tee-address-from-step3> \
   --price-per-cpu <neuron/cpu/min> \
   --price-per-mem <neuron/memGB/min> \

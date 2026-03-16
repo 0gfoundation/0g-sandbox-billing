@@ -84,6 +84,18 @@ func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker,
 		req.Host = target.Host
 	}
 
+	// Strip CORS headers from the upstream response so they are not duplicated
+	// on top of the headers already set by gin's CORS middleware.
+	// httputil.ReverseProxy uses Add() when copying upstream headers, which
+	// would result in Access-Control-Allow-Origin: ["*", "*"] — browsers
+	// reject responses with duplicate ACAO headers as a CORS error.
+	rp.ModifyResponse = func(resp *http.Response) error {
+		resp.Header.Del("Access-Control-Allow-Origin")
+		resp.Header.Del("Access-Control-Allow-Methods")
+		resp.Header.Del("Access-Control-Allow-Headers")
+		return nil
+	}
+
 	var broker *brokerClient
 	if brokerURL != "" && teeKey != nil {
 		broker = newBrokerClient(brokerURL, teeKey, providerAddress, voucherIntervalSec, log)

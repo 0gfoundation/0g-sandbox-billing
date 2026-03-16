@@ -5,13 +5,12 @@ services:
     image: 0g-broker:dev
     pull_policy: never
     ports:
-      - "${BROKER_PORT:-8081}:8081"
+      - "${BROKER_PORT:-8082}:8081"
     environment:
       # Chain
       RPC_URL:              ${RPC_URL:-https://evmrpc-testnet.0g.ai}
       CHAIN_ID:             ${CHAIN_ID:-16602}
       SETTLEMENT_CONTRACT:  ${SETTLEMENT_CONTRACT}
-      PROVIDER_ADDRESS:     ${PROVIDER_ADDRESS:-}
       # Redis (broker-only instance)
       REDIS_ADDR:           broker-redis:6379
       REDIS_PASSWORD:       ${BROKER_REDIS_PASSWORD:-}
