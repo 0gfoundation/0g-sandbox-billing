@@ -9,8 +9,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
-	"github.com/0gfoundation/0g-sandbox-billing/internal/config"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/voucher"
+	"github.com/0gfoundation/0g-sandbox/internal/config"
+	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 )
 
 const maxBatchSize = 50

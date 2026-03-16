@@ -1,4 +1,4 @@
-module github.com/0gfoundation/0g-sandbox-billing
+module github.com/0gfoundation/0g-sandbox
 
 go 1.25.6
 

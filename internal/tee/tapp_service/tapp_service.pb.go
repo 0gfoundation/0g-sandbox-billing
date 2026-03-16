@@ -185,7 +185,7 @@ const file_internal_tee_tapp_service_proto_rawDesc = "" +
 	"ethAddress\x12*\n" +
 	"\x11x25519_public_key\x18\x06 \x01(\fR\x0fx25519PublicKey2m\n" +
 	"\vTappService\x12^\n" +
-	"\x0fGetAppSecretKey\x12$.tapp_service.GetAppSecretKeyRequest\x1a%.tapp_service.GetAppSecretKeyResponseBFZDgithub.com/0gfoundation/0g-sandbox-billing/internal/tee/tapp_serviceb\x06proto3"
+	"\x0fGetAppSecretKey\x12$.tapp_service.GetAppSecretKeyRequest\x1a%.tapp_service.GetAppSecretKeyResponseBFZDgithub.com/0gfoundation/0g-sandbox/internal/tee/tapp_serviceb\x06proto3"
 
 var (
 	file_internal_tee_tapp_service_proto_rawDescOnce sync.Once

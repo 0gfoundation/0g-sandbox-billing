@@ -1,5 +1,6 @@
 # Build outputs
 /billing
+/broker
 /deploy
 /upgrade
 /verify
@@ -13,8 +14,9 @@ contracts/cache/
 # forge-std is managed separately; include only via submodule or install
 contracts/lib/
 
-# Environment secrets
+# Environment secrets — all .env* files may contain real credentials
 .env
+.env.*
 
 # Private keys and certificates
 *.key

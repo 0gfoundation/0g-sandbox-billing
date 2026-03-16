@@ -3,8 +3,8 @@ package settler
 import (
 	"context"
 
-	"github.com/0gfoundation/0g-sandbox-billing/internal/chain"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/voucher"
+	"github.com/0gfoundation/0g-sandbox/internal/chain"
+	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 )
 
 // StopSignal carries the reason a sandbox should be stopped.

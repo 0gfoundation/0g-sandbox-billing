@@ -14,8 +14,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
-	"github.com/0gfoundation/0g-sandbox-billing/internal/daytona"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/settler"
+	"github.com/0gfoundation/0g-sandbox/internal/daytona"
+	"github.com/0gfoundation/0g-sandbox/internal/settler"
 )
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -221,7 +221,7 @@ func TestRunStopHandler_StopsAndCleansRedis(t *testing.T) {
 	rdb.Set(bg, "billing:compute:sb-1", "session", 0)          //nolint:errcheck
 	rdb.Set(bg, "stop:sandbox:sb-1", "insufficient_balance", 0) //nolint:errcheck
 
-	go runStopHandler(ctx, stopCh, mock.client(), rdb, zap.NewNop())
+	go runStopHandler(ctx, stopCh, mock.client(), rdb, zap.NewNop(), nil)
 
 	stopCh <- settler.StopSignal{SandboxID: "sb-1", Reason: "insufficient_balance"}
 
@@ -247,7 +247,7 @@ func TestRunStopHandler_DaytonaError_StillCleansRedis(t *testing.T) {
 	rdb.Set(bg, "billing:compute:sb-err", "session", 0)    //nolint:errcheck
 	rdb.Set(bg, "stop:sandbox:sb-err", "not_acknowledged", 0) //nolint:errcheck
 
-	go runStopHandler(ctx, stopCh, mock.client(), rdb, zap.NewNop())
+	go runStopHandler(ctx, stopCh, mock.client(), rdb, zap.NewNop(), nil)
 
 	stopCh <- settler.StopSignal{SandboxID: "sb-err", Reason: "not_acknowledged"}
 
@@ -268,7 +268,7 @@ func TestRunStopHandler_MultipleSignals(t *testing.T) {
 		rdb.Set(bg, "stop:sandbox:"+id, "insufficient_balance", 0) //nolint:errcheck
 	}
 
-	go runStopHandler(ctx, stopCh, mock.client(), rdb, zap.NewNop())
+	go runStopHandler(ctx, stopCh, mock.client(), rdb, zap.NewNop(), nil)
 
 	for _, id := range []string{"sb-x", "sb-y", "sb-z"} {
 		stopCh <- settler.StopSignal{SandboxID: id, Reason: "insufficient_balance"}
@@ -296,7 +296,7 @@ func TestRunStopHandler_ContextCancel_Exits(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		runStopHandler(ctx, stopCh, mock.client(), rdb, zap.NewNop())
+		runStopHandler(ctx, stopCh, mock.client(), rdb, zap.NewNop(), nil)
 		close(done)
 	}()
 

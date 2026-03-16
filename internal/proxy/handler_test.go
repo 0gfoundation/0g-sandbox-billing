@@ -13,7 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
-	"github.com/0gfoundation/0g-sandbox-billing/internal/daytona"
+	"github.com/0gfoundation/0g-sandbox/internal/daytona"
 )
 
 func init() { gin.SetMode(gin.TestMode) }
@@ -117,7 +117,7 @@ func newTestEngine(dtona *daytona.Client, bh BillingHooks, wallet string) *gin.E
 		c.Set("wallet_address", wallet)
 		c.Next()
 	})
-	NewHandler(dtona, bh, nil, nil, nil, nil, nil, "", nil, zap.NewNop()).Register(api)
+	NewHandler(dtona, bh, nil, nil, nil, nil, nil, "", "", nil, zap.NewNop(), "", nil, 0).Register(api)
 	return r
 }
 

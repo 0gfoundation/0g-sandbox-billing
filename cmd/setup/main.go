@@ -40,7 +40,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	"github.com/0gfoundation/0g-sandbox-billing/internal/chain"
+	"github.com/0gfoundation/0g-sandbox/internal/chain"
 )
 
 // defaultSnapshots are pre-provisioned when DAYTONA_API_URL is available.

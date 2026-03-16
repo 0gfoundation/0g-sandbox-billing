@@ -20,18 +20,18 @@ import (
 
 	"github.com/ethereum/go-ethereum/crypto"
 
-	"github.com/0gfoundation/0g-sandbox-billing/internal/admin"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/auth"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/billing"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/chain"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/config"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/daytona"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/events"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/proxy"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/registry"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/settler"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/tee"
-	"github.com/0gfoundation/0g-sandbox-billing/web"
+	"github.com/0gfoundation/0g-sandbox/internal/admin"
+	"github.com/0gfoundation/0g-sandbox/internal/auth"
+	"github.com/0gfoundation/0g-sandbox/internal/billing"
+	"github.com/0gfoundation/0g-sandbox/internal/chain"
+	"github.com/0gfoundation/0g-sandbox/internal/config"
+	"github.com/0gfoundation/0g-sandbox/internal/daytona"
+	"github.com/0gfoundation/0g-sandbox/internal/events"
+	"github.com/0gfoundation/0g-sandbox/internal/proxy"
+	"github.com/0gfoundation/0g-sandbox/internal/registry"
+	"github.com/0gfoundation/0g-sandbox/internal/settler"
+	"github.com/0gfoundation/0g-sandbox/internal/tee"
+	"github.com/0gfoundation/0g-sandbox/web"
 )
 
 func main() {
@@ -177,7 +177,6 @@ func main() {
 	// Recovery must start after stopCh is ready but before settler writes to it.
 	go recoverPendingStops(ctx, rdb, stopCh, log)
 	go settler.Run(ctx, cfg, rdb, onchain, stopCh, log)
-	go runStopHandler(ctx, stopCh, dtona, rdb, log)
 	go billing.RunGenerator(ctx, cfg, rdb, signer, computePricePerSec, log)
 
 	// ── HTTP server ───────────────────────────────────────────────────────────
@@ -344,7 +343,9 @@ func main() {
 	admin.New(rdb, cfg, dtona, log).Register(adminGroup)
 
 	api := r.Group("/api", auth.Middleware(rdb))
-	proxy.NewHandler(dtona, billingHandler, onchain, onchain, onchain, minBalance, computePricePerSec, cfg.Chain.ProviderAddress, cfg.Server.SSHGatewayHost, rdb, log).Register(api)
+	proxyHandler := proxy.NewHandler(dtona, billingHandler, onchain, onchain, onchain, minBalance, computePricePerSec, cfg.Chain.ProviderAddress, cfg.Server.SSHGatewayHost, rdb, log, cfg.Server.BrokerURL, onchain.PrivateKey(), cfg.Billing.VoucherIntervalSec)
+	proxyHandler.Register(api)
+	go runStopHandler(ctx, stopCh, dtona, rdb, log, proxyHandler.BrokerDeregister)
 
 	// Provider-only: pull an image from an external registry into the internal registry.
 	// The import runs synchronously (crane.Copy) — may take minutes for large images.
@@ -475,7 +476,7 @@ func recoverPendingStops(ctx context.Context, rdb *redis.Client, stopCh chan<- s
 
 // runStopHandler consumes StopSignals, archives the sandbox (preserving state in
 // object storage so it can be restarted later), and cleans up Redis.
-func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona *daytona.Client, rdb *redis.Client, log *zap.Logger) {
+func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona *daytona.Client, rdb *redis.Client, log *zap.Logger, deregisterBroker func(context.Context, string)) {
 	for {
 		select {
 		case sig := <-stopCh:
@@ -488,12 +489,15 @@ func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona
 				)
 			}
 			// Step 2: wait for stopped state (stop is async in Daytona).
-			if err := dtona.WaitStopped(ctx, sig.SandboxID); err != nil {
+			// Use a 2-minute timeout so a stuck archive job doesn't block this goroutine forever.
+			waitCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+			if err := dtona.WaitStopped(waitCtx, sig.SandboxID); err != nil {
 				log.Warn("wait stopped failed",
 					zap.String("sandbox", sig.SandboxID),
 					zap.Error(err),
 				)
 			}
+			cancel()
 			// Step 3: archive (backup filesystem to MinIO for later restore).
 			if err := dtona.ArchiveSandbox(ctx, sig.SandboxID); err != nil {
 				log.Warn("archive sandbox failed (may already be archived)",
@@ -503,6 +507,9 @@ func runStopHandler(ctx context.Context, stopCh <-chan settler.StopSignal, dtona
 			}
 			rdb.Del(ctx, "billing:compute:"+sig.SandboxID) //nolint:errcheck
 			rdb.Del(ctx, "stop:sandbox:"+sig.SandboxID)    //nolint:errcheck
+			if deregisterBroker != nil {
+				deregisterBroker(ctx, sig.SandboxID)
+			}
 			log.Info("sandbox archived",
 				zap.String("sandbox", sig.SandboxID),
 				zap.String("reason", sig.Reason),

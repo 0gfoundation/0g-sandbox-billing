@@ -14,8 +14,8 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	"github.com/0gfoundation/0g-sandbox-billing/internal/config"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/voucher"
+	"github.com/0gfoundation/0g-sandbox/internal/config"
+	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 )
 
 // SettlementStatus mirrors the Solidity enum (same ordinal values).
@@ -401,6 +401,67 @@ func (c *Client) GetServiceInfo(ctx context.Context, provider common.Address) (*
 		CreateFee:           svc.CreateFee,
 		SignerVersion:       svc.SignerVersion,
 	}, nil
+}
+
+// ProviderEvent holds a decoded ServiceUpdated event from the contract.
+type ProviderEvent struct {
+	Provider         common.Address
+	URL              string
+	TEESignerAddress common.Address
+	SignerVersion    *big.Int
+	Block            uint64
+	TxHash           string
+}
+
+// GetServiceUpdatedEvents queries ServiceUpdated logs starting at fromBlock.
+// fromBlock=0 scans from block 1. Returns events, the current latest block, and any error.
+func (c *Client) GetServiceUpdatedEvents(ctx context.Context, fromBlock uint64) ([]ProviderEvent, uint64, error) {
+	latest, err := c.eth.BlockNumber(ctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("get block number: %w", err)
+	}
+	start := fromBlock
+	if start == 0 {
+		start = 1
+	}
+	opts := &bind.FilterOpts{
+		Start:   start,
+		End:     &latest,
+		Context: ctx,
+	}
+	iter, err := c.contract.FilterServiceUpdated(opts, nil)
+	if err != nil {
+		return nil, latest, fmt.Errorf("FilterServiceUpdated: %w", err)
+	}
+	defer iter.Close()
+
+	var events []ProviderEvent
+	for iter.Next() {
+		e := iter.Event
+		events = append(events, ProviderEvent{
+			Provider:         e.Provider,
+			URL:              e.Url,
+			TEESignerAddress: e.TeeSignerAddress,
+			SignerVersion:    e.SignerVersion,
+			Block:            e.Raw.BlockNumber,
+			TxHash:           e.Raw.TxHash.Hex(),
+		})
+	}
+	if err := iter.Error(); err != nil {
+		return nil, latest, fmt.Errorf("iterate ServiceUpdated: %w", err)
+	}
+	return events, latest, nil
+}
+
+// GetBalanceBatch returns the on-chain balances for a list of users with a
+// specific provider in a single view call.
+func (c *Client) GetBalanceBatch(ctx context.Context, users []common.Address, provider common.Address) ([]*big.Int, error) {
+	opts := &bind.CallOpts{Context: ctx}
+	balances, err := c.contract.BalanceOfBatch(opts, users, provider)
+	if err != nil {
+		return nil, fmt.Errorf("BalanceOfBatch: %w", err)
+	}
+	return balances, nil
 }
 
 // GetProviderBalance returns a user's balance, pendingRefund, and refundUnlockAt

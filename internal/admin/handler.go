@@ -11,10 +11,10 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
-	"github.com/0gfoundation/0g-sandbox-billing/internal/billing"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/config"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/daytona"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/events"
+	"github.com/0gfoundation/0g-sandbox/internal/billing"
+	"github.com/0gfoundation/0g-sandbox/internal/config"
+	"github.com/0gfoundation/0g-sandbox/internal/daytona"
+	"github.com/0gfoundation/0g-sandbox/internal/events"
 )
 
 // Handler serves /admin/* endpoints.

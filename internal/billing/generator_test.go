@@ -10,7 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/0gfoundation/0g-sandbox-billing/internal/config"
+	"github.com/0gfoundation/0g-sandbox/internal/config"
 )
 
 // ── helpers ───────────────────────────────────────────────────────────────────

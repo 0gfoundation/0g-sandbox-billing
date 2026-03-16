@@ -13,6 +13,14 @@ type Config struct {
 	Billing BillingConfig
 	Chain   ChainConfig
 	Server  ServerConfig
+	Broker  BrokerConfig
+}
+
+type BrokerConfig struct {
+	MonitorIntervalSec  int64  `mapstructure:"monitor_interval_sec"`
+	TopupIntervals      int64  `mapstructure:"topup_intervals"`
+	ThresholdIntervals  int64  `mapstructure:"threshold_intervals"`
+	PaymentLayerURL     string `mapstructure:"payment_layer_url"`
 }
 
 type DaytonaConfig struct {
@@ -45,6 +53,7 @@ type ChainConfig struct {
 type ServerConfig struct {
 	Port           int    `mapstructure:"port"`
 	SSHGatewayHost string `mapstructure:"ssh_gateway_host"`
+	BrokerURL      string `mapstructure:"broker_url"`
 }
 
 func Load() (*Config, error) {
@@ -88,6 +97,7 @@ func Load() (*Config, error) {
 		"chain.chain_id":               "CHAIN_ID",
 		"server.port":                  "PORT",
 		"server.ssh_gateway_host":       "SSH_GATEWAY_HOST",
+		"server.broker_url":             "BROKER_URL",
 	}
 	for key, env := range bindings {
 		if err := v.BindEnv(key, env); err != nil {
@@ -101,6 +111,63 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, cfg.validate()
+}
+
+// LoadBroker loads the minimal config needed by the Broker service.
+// Unlike Load(), it does not require Daytona configuration.
+func LoadBroker() (*Config, error) {
+	v := viper.New()
+
+	v.SetDefault("server.port", 8081)
+	v.SetDefault("redis.addr", "redis:6379")
+
+	v.SetConfigName("config")
+	v.SetConfigType("yaml")
+	v.AddConfigPath(".")
+	v.AddConfigPath("/app")
+	_ = v.ReadInConfig()
+
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+
+	v.SetDefault("broker.monitor_interval_sec", 300)
+	v.SetDefault("broker.topup_intervals", 3)
+	v.SetDefault("broker.threshold_intervals", 2)
+
+	bindings := map[string]string{
+		"redis.addr":                    "REDIS_ADDR",
+		"redis.password":                "REDIS_PASSWORD",
+		"chain.rpc_url":                 "RPC_URL",
+		"chain.contract_address":        "SETTLEMENT_CONTRACT",
+		"chain.provider_address":        "PROVIDER_ADDRESS",
+		"chain.chain_id":                "CHAIN_ID",
+		"server.port":                   "BROKER_PORT",
+		"broker.monitor_interval_sec":   "BROKER_MONITOR_INTERVAL_SEC",
+		"broker.topup_intervals":        "BROKER_TOPUP_INTERVALS",
+		"broker.threshold_intervals":    "BROKER_THRESHOLD_INTERVALS",
+		"broker.payment_layer_url":      "PAYMENT_LAYER_URL",
+	}
+	for key, env := range bindings {
+		if err := v.BindEnv(key, env); err != nil {
+			return nil, fmt.Errorf("bind env %s: %w", env, err)
+		}
+	}
+
+	cfg := &Config{}
+	if err := v.Unmarshal(cfg); err != nil {
+		return nil, fmt.Errorf("unmarshal config: %w", err)
+	}
+
+	if cfg.Chain.RPCURL == "" {
+		return nil, fmt.Errorf("required config missing: RPC_URL")
+	}
+	if cfg.Chain.ContractAddress == "" {
+		return nil, fmt.Errorf("required config missing: SETTLEMENT_CONTRACT")
+	}
+	if cfg.Chain.ChainID == 0 {
+		return nil, fmt.Errorf("required config missing: CHAIN_ID")
+	}
+	return cfg, nil
 }
 
 func (c *Config) validate() error {

@@ -16,7 +16,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/0gfoundation/0g-sandbox-billing/internal/tee/tapp_service"
+	"github.com/0gfoundation/0g-sandbox/internal/tee/tapp_service"
 )
 
 // AppKey holds the keys returned by the TEE.

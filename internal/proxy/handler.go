@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"encoding/json"
 	"io"
 	"math/big"
@@ -19,9 +20,9 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
-	"github.com/0gfoundation/0g-sandbox-billing/internal/billing"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/chain"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/daytona"
+	"github.com/0gfoundation/0g-sandbox/internal/billing"
+	"github.com/0gfoundation/0g-sandbox/internal/chain"
+	"github.com/0gfoundation/0g-sandbox/internal/daytona"
 )
 
 // BillingHooks is satisfied by billing.EventHandler.
@@ -62,15 +63,16 @@ type Handler struct {
 	balCheck           BalanceChecker // nil = no check
 	ackCheck           AckChecker     // nil = no check
 	eventFetcher       EventFetcher   // nil = events endpoint disabled
-	minBalance         *big.Int       // minimum balance required to create a sandbox
+	minBalance         *big.Int       // minimum balance required to create/start a sandbox
 	providerAddress    string         // only this wallet may call provider-only endpoints
 	sshGatewayHost     string         // if set, replaces localhost in SSH commands
 	computePricePerSec *big.Int
 	rdb                *redis.Client
+	broker             *brokerClient // nil = broker integration disabled
 	log                *zap.Logger
 }
 
-func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, ackCheck AckChecker, eventFetcher EventFetcher, minBalance, computePricePerSec *big.Int, providerAddress, sshGatewayHost string, rdb *redis.Client, log *zap.Logger) *Handler {
+func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, ackCheck AckChecker, eventFetcher EventFetcher, minBalance, computePricePerSec *big.Int, providerAddress, sshGatewayHost string, rdb *redis.Client, log *zap.Logger, brokerURL string, teeKey *ecdsa.PrivateKey, voucherIntervalSec int64) *Handler {
 	target, _ := url.Parse(dtona.BaseURL())
 	rp := httputil.NewSingleHostReverseProxy(target)
 
@@ -82,7 +84,21 @@ func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker,
 		req.Host = target.Host
 	}
 
-	return &Handler{dtona: dtona, billing: bh, rp: rp, balCheck: balCheck, ackCheck: ackCheck, eventFetcher: eventFetcher, minBalance: minBalance, computePricePerSec: computePricePerSec, providerAddress: providerAddress, sshGatewayHost: sshGatewayHost, rdb: rdb, log: log}
+	var broker *brokerClient
+	if brokerURL != "" && teeKey != nil {
+		broker = newBrokerClient(brokerURL, teeKey, providerAddress, voucherIntervalSec, log)
+	}
+	return &Handler{dtona: dtona, billing: bh, rp: rp, balCheck: balCheck, ackCheck: ackCheck, eventFetcher: eventFetcher, minBalance: minBalance, computePricePerSec: computePricePerSec, providerAddress: providerAddress, sshGatewayHost: sshGatewayHost, rdb: rdb, broker: broker, log: log}
+}
+
+// BrokerDeregister removes a sandbox from broker monitoring. No-op if broker is disabled.
+func (h *Handler) BrokerDeregister(ctx context.Context, sandboxID string) {
+	if h.broker == nil {
+		return
+	}
+	if err := h.broker.deregisterSession(ctx, sandboxID); err != nil {
+		h.log.Warn("broker deregister (archive)", zap.String("id", sandboxID), zap.Error(err))
+	}
 }
 
 // Register mounts all routes. authMiddleware should already be applied to the group.
@@ -132,6 +148,29 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 func (h *Handler) handleCreate(c *gin.Context) {
 	wallet := c.GetString("wallet_address")
 
+	// Read body early so we can extract cpu/mem for the broker top-up call
+	// and then pass the (possibly modified) body to InjectOwner.
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "read body"})
+		return
+	}
+	reqCPU, reqMemGB := extractResources(body)
+
+	// Pre-check: reject if user has not acknowledged the TEE signer.
+	if h.ackCheck != nil {
+		acked, err := h.ackCheck.IsAcknowledged(c.Request.Context(), common.HexToAddress(wallet))
+		if err != nil {
+			h.log.Error("ack check", zap.String("wallet", wallet), zap.Error(err))
+			c.JSON(http.StatusBadGateway, gin.H{"error": "acknowledgement check failed"})
+			return
+		}
+		if !acked {
+			c.JSON(http.StatusPaymentRequired, gin.H{"error": "TEE signer not acknowledged"})
+			return
+		}
+	}
+
 	// Pre-check: reject if on-chain balance is below the minimum required.
 	if h.balCheck != nil && h.minBalance != nil {
 		balance, err := h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
@@ -139,6 +178,21 @@ func (h *Handler) handleCreate(c *gin.Context) {
 			h.log.Error("balance check", zap.String("wallet", wallet), zap.Error(err))
 			c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
 			return
+		}
+		if balance.Cmp(h.minBalance) < 0 && h.broker != nil {
+			// Ask the broker to top up the user's balance (funding-only call:
+			// sandbox_id="" means no monitoring session is registered yet).
+			if berr := h.broker.registerSession(c.Request.Context(), "", wallet, int64(reqCPU), int64(reqMemGB)); berr != nil {
+				h.log.Warn("broker pre-create fund", zap.String("wallet", wallet), zap.Error(berr))
+			} else {
+				// Re-read balance after top-up.
+				balance, err = h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
+				if err != nil {
+					h.log.Error("balance re-check", zap.String("wallet", wallet), zap.Error(err))
+					c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
+					return
+				}
+			}
 		}
 		if balance.Cmp(h.minBalance) < 0 {
 			c.JSON(http.StatusPaymentRequired, gin.H{
@@ -148,12 +202,6 @@ func (h *Handler) handleCreate(c *gin.Context) {
 			})
 			return
 		}
-	}
-
-	body, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "read body"})
-		return
 	}
 
 	modified, err := InjectOwner(body, wallet)
@@ -191,7 +239,17 @@ func (h *Handler) handleCreate(c *gin.Context) {
 	if result.StatusCode >= 200 && result.StatusCode < 300 {
 		if id := extractID(upstream.Body.Bytes()); id != "" {
 			cpu, memGB := extractResources(upstream.Body.Bytes())
-			go h.billing.OnCreate(context.WithoutCancel(c.Request.Context()), id, wallet, cpu, memGB)
+			go func() {
+				ctx := context.WithoutCancel(c.Request.Context())
+				// Register the real sandbox ID with the broker for ongoing
+				// balance monitoring.
+				if h.broker != nil {
+					if berr := h.broker.registerSession(ctx, id, wallet, int64(cpu), int64(memGB)); berr != nil {
+						h.log.Warn("broker post-create register", zap.String("id", id), zap.Error(berr))
+					}
+				}
+				h.billing.OnCreate(ctx, id, wallet, cpu, memGB)
+			}()
 		}
 	}
 }
@@ -218,6 +276,44 @@ func (h *Handler) handleStart(c *gin.Context) {
 		}
 	}
 
+	// Pre-check: reject if on-chain balance is below the minimum required.
+	// For restarts the sandbox ID is already known, so we can register a full
+	// monitoring session with the broker (funding + monitoring in one call).
+	if h.balCheck != nil && h.minBalance != nil {
+		balance, err := h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
+		if err != nil {
+			h.log.Error("balance check (start)", zap.String("wallet", wallet), zap.Error(err))
+			c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
+			return
+		}
+		if balance.Cmp(h.minBalance) < 0 && h.broker != nil {
+			// Fetch the sandbox's resource spec so the broker can compute the
+			// correct top-up amount.
+			cpu, memGB := 0, 0
+			if sb, err := h.dtona.GetSandbox(c.Request.Context(), id); err == nil {
+				cpu, memGB = sb.CPU, sb.Memory
+			}
+			if berr := h.broker.registerSession(c.Request.Context(), id, wallet, int64(cpu), int64(memGB)); berr != nil {
+				h.log.Warn("broker pre-start fund", zap.String("id", id), zap.Error(berr))
+			} else {
+				balance, err = h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
+				if err != nil {
+					h.log.Error("balance re-check (start)", zap.String("wallet", wallet), zap.Error(err))
+					c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
+					return
+				}
+			}
+		}
+		if balance.Cmp(h.minBalance) < 0 {
+			c.JSON(http.StatusPaymentRequired, gin.H{
+				"error":    "insufficient balance",
+				"balance":  balance.String(),
+				"required": h.minBalance.String(),
+			})
+			return
+		}
+	}
+
 	h.rp.ServeHTTP(safeWriter{c.Writer}, c.Request)
 	if c.Writer.Status() >= 200 && c.Writer.Status() < 300 {
 		go func() {
@@ -235,7 +331,15 @@ func (h *Handler) handleStop(c *gin.Context) {
 	id := c.Param("id")
 	h.rp.ServeHTTP(safeWriter{c.Writer}, c.Request)
 	if c.Writer.Status() >= 200 && c.Writer.Status() < 300 {
-		go h.billing.OnStop(context.WithoutCancel(c.Request.Context()), id)
+		ctx := context.WithoutCancel(c.Request.Context())
+		go h.billing.OnStop(ctx, id)
+		if h.broker != nil {
+			go func() {
+				if berr := h.broker.deregisterSession(ctx, id); berr != nil {
+					h.log.Warn("broker deregister (stop)", zap.String("id", id), zap.Error(berr))
+				}
+			}()
+		}
 	}
 }
 
@@ -243,7 +347,15 @@ func (h *Handler) handleDelete(c *gin.Context) {
 	id := c.Param("id")
 	h.rp.ServeHTTP(safeWriter{c.Writer}, c.Request)
 	if c.Writer.Status() >= 200 && c.Writer.Status() < 300 {
-		go h.billing.OnDelete(context.WithoutCancel(c.Request.Context()), id)
+		ctx := context.WithoutCancel(c.Request.Context())
+		go h.billing.OnDelete(ctx, id)
+		if h.broker != nil {
+			go func() {
+				if berr := h.broker.deregisterSession(ctx, id); berr != nil {
+					h.log.Warn("broker deregister (delete)", zap.String("id", id), zap.Error(berr))
+				}
+			}()
+		}
 	}
 }
 

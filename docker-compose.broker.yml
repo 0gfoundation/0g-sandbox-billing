@@ -1,0 +1,57 @@
+services:
+
+  # ── Broker ────────────────────────────────────────────────────────────────────
+  broker:
+    image: 0g-broker:dev
+    pull_policy: never
+    ports:
+      - "${BROKER_PORT:-8081}:8081"
+    environment:
+      # Chain
+      RPC_URL:              ${RPC_URL:-https://evmrpc-testnet.0g.ai}
+      CHAIN_ID:             ${CHAIN_ID:-16602}
+      SETTLEMENT_CONTRACT:  ${SETTLEMENT_CONTRACT}
+      PROVIDER_ADDRESS:     ${PROVIDER_ADDRESS:-}
+      # Redis (broker-only instance)
+      REDIS_ADDR:           broker-redis:6379
+      REDIS_PASSWORD:       ${BROKER_REDIS_PASSWORD:-}
+      # TEE key — fetched from tapp-daemon via gRPC
+      BACKEND_TAPP_IP:      ${BACKEND_TAPP_IP:-127.0.0.1}
+      BACKEND_TAPP_PORT:    ${BACKEND_TAPP_PORT:-50051}
+      BACKEND_APP_NAME:     ${BACKEND_APP_NAME:-0g-broker}
+      MOCK_TEE:             ${MOCK_TEE:-}
+      MOCK_APP_PRIVATE_KEY: ${MOCK_APP_PRIVATE_KEY:-}
+      # Balance monitor tuning
+      BROKER_PORT:          8081
+      BROKER_MONITOR_INTERVAL_SEC: ${BROKER_MONITOR_INTERVAL_SEC:-300}
+      BROKER_TOPUP_INTERVALS:      ${BROKER_TOPUP_INTERVALS:-3}
+      BROKER_THRESHOLD_INTERVALS:  ${BROKER_THRESHOLD_INTERVALS:-2}
+      # Payment layer — empty = noop (log-only, top-up manually)
+      PAYMENT_LAYER_URL:    ${PAYMENT_LAYER_URL:-}
+      # Debug: expose GET /api/monitor
+      BROKER_DEBUG:         ${BROKER_DEBUG:-false}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./.env:/app/.env:ro   # tapp-cli uploads .env for compose variable substitution
+    depends_on:
+      broker-redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Broker Redis ───────────────────────────────────────────────────────────────
+  broker-redis:
+    image: redis@sha256:8b81dd37ff027bec4e516d41acfbe9fe2460070dc6d4a4570a2ac5b9d59df065
+    volumes:
+      - broker_redis_data:/data
+    command: >
+      redis-server --appendonly yes --requirepass "${BROKER_REDIS_PASSWORD:-}"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${BROKER_REDIS_PASSWORD:-}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  broker_redis_data:

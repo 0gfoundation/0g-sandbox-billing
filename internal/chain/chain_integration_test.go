@@ -25,8 +25,8 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient/simulated"
 
-	"github.com/0gfoundation/0g-sandbox-billing/internal/chain"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/voucher"
+	"github.com/0gfoundation/0g-sandbox/internal/chain"
+	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 )
 
 // ── test keys (Anvil default accounts) ────────────────────────────────────────

@@ -1,27 +1,39 @@
+//go:build e2e
+
 package main
 
-// Component tests for the billing pipeline.
+// E2E tests exercise the complete billing pipeline against real external
+// services: live Daytona, real Redis, and the 0G Galileo testnet.
 //
-// These tests wire up the full billing stack (auth → proxy → billing → settler)
-// but replace external dependencies with lightweight in-process fakes:
-//   - Chain:   go-ethereum simulated backend (deterministic, no network)
-//   - Daytona: httptest.Server mock
-//   - Redis:   miniredis (in-process)
+// TestMain starts the full server (proxy + settler + generator) once and keeps
+// it running across all TestE2E_* functions.  Each test only exercises one
+// scenario; the shared infrastructure is never restarted between tests.
 //
-// Tests skip gracefully when compiled contract artifacts are absent
-// (run `make build-contracts` to produce contracts/out/).
+// Prerequisites:
 //
-//  1. TestComponent_HappyPath
-//     Signed POST /sandbox → mock Daytona creates sandbox → billing enqueues
-//     create-fee voucher → settler settles on simulated chain → lastNonce == 1.
+//	MOCK_TEE=true
+//	MOCK_APP_PRIVATE_KEY=0x<key>    TEE key = provider key = user wallet
+//	MOCK_APP_ETH_ADDRESS=0x<addr>   (optional; derived from key if absent)
+//	REDIS_ADDR                      (optional; default localhost:6379)
+//	REDIS_PASSWORD                  (optional)
+//	INTEGRATION_RPC_URL             (optional; default https://evmrpc-testnet.0g.ai)
+//	INTEGRATION_CONTRACT            (optional; default 0x24cD979DBd0Ae924a3f0c832a724CF4C58E5C210)
+//	INTEGRATION_DAYTONA_URL         (optional; default http://localhost:3000)
+//	INTEGRATION_DAYTONA_KEY         (optional; default daytona_admin_key)
+//	INTEGRATION_USER_KEY            (optional; defaults to MOCK_APP_PRIVATE_KEY)
+//	INTEGRATION_VOUCHER_INTERVAL_SEC (optional; default 5 seconds)
+//	INTEGRATION_CREATE_FEE           (optional; default 1 neuron)
+//	INTEGRATION_COMPUTE_PRICE        (optional; default 1 neuron/sec)
 //
-//  2. TestComponent_InsufficientBalance
-//     User has no balance → settler gets StatusInsufficientBalance →
-//     runStopHandler stops sandbox → Redis stop key cleaned up.
+// Before running:
+//  1. The account must have deposited into the contract.
+//  2. The account must have acknowledged itself as the TEE signer.
 //
-//  3. TestComponent_OwnershipFiltering
-//     Proxy injects daytona-owner label → list filtered by caller →
-//     cross-owner GET returns 403.
+// Run with:
+//
+//	MOCK_TEE=true \
+//	MOCK_APP_PRIVATE_KEY=0x<key> \
+//	go test -v -tags e2e ./cmd/billing/ -run TestE2E -timeout 10m
 
 import (
 	"context"
@@ -35,295 +47,229 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
-	"runtime"
+	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/alicebob/miniredis/v2"
-	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethclient/simulated"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
-	"github.com/0gfoundation/0g-sandbox-billing/internal/auth"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/billing"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/chain"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/config"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/daytona"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/proxy"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/settler"
-	"github.com/0gfoundation/0g-sandbox-billing/internal/voucher"
+	"github.com/0gfoundation/0g-sandbox/internal/auth"
+	"github.com/0gfoundation/0g-sandbox/internal/billing"
+	"github.com/0gfoundation/0g-sandbox/internal/chain"
+	"github.com/0gfoundation/0g-sandbox/internal/config"
+	"github.com/0gfoundation/0g-sandbox/internal/daytona"
+	"github.com/0gfoundation/0g-sandbox/internal/proxy"
+	"github.com/0gfoundation/0g-sandbox/internal/settler"
+	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 )
 
-// ── test keys (Anvil defaults) ────────────────────────────────────────────────
+// ── Shared E2E environment ────────────────────────────────────────────────────
 
-var (
-	e2eProviderKeyHex = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-	e2eUserKeyHex     = "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
-	e2eChainID        = big.NewInt(1337)
-)
-
-// ── e2eFixture: simulated chain with deployed SandboxServing beacon-proxy ─────
-
-type e2eFixture struct {
-	backend      *simulated.Backend
-	simClient    simulated.Client
-	contract     *chain.SandboxServing
-	proxyAddr    common.Address
-	providerAddr common.Address
-	userAddr     common.Address
-	providerKey  *ecdsa.PrivateKey
-	userKey      *ecdsa.PrivateKey
-	providerAuth *bind.TransactOpts
-	userAuth     *bind.TransactOpts
+type e2eEnv struct {
+	srv             *httptest.Server
+	rdb             *redis.Client
+	onchain         *chain.Client
+	providerAddr    common.Address
+	userKeyHex      string
+	userAddr        common.Address
+	queueKey        string
+	voucherInterval time.Duration     // how often the generator fires
+	cancel          context.CancelFunc // stops settler + generator
+	cfg             *config.Config
+	mainPrivKey     *ecdsa.PrivateKey // TEE/provider key; used to fund ephemeral accounts
+	createFee       *big.Int
+	computePrice    *big.Int
 }
 
-// deployE2EFixture deploys the full beacon-proxy stack on a simulated chain.
-// It registers the provider service but does NOT deposit or acknowledge TEE
-// signer for the user — tests control that to exercise different scenarios.
-func deployE2EFixture(t *testing.T) *e2eFixture {
-	t.Helper()
+var globalE2E *e2eEnv
 
-	providerKey, _ := crypto.HexToECDSA(e2eProviderKeyHex)
-	userKey, _ := crypto.HexToECDSA(e2eUserKeyHex)
-	providerAddr := crypto.PubkeyToAddress(providerKey.PublicKey)
-	userAddr := crypto.PubkeyToAddress(userKey.PublicKey)
-
-	balance, _ := new(big.Int).SetString("1000000000000000000000", 10) // 1000 0G
-	alloc := types.GenesisAlloc{
-		providerAddr: {Balance: balance},
-		userAddr:     {Balance: balance},
-	}
-	backend := simulated.NewBackend(alloc, simulated.WithBlockGasLimit(30_000_000))
-	t.Cleanup(func() { backend.Close() })
-	simClient := backend.Client()
-
-	providerAuth, _ := bind.NewKeyedTransactorWithChainID(providerKey, e2eChainID)
-	userAuth, _ := bind.NewKeyedTransactorWithChainID(userKey, e2eChainID)
-
-	// Deploy SandboxServing implementation
-	implBytecode, implABI := e2eLoadArtifact(t,
-		"contracts/out/SandboxServing.sol/SandboxServing.json",
-		chain.SandboxServingMetaData.ABI)
-	providerAuth.GasLimit = 5_000_000
-	implAddr, _, _, err := bind.DeployContract(providerAuth, implABI, implBytecode, simClient)
-	if err != nil {
-		t.Fatalf("deploy impl: %v", err)
-	}
-	backend.Commit()
-
-	// Deploy UpgradeableBeacon(impl, providerAddr)
-	beaconBytecode, beaconABI := e2eLoadArtifact(t,
-		"contracts/out/UpgradeableBeacon.sol/UpgradeableBeacon.json",
-		chain.UpgradeableBeaconMetaData.ABI)
-	providerAuth.GasLimit = 3_000_000
-	beaconAddr, _, _, err := bind.DeployContract(providerAuth, beaconABI, beaconBytecode, simClient,
-		implAddr, providerAddr)
-	if err != nil {
-		t.Fatalf("deploy beacon: %v", err)
-	}
-	backend.Commit()
-
-	// Deploy BeaconProxy(beacon, initialize(0))
-	proxyBytecode, proxyCtorABI := e2eLoadArtifact(t,
-		"contracts/out/BeaconProxy.sol/BeaconProxy.json",
-		`[{"type":"constructor","inputs":[{"name":"beacon","type":"address"},{"name":"data","type":"bytes"}],"stateMutability":"payable"}]`)
-	initCalldata, _ := implABI.Pack("initialize", big.NewInt(0))
-	providerAuth.GasLimit = 5_000_000
-	proxyAddr, _, _, err := bind.DeployContract(providerAuth, proxyCtorABI, proxyBytecode, simClient,
-		beaconAddr, initCalldata)
-	if err != nil {
-		t.Fatalf("deploy proxy: %v", err)
-	}
-	backend.Commit()
-	providerAuth.GasLimit = 0
-
-	contract, err := chain.NewSandboxServing(proxyAddr, simClient)
-	if err != nil {
-		t.Fatalf("bind contract: %v", err)
-	}
-
-	// Register service (TEE signer == providerAddr, 100 neuron/CPU/min, 0 mem fee, no create fee)
-	_, err = contract.AddOrUpdateService(providerAuth, "https://provider.test",
-		providerAddr, big.NewInt(100), big.NewInt(0), big.NewInt(0))
-	if err != nil {
-		t.Fatalf("addOrUpdateService: %v", err)
-	}
-	backend.Commit()
-
-	return &e2eFixture{
-		backend:      backend,
-		simClient:    simClient,
-		contract:     contract,
-		proxyAddr:    proxyAddr,
-		providerAddr: providerAddr,
-		userAddr:     userAddr,
-		providerKey:  providerKey,
-		userKey:      userKey,
-		providerAuth: providerAuth,
-		userAuth:     userAuth,
-	}
-}
-
-// ── simChainClient: settler.ChainClient backed by simulated EVM ───────────────
-
-type simChainClient struct {
-	contract     *chain.SandboxServing
-	providerAuth *bind.TransactOpts
-	simClient    simulated.Client
-	backend      *simulated.Backend
-}
-
-// SettleFeesWithTEE submits the vouchers to the simulated chain.
-// Statuses are read via PreviewSettlementResults BEFORE the tx so they are
-// accurate for all outcomes (success, insufficient balance, etc.).
-func (c *simChainClient) SettleFeesWithTEE(ctx context.Context, vs []voucher.SandboxVoucher) ([]chain.SettlementStatus, error) {
-	cvs := make([]chain.SandboxServingSandboxVoucher, len(vs))
-	for i, v := range vs {
-		cvs[i] = chain.SandboxServingSandboxVoucher{
-			User: v.User, Provider: v.Provider,
-			TotalFee: v.TotalFee, UsageHash: v.UsageHash,
-			Nonce: v.Nonce, Signature: v.Signature,
+// TestMain starts the shared E2E environment once for all tests.
+// If MOCK_APP_PRIVATE_KEY is absent or any dependency is unreachable,
+// globalE2E is left nil and every TestE2E_* skips automatically.
+// Component tests (which wire their own mock server) are unaffected.
+func TestMain(m *testing.M) {
+	if key := strings.TrimPrefix(os.Getenv("MOCK_APP_PRIVATE_KEY"), "0x"); key != "" {
+		env, err := setupE2E(key)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[E2E] setup skipped: %v\n", err)
+		} else {
+			globalE2E = env
 		}
 	}
-
-	// Preview statuses before the tx; From must equal voucher.Provider.
-	previewOpts := &bind.CallOpts{Context: ctx, From: c.providerAuth.From}
-	rawStatuses, err := c.contract.PreviewSettlementResults(previewOpts, cvs)
-	if err != nil {
-		return nil, fmt.Errorf("preview statuses: %w", err)
+	code := m.Run()
+	if globalE2E != nil {
+		globalE2E.cancel()
+		globalE2E.srv.Close()
 	}
-
-	// Submit tx and mine a block.
-	opts := *c.providerAuth
-	opts.Context = ctx
-	tx, err := c.contract.SettleFeesWithTEE(&opts, cvs)
-	if err != nil {
-		return nil, fmt.Errorf("SettleFeesWithTEE tx: %w", err)
-	}
-	c.backend.Commit()
-
-	receipt, err := c.simClient.TransactionReceipt(ctx, tx.Hash())
-	if err != nil {
-		return nil, fmt.Errorf("get receipt: %w", err)
-	}
-	if receipt.Status == 0 {
-		return nil, fmt.Errorf("settlement tx reverted")
-	}
-
-	statuses := make([]chain.SettlementStatus, len(rawStatuses))
-	for i, s := range rawStatuses {
-		statuses[i] = chain.SettlementStatus(s)
-	}
-	return statuses, nil
+	os.Exit(code)
 }
 
-// ── e2eMockDaytona: records creates and stops ─────────────────────────────────
+func setupE2E(teeKeyHex string) (*e2eEnv, error) {
+	const (
+		defaultRPC      = "https://evmrpc-testnet.0g.ai"
+		defaultContract = "0x24cD979DBd0Ae924a3f0c832a724CF4C58E5C210"
+		defaultDaytona  = "http://localhost:3000"
+		defaultDayKey   = "daytona_admin_key"
+		defaultRedis    = "localhost:6379"
+		chainIDVal      = int64(16602)
+	)
 
-type e2eMockDaytona struct {
-	mu      sync.Mutex
-	created []string // sandbox IDs returned by POST /api/sandbox
-	stopped []string // sandbox IDs stopped by POST /api/sandbox/:id/stop
-	srv     *httptest.Server
+	rpcURL := envOrDefault("INTEGRATION_RPC_URL", defaultRPC)
+	contractAddr := envOrDefault("INTEGRATION_CONTRACT", defaultContract)
+	daytonaURL := envOrDefault("INTEGRATION_DAYTONA_URL", defaultDaytona)
+	daytonaKey := envOrDefault("INTEGRATION_DAYTONA_KEY", defaultDayKey)
+	redisAddr := envOrDefault("REDIS_ADDR", defaultRedis)
+	redisPassword := os.Getenv("REDIS_PASSWORD")
+	userKeyHex := strings.TrimPrefix(envOrDefault("INTEGRATION_USER_KEY", teeKeyHex), "0x")
+	createFeeStr := envOrDefault("INTEGRATION_CREATE_FEE", "1")
+	computePriceStr := envOrDefault("INTEGRATION_COMPUTE_PRICE", "1")
+	voucherIntervalSec, err := strconv.ParseInt(envOrDefault("INTEGRATION_VOUCHER_INTERVAL_SEC", "5"), 10, 64)
+	if err != nil || voucherIntervalSec < 1 {
+		return nil, fmt.Errorf("invalid INTEGRATION_VOUCHER_INTERVAL_SEC: must be a positive integer")
+	}
+
+	if !daytonaReachable(daytonaURL, daytonaKey) {
+		return nil, fmt.Errorf("Daytona not reachable at %s", daytonaURL)
+	}
+
+	teePrivKey, err := crypto.HexToECDSA(teeKeyHex)
+	if err != nil {
+		return nil, fmt.Errorf("parse MOCK_APP_PRIVATE_KEY: %w", err)
+	}
+	providerAddr := crypto.PubkeyToAddress(teePrivKey.PublicKey)
+
+	userPrivKey, err := crypto.HexToECDSA(userKeyHex)
+	if err != nil {
+		return nil, fmt.Errorf("parse user key: %w", err)
+	}
+	userAddr := crypto.PubkeyToAddress(userPrivKey.PublicKey)
+
+	// Redis
+	rdb := redis.NewClient(&redis.Options{Addr: redisAddr, Password: redisPassword})
+	if err := rdb.Ping(context.Background()).Err(); err != nil {
+		return nil, fmt.Errorf("Redis not reachable at %s: %w", redisAddr, err)
+	}
+
+	// Flush stale billing sessions left by previous interrupted runs.
+	// Without this, the generator keeps billing orphaned sessions indefinitely
+	// (they never auto-stop because the main account always has sufficient balance).
+	if keys, err := rdb.Keys(context.Background(), "billing:compute:*").Result(); err == nil && len(keys) > 0 {
+		rdb.Del(context.Background(), keys...)
+	}
+
+	// Chain client
+	cfg := &config.Config{
+		Chain: config.ChainConfig{
+			RPCURL:          rpcURL,
+			ContractAddress: contractAddr,
+			TEEPrivateKey:   teeKeyHex,
+			ProviderAddress: providerAddr.Hex(),
+			ChainID:         chainIDVal,
+		},
+		Billing: config.BillingConfig{VoucherIntervalSec: voucherIntervalSec, ComputePricePerSec: computePriceStr, CreateFee: createFeeStr},
+		Daytona: config.DaytonaConfig{APIURL: daytonaURL, AdminKey: daytonaKey},
+		Redis:   config.RedisConfig{Addr: redisAddr, Password: redisPassword},
+	}
+	onchain, err := chain.NewClient(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("chain client: %w", err)
+	}
+
+	// Billing components
+	createFee, ok := new(big.Int).SetString(createFeeStr, 10)
+	if !ok {
+		return nil, fmt.Errorf("invalid INTEGRATION_CREATE_FEE: %s", createFeeStr)
+	}
+	computePrice, ok := new(big.Int).SetString(computePriceStr, 10)
+	if !ok {
+		return nil, fmt.Errorf("invalid INTEGRATION_COMPUTE_PRICE: %s", computePriceStr)
+	}
+	signer := billing.NewSigner(
+		onchain.PrivateKey(),
+		big.NewInt(chainIDVal),
+		common.HexToAddress(contractAddr),
+		providerAddr,
+		rdb,
+		onchain,
+		zap.NewNop(),
+	)
+	bh := billing.NewEventHandler(rdb, providerAddr.Hex(), computePrice, createFee, signer, zap.NewNop())
+
+	// Proxy server
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	dtona := daytona.NewClient(daytonaURL, daytonaKey)
+	minBalance := new(big.Int).Add(createFee, new(big.Int).Mul(computePrice, big.NewInt(cfg.Billing.VoucherIntervalSec)))
+	proxy.NewHandler(dtona, bh, onchain, onchain, onchain, minBalance, computePrice, providerAddr.Hex(), "", rdb, zap.NewNop(), "", nil, 0).Register(r.Group("/api", auth.Middleware(rdb)))
+	srv := httptest.NewServer(r)
+
+	// Settler + generator (run for the lifetime of the test suite)
+	bgCtx, cancel := context.WithCancel(context.Background())
+	stopCh := make(chan settler.StopSignal, 100)
+	go settler.Run(bgCtx, cfg, rdb, onchain, stopCh, zap.NewNop())
+	go billing.RunGenerator(bgCtx, cfg, rdb, signer, zap.NewNop())
+	go runStopHandler(bgCtx, stopCh, dtona, rdb, zap.NewNop(), nil)
+
+	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, providerAddr.Hex())
+
+	fmt.Printf("[E2E] provider:       %s\n", providerAddr.Hex())
+	fmt.Printf("[E2E] user:           %s\n", userAddr.Hex())
+	fmt.Printf("[E2E] proxy:          %s\n", srv.URL)
+	fmt.Printf("[E2E] contract:       %s\n", contractAddr)
+	fmt.Printf("[E2E] create fee:     %s neuron\n", createFeeStr)
+	fmt.Printf("[E2E] compute price:  %s neuron/sec\n", computePriceStr)
+
+	return &e2eEnv{
+		srv:             srv,
+		rdb:             rdb,
+		onchain:         onchain,
+		providerAddr:    providerAddr,
+		userKeyHex:      userKeyHex,
+		userAddr:        userAddr,
+		queueKey:        queueKey,
+		voucherInterval: time.Duration(cfg.Billing.VoucherIntervalSec) * time.Second,
+		cancel:          cancel,
+		cfg:             cfg,
+		mainPrivKey:     teePrivKey,
+		createFee:       createFee,
+		computePrice:    computePrice,
+	}, nil
 }
 
-func newE2EMockDaytona(t *testing.T) *e2eMockDaytona {
+// ── E2E helpers ───────────────────────────────────────────────────────────────
+
+// e2eSkip skips t if the E2E environment is not available.
+func e2eSkip(t *testing.T) {
 	t.Helper()
-	m := &e2eMockDaytona{}
-	m.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path, method := r.URL.Path, r.Method
-
-		// POST /api/sandbox → create sandbox, return new ID
-		if method == http.MethodPost && path == "/api/sandbox" {
-			m.mu.Lock()
-			id := fmt.Sprintf("sb-e2e-%d", len(m.created)+1)
-			m.created = append(m.created, id)
-			m.mu.Unlock()
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusCreated)
-			fmt.Fprintf(w, `{"id":%q}`, id)
-			return
-		}
-
-		// POST /api/sandbox/:id/stop → stop sandbox
-		if method == http.MethodPost && strings.HasSuffix(path, "/stop") {
-			// path = /api/sandbox/:id/stop → split gives ["api","sandbox",id,"stop"]
-			parts := strings.Split(strings.Trim(path, "/"), "/")
-			if len(parts) == 4 && parts[0] == "api" && parts[1] == "sandbox" {
-				m.mu.Lock()
-				m.stopped = append(m.stopped, parts[2])
-				m.mu.Unlock()
-			}
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	t.Cleanup(m.srv.Close)
-	return m
+	if globalE2E == nil {
+		t.Skip("E2E environment not set up — set MOCK_APP_PRIVATE_KEY to enable")
+	}
 }
 
-func (m *e2eMockDaytona) createdIDs() []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := make([]string, len(m.created))
-	copy(out, m.created)
-	return out
+// e2eRequest builds an authenticated request to the proxy server.
+func (e *e2eEnv) e2eRequest(ctx context.Context, method, path string, body io.Reader) *http.Request {
+	req, _ := http.NewRequestWithContext(ctx, method, e.srv.URL+path, body)
+	wa, mb, sh := e2eSignedHeadersRaw(e.userKeyHex)
+	req.Header.Set("X-Wallet-Address", wa)
+	req.Header.Set("X-Signed-Message", mb)
+	req.Header.Set("X-Wallet-Signature", sh)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return req
 }
 
-func (m *e2eMockDaytona) stoppedIDs() []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := make([]string, len(m.stopped))
-	copy(out, m.stopped)
-	return out
-}
-
-// ── shared helpers ────────────────────────────────────────────────────────────
-
-// e2eLoadArtifact reads a Foundry JSON artifact. Skips the test if not found.
-func e2eLoadArtifact(t *testing.T, relPath, abiStr string) ([]byte, abi.ABI) {
-	t.Helper()
-	_, thisFile, _, _ := runtime.Caller(0)
-	fullPath := filepath.Join(filepath.Dir(thisFile), "..", "..", relPath)
-	raw, err := os.ReadFile(fullPath)
-	if err != nil {
-		t.Skipf("artifact not found (run `make build-contracts`): %v", err)
-	}
-	var artifact struct {
-		Bytecode struct{ Object string `json:"object"` } `json:"bytecode"`
-	}
-	if err := json.Unmarshal(raw, &artifact); err != nil {
-		t.Fatalf("parse artifact %s: %v", relPath, err)
-	}
-	hexStr := strings.TrimPrefix(artifact.Bytecode.Object, "0x")
-	bytecode, err := hex.DecodeString(hexStr)
-	if err != nil {
-		t.Fatalf("decode bytecode %s: %v", relPath, err)
-	}
-	parsedABI, err := abi.JSON(strings.NewReader(abiStr))
-	if err != nil {
-		t.Fatalf("parse ABI %s: %v", relPath, err)
-	}
-	return bytecode, parsedABI
-}
-
-// e2eSignedHeaders builds EIP-191 auth headers for the given private key.
-func e2eSignedHeaders(t *testing.T, privKeyHex string) (walletAddr, msgB64, sigHex string) {
-	t.Helper()
-	privKey, err := crypto.HexToECDSA(privKeyHex)
-	if err != nil {
-		t.Fatalf("parse private key: %v", err)
-	}
+// e2eSignedHeadersRaw builds EIP-191 auth headers without requiring *testing.T.
+func e2eSignedHeadersRaw(privKeyHex string) (walletAddr, msgB64, sigHex string) {
+	privKey, _ := crypto.HexToECDSA(privKeyHex)
 	walletAddr = crypto.PubkeyToAddress(privKey.PublicKey).Hex()
 	req := auth.SignedRequest{
 		Action:    "create",
@@ -332,475 +278,393 @@ func e2eSignedHeaders(t *testing.T, privKeyHex string) (walletAddr, msgB64, sigH
 	}
 	msgBytes, _ := json.Marshal(req)
 	hash := auth.HashMessage(msgBytes)
-	sig, err := crypto.Sign(hash, privKey)
-	if err != nil {
-		t.Fatalf("sign: %v", err)
-	}
-	sig[64] += 27 // normalize V to Ethereum convention (27/28)
+	sig, _ := crypto.Sign(hash, privKey)
+	sig[64] += 27
 	return walletAddr,
 		base64.StdEncoding.EncodeToString(msgBytes),
 		"0x" + hex.EncodeToString(sig)
 }
 
-// waitFor polls f() until it returns true or timeout elapses.
-func waitFor(t *testing.T, desc string, timeout time.Duration, f func() bool) {
+// e2eCreate creates a sandbox via the proxy and returns its ID.
+func (e *e2eEnv) e2eCreate(t *testing.T, ctx context.Context) string {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if f() {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for: %s", desc)
-}
-
-// buildServer wires up the full gin HTTP server (auth + proxy handler).
-func buildServer(t *testing.T, dtona *daytona.Client, bh proxy.BillingHooks, rdb *redis.Client) *httptest.Server {
-	t.Helper()
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	api := r.Group("/api", auth.Middleware(rdb))
-	proxy.NewHandler(dtona, bh, nil, nil, nil, big.NewInt(0), big.NewInt(0), "", rdb, zap.NewNop()).Register(api)
-	srv := httptest.NewServer(r)
-	t.Cleanup(srv.Close)
-	return srv
-}
-
-// postSandbox sends an authenticated POST /api/sandbox to srv and asserts 201.
-func postSandbox(t *testing.T, ctx context.Context, srvURL, privKeyHex string) {
-	t.Helper()
-	walletAddr, msgB64, sigHex := e2eSignedHeaders(t, privKeyHex)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		srvURL+"/api/sandbox", strings.NewReader(`{}`))
-	if err != nil {
-		t.Fatalf("build request: %v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Wallet-Address", walletAddr)
-	req.Header.Set("X-Signed-Message", msgB64)
-	req.Header.Set("X-Wallet-Signature", sigHex)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("POST /api/sandbox: %v", err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("POST /api/sandbox: got HTTP %d, want 201", resp.StatusCode)
-	}
-}
-
-// e2eNonceReader satisfies billing.NonceReader via the simulated chain.
-type e2eNonceReader struct{ contract *chain.SandboxServing }
-
-func (r *e2eNonceReader) GetLastNonce(ctx context.Context, user, provider common.Address) (*big.Int, error) {
-	return r.contract.GetLastNonce(&bind.CallOpts{Context: ctx}, user, provider)
-}
-
-// ── Test 1: happy path ────────────────────────────────────────────────────────
-
-// TestComponent_HappyPath exercises the full happy-path flow on a simulated chain:
-//
-//  1. POST /api/sandbox → Daytona mock receives create request, returns sandbox ID.
-//  2. billing.OnCreate enqueues a create-fee voucher into Redis.
-//  3. settler.Run settles the voucher on-chain.
-//  4. On-chain lastNonce advances to 1.
-func TestComponent_HappyPath(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	fix := deployE2EFixture(t)
-
-	// User deposits 10 0G for the provider and acknowledges the TEE signer.
-	fix.userAuth.Value, _ = new(big.Int).SetString("10000000000000000000", 10)
-	if _, err := fix.contract.Deposit(fix.userAuth, fix.userAddr, fix.providerAddr); err != nil {
-		t.Fatalf("deposit: %v", err)
-	}
-	fix.backend.Commit()
-	fix.userAuth.Value = big.NewInt(0)
-
-	if _, err := fix.contract.AcknowledgeTEESigner(fix.userAuth, fix.providerAddr, true); err != nil {
-		t.Fatalf("acknowledgeTEESigner: %v", err)
-	}
-	fix.backend.Commit()
-
-	// Redis + Daytona mock
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	mock := newE2EMockDaytona(t)
-	dtona := daytona.NewClient(mock.srv.URL, "test-key")
-
-	// Billing: createFee=100 neuron so OnCreate enqueues a non-trivial voucher.
-	signer := billing.NewSigner(fix.providerKey, e2eChainID, fix.proxyAddr, fix.providerAddr,
-		rdb, &e2eNonceReader{fix.contract}, zap.NewNop())
-	bh := billing.NewEventHandler(rdb, fix.providerAddr.Hex(),
-		big.NewInt(0), big.NewInt(100), new(big.Int), new(big.Int), signer, zap.NewNop())
-
-	srv := buildServer(t, dtona, bh, rdb)
-
-	// ── 1. POST /sandbox ──────────────────────────────────────────────────────
-	postSandbox(t, ctx, srv.URL, e2eUserKeyHex)
-
-	// ── Assert: Daytona received the create request ───────────────────────────
-	waitFor(t, "Daytona create request", 3*time.Second, func() bool {
-		return len(mock.createdIDs()) == 1
-	})
-	createdID := mock.createdIDs()[0]
-	t.Logf("Daytona create confirmed: sandbox ID = %q", createdID)
-
-	// ── 2. Wait for OnCreate to enqueue the voucher ───────────────────────────
-	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, fix.providerAddr.Hex())
-	waitFor(t, "voucher in Redis queue", 3*time.Second, func() bool {
-		n, _ := rdb.LLen(ctx, queueKey).Result()
-		return n >= 1
-	})
-
-	// ── 3. Settler processes the voucher ──────────────────────────────────────
-	onchain := &simChainClient{
-		contract:     fix.contract,
-		providerAuth: fix.providerAuth,
-		simClient:    fix.simClient,
-		backend:      fix.backend,
-	}
-	stopCh := make(chan settler.StopSignal, 4)
-	cfg := &config.Config{
-		Chain:   config.ChainConfig{ProviderAddress: fix.providerAddr.Hex()},
-		Billing: config.BillingConfig{VoucherIntervalSec: 1},
-	}
-	settlerCtx, settlerCancel := context.WithCancel(ctx)
-	defer settlerCancel()
-	go settler.Run(settlerCtx, cfg, rdb, onchain, stopCh, zap.NewNop())
-
-	// ── 4. Assert: on-chain lastNonce == 1 ────────────────────────────────────
-	waitFor(t, "on-chain lastNonce == 1", 10*time.Second, func() bool {
-		n, err := fix.contract.GetLastNonce(&bind.CallOpts{}, fix.userAddr, fix.providerAddr)
-		if err != nil {
-			return false
-		}
-		return n.Int64() == 1
-	})
-	settlerCancel()
-	t.Logf("Settlement confirmed: lastNonce(user=%s, provider=%s) = 1",
-		fix.userAddr.Hex(), fix.providerAddr.Hex())
-}
-
-// ── Test 2: insufficient balance → auto-stop ─────────────────────────────────
-
-// TestComponent_InsufficientBalance exercises the sad-path flow on a simulated chain:
-//
-//  1. POST /api/sandbox → Daytona mock creates sandbox, billing enqueues voucher.
-//  2. settler.Run settles → StatusInsufficientBalance (user never deposited).
-//  3. settler calls persistStop → runStopHandler calls Daytona stop endpoint.
-//  4. Daytona mock confirms it received the stop request for the correct sandbox.
-//  5. Redis stop:sandbox key is cleaned up.
-func TestComponent_InsufficientBalance(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	fix := deployE2EFixture(t)
-
-	// User acknowledges TEE signer but does NOT deposit → balance == 0.
-	// This produces StatusInsufficientBalance (not StatusNotAcknowledged).
-	if _, err := fix.contract.AcknowledgeTEESigner(fix.userAuth, fix.providerAddr, true); err != nil {
-		t.Fatalf("acknowledgeTEESigner: %v", err)
-	}
-	fix.backend.Commit()
-
-	// Redis + Daytona mock
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	mock := newE2EMockDaytona(t)
-	dtona := daytona.NewClient(mock.srv.URL, "test-key")
-
-	// createFee=100 neuron: OnCreate enqueues a voucher that will fail due to
-	// the user's zero balance.
-	signer := billing.NewSigner(fix.providerKey, e2eChainID, fix.proxyAddr, fix.providerAddr,
-		rdb, &e2eNonceReader{fix.contract}, zap.NewNop())
-	bh := billing.NewEventHandler(rdb, fix.providerAddr.Hex(),
-		big.NewInt(0), big.NewInt(100), new(big.Int), new(big.Int), signer, zap.NewNop())
-
-	srv := buildServer(t, dtona, bh, rdb)
-
-	// ── 1. POST /sandbox ──────────────────────────────────────────────────────
-	postSandbox(t, ctx, srv.URL, e2eUserKeyHex)
-
-	// Wait for Daytona to receive the create request.
-	waitFor(t, "Daytona create request", 3*time.Second, func() bool {
-		return len(mock.createdIDs()) == 1
-	})
-	sandboxID := mock.createdIDs()[0]
-	t.Logf("Daytona create confirmed: sandbox ID = %q", sandboxID)
-
-	// Wait for the create-fee voucher to land in the queue.
-	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, fix.providerAddr.Hex())
-	waitFor(t, "voucher in Redis queue", 3*time.Second, func() bool {
-		n, _ := rdb.LLen(ctx, queueKey).Result()
-		return n >= 1
-	})
-
-	// ── 2. Settler + stop handler ─────────────────────────────────────────────
-	onchain := &simChainClient{
-		contract:     fix.contract,
-		providerAuth: fix.providerAuth,
-		simClient:    fix.simClient,
-		backend:      fix.backend,
-	}
-	stopCh := make(chan settler.StopSignal, 4)
-	cfg := &config.Config{
-		Chain:   config.ChainConfig{ProviderAddress: fix.providerAddr.Hex()},
-		Billing: config.BillingConfig{VoucherIntervalSec: 1},
-	}
-	settlerCtx, settlerCancel := context.WithCancel(ctx)
-	defer settlerCancel()
-	go settler.Run(settlerCtx, cfg, rdb, onchain, stopCh, zap.NewNop())
-	go runStopHandler(ctx, stopCh, dtona, rdb, zap.NewNop())
-
-	// ── 3. Assert: Daytona received stop for the correct sandbox ──────────────
-	waitFor(t, fmt.Sprintf("Daytona stop for %q", sandboxID), 10*time.Second, func() bool {
-		for _, id := range mock.stoppedIDs() {
-			if id == sandboxID {
-				return true
-			}
-		}
-		return false
-	})
-	t.Logf("Daytona stop confirmed: sandbox %q stopped", sandboxID)
-
-	// ── 4. Assert: Redis stop key cleaned up ──────────────────────────────────
-	stopKey := "stop:sandbox:" + sandboxID
-	waitFor(t, fmt.Sprintf("Redis key %q deleted", stopKey), 3*time.Second, func() bool {
-		n, _ := rdb.Exists(ctx, stopKey).Result()
-		return n == 0
-	})
-	t.Logf("Redis cleanup confirmed: %q deleted", stopKey)
-}
-
-// ── noopBillingHooks ─────────────────────────────────────────────────────────
-
-// noopBillingHooks satisfies proxy.BillingHooks with no-op methods.
-// Used by tests that only care about proxy/ownership behavior, not billing.
-type noopBillingHooks struct{}
-
-func (n *noopBillingHooks) OnCreate(_ context.Context, _, _ string, _, _ int) {}
-func (n *noopBillingHooks) OnStart(_ context.Context, _, _ string, _, _ int)  {}
-func (n *noopBillingHooks) OnStop(_ context.Context, _ string)            {}
-func (n *noopBillingHooks) OnDelete(_ context.Context, _ string)          {}
-func (n *noopBillingHooks) OnArchive(_ context.Context, _ string)         {}
-func (n *noopBillingHooks) EnsureSession(_ context.Context, _, _ string)  {}
-
-// ── ownerMockDaytona ─────────────────────────────────────────────────────────
-
-// ownerMockDaytona is a stateful mock Daytona server that stores sandboxes with
-// their labels so the proxy's ownership-filter and ownership-check logic can be
-// exercised without a real Daytona instance.
-type ownerMockDaytona struct {
-	mu        sync.Mutex
-	sandboxes map[string]daytona.Sandbox
-	nextID    int
-	srv       *httptest.Server
-}
-
-func newOwnerMockDaytona(t *testing.T) *ownerMockDaytona {
-	t.Helper()
-	m := &ownerMockDaytona{sandboxes: make(map[string]daytona.Sandbox)}
-	m.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path, method := r.URL.Path, r.Method
-		w.Header().Set("Content-Type", "application/json")
-
-		// POST /api/sandbox → create sandbox, extract injected labels
-		if method == http.MethodPost && path == "/api/sandbox" {
-			var body map[string]any
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			labels := map[string]string{}
-			if ls, ok := body["labels"].(map[string]any); ok {
-				for k, v := range ls {
-					if s, ok := v.(string); ok {
-						labels[k] = s
-					}
-				}
-			}
-			m.mu.Lock()
-			m.nextID++
-			id := fmt.Sprintf("sb-owner-%d", m.nextID)
-			sb := daytona.Sandbox{ID: id, State: "running", Labels: labels}
-			m.sandboxes[id] = sb
-			m.mu.Unlock()
-			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(sb)
-			return
-		}
-
-		// GET /api/sandbox → list all (proxy does the owner-label filtering)
-		if method == http.MethodGet && path == "/api/sandbox" {
-			m.mu.Lock()
-			list := make([]daytona.Sandbox, 0, len(m.sandboxes))
-			for _, s := range m.sandboxes {
-				list = append(list, s)
-			}
-			m.mu.Unlock()
-			_ = json.NewEncoder(w).Encode(list)
-			return
-		}
-
-		// GET /api/sandbox/:id → single sandbox lookup
-		// path = "/api/sandbox/<id>" → trim leading "/" → split into 3 parts
-		parts := strings.SplitN(strings.TrimPrefix(path, "/"), "/", 4)
-		if method == http.MethodGet && len(parts) == 3 &&
-			parts[0] == "api" && parts[1] == "sandbox" {
-			id := parts[2]
-			m.mu.Lock()
-			sb, ok := m.sandboxes[id]
-			m.mu.Unlock()
-			if !ok {
-				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
-				return
-			}
-			_ = json.NewEncoder(w).Encode(sb)
-			return
-		}
-
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	t.Cleanup(m.srv.Close)
-	return m
-}
-
-// ── ownership helpers ─────────────────────────────────────────────────────────
-
-// postSandboxGetID sends an authenticated POST /api/sandbox and returns the
-// created sandbox ID extracted from the JSON response body.
-func postSandboxGetID(t *testing.T, ctx context.Context, srvURL, privKeyHex string) string {
-	t.Helper()
-	walletAddr, msgB64, sigHex := e2eSignedHeaders(t, privKeyHex)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		srvURL+"/api/sandbox", strings.NewReader(`{}`))
-	if err != nil {
-		t.Fatalf("build request: %v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Wallet-Address", walletAddr)
-	req.Header.Set("X-Signed-Message", msgB64)
-	req.Header.Set("X-Wallet-Signature", sigHex)
+	req := e.e2eRequest(ctx, http.MethodPost, "/api/sandbox", strings.NewReader(`{}`))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST /api/sandbox: %v", err)
 	}
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("POST /api/sandbox: got HTTP %d, want 201; body: %s", resp.StatusCode, body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		t.Fatalf("POST /api/sandbox: got %d; body: %s", resp.StatusCode, body)
 	}
 	var result struct {
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil || result.ID == "" {
-		t.Fatalf("POST /api/sandbox: cannot extract ID from %q", body)
+		t.Fatalf("cannot extract sandbox ID from %q", body)
 	}
+	t.Logf("created sandbox: %s", result.ID)
 	return result.ID
 }
 
-// getSandboxList sends GET /api/sandbox with auth headers and returns the
-// (already owner-filtered) list returned by the proxy.
-func getSandboxList(t *testing.T, ctx context.Context, srvURL, privKeyHex string) []daytona.Sandbox {
+// e2eStop stops a sandbox via the proxy.
+func (e *e2eEnv) e2eStop(t *testing.T, ctx context.Context, sandboxID string) {
 	t.Helper()
-	walletAddr, msgB64, sigHex := e2eSignedHeaders(t, privKeyHex)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srvURL+"/api/sandbox", nil)
-	if err != nil {
-		t.Fatalf("build request: %v", err)
-	}
-	req.Header.Set("X-Wallet-Address", walletAddr)
-	req.Header.Set("X-Signed-Message", msgB64)
-	req.Header.Set("X-Wallet-Signature", sigHex)
+	req := e.e2eRequest(ctx, http.MethodPost, "/api/sandbox/"+sandboxID+"/stop", nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatalf("GET /api/sandbox: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET /api/sandbox: got HTTP %d, want 200", resp.StatusCode)
-	}
-	var list []daytona.Sandbox
-	_ = json.NewDecoder(resp.Body).Decode(&list)
-	return list
-}
-
-// getSandboxStatus sends GET /api/sandbox/:id with auth headers and returns
-// the HTTP status code.  Used to verify 200 (owner) or 403 (non-owner).
-func getSandboxStatus(t *testing.T, ctx context.Context, srvURL, sandboxID, privKeyHex string) int {
-	t.Helper()
-	walletAddr, msgB64, sigHex := e2eSignedHeaders(t, privKeyHex)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		srvURL+"/api/sandbox/"+sandboxID, nil)
-	if err != nil {
-		t.Fatalf("build request: %v", err)
-	}
-	req.Header.Set("X-Wallet-Address", walletAddr)
-	req.Header.Set("X-Signed-Message", msgB64)
-	req.Header.Set("X-Wallet-Signature", sigHex)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("GET /api/sandbox/%s: %v", sandboxID, err)
+		t.Logf("stop %s: %v (may already be stopped)", sandboxID, err)
+		return
 	}
 	resp.Body.Close()
-	return resp.StatusCode
+	t.Logf("stopped sandbox %s (status %d)", sandboxID, resp.StatusCode)
 }
 
-// ── Test 3: ownership filtering ───────────────────────────────────────────────
+// e2eNonce returns the current on-chain lastNonce for the test account pair.
+func (e *e2eEnv) e2eNonce(ctx context.Context) (*big.Int, error) {
+	return e.onchain.GetLastNonce(ctx, e.userAddr, e.providerAddr)
+}
 
-// TestComponent_OwnershipFiltering verifies the proxy's owner-isolation guarantees:
+// ── E2E tests ─────────────────────────────────────────────────────────────────
+
+// TestE2E_CreateFeeSettled verifies that creating a sandbox triggers a
+// create-fee settlement on chain (nonce advances by 1).
+func TestE2E_CreateFeeSettled(t *testing.T) {
+	e2eSkip(t)
+	env := globalE2E
+	ctx := context.Background()
+
+	// Pre-flight: user must have deposited.
+	balance, _, _, err := env.onchain.GetProviderBalance(ctx, env.userAddr, env.providerAddr)
+	if err != nil {
+		t.Fatalf("GetProviderBalance: %v", err)
+	}
+	if balance.Sign() == 0 {
+		t.Skip("user balance is 0 — run cmd/setup first")
+	}
+	t.Logf("balance before: %s neuron", balance)
+
+	nonceBefore, err := env.e2eNonce(ctx)
+	if err != nil {
+		t.Fatalf("nonce before: %v", err)
+	}
+	t.Logf("nonce before: %s", nonceBefore)
+
+	// Flush stale vouchers.
+	env.rdb.Del(ctx, env.queueKey) //nolint:errcheck
+
+	sandboxID := env.e2eCreate(t, ctx)
+	t.Cleanup(func() { env.e2eStop(t, context.Background(), sandboxID) })
+
+	// Wait for create-fee settlement.
+	expected := new(big.Int).Add(nonceBefore, big.NewInt(1))
+	var nonceAfter *big.Int
+	waitFor(t, fmt.Sprintf("nonce >= %s", expected), 5*time.Minute, func() bool {
+		n, err := env.e2eNonce(ctx)
+		if err == nil && n.Cmp(expected) >= 0 {
+			nonceAfter = n
+			return true
+		}
+		return false
+	})
+	t.Logf("create-fee settled: nonce = %s (delta = +%s)", nonceAfter, new(big.Int).Sub(nonceAfter, nonceBefore))
+}
+
+// TestE2E_ComputeFeeSettled verifies that stopping a sandbox after it has been
+// running triggers a compute-fee settlement on chain (nonce advances by 1 more).
+func TestE2E_ComputeFeeSettled(t *testing.T) {
+	e2eSkip(t)
+	env := globalE2E
+	ctx := context.Background()
+
+	balance, _, _, err := env.onchain.GetProviderBalance(ctx, env.userAddr, env.providerAddr)
+	if err != nil {
+		t.Fatalf("GetProviderBalance: %v", err)
+	}
+	if balance.Sign() == 0 {
+		t.Skip("user balance is 0 — run cmd/setup first")
+	}
+
+	// Flush stale vouchers.
+	env.rdb.Del(ctx, env.queueKey) //nolint:errcheck
+
+	nonceBefore, err := env.e2eNonce(ctx)
+	if err != nil {
+		t.Fatalf("nonce before: %v", err)
+	}
+	t.Logf("nonce before: %s", nonceBefore)
+
+	sandboxID := env.e2eCreate(t, ctx)
+
+	// Wait for create-fee to settle (nonce+1).
+	afterCreate := new(big.Int).Add(nonceBefore, big.NewInt(1))
+	waitFor(t, fmt.Sprintf("create-fee nonce >= %s", afterCreate), 5*time.Minute, func() bool {
+		n, err := env.e2eNonce(ctx)
+		return err == nil && n.Cmp(afterCreate) >= 0
+	})
+	t.Logf("create-fee settled: nonce >= %s", afterCreate)
+
+	// Let the sandbox run for 6 voucher intervals so the periodic generator
+	// fires several times before the final stop voucher.
+	runDuration := 6 * env.voucherInterval
+	t.Logf("sandbox running for %s (6 × voucher interval)…", runDuration)
+	time.Sleep(runDuration)
+
+	// Stop via proxy → OnStop → generateFinalVoucher → compute-fee settlement.
+	env.e2eStop(t, ctx, sandboxID)
+
+	// Wait for compute-fee to settle (nonce+2 minimum; actual may be higher if
+	// the periodic generator fired multiple times during the run duration).
+	afterStop := new(big.Int).Add(nonceBefore, big.NewInt(2))
+	var nonceAfterStop *big.Int
+	waitFor(t, fmt.Sprintf("compute-fee nonce >= %s", afterStop), 5*time.Minute, func() bool {
+		n, err := env.e2eNonce(ctx)
+		if err == nil && n.Cmp(afterStop) >= 0 {
+			nonceAfterStop = n
+			return true
+		}
+		return false
+	})
+	t.Logf("compute-fee settled: nonce = %s (expected >= %s, delta = +%s)",
+		nonceAfterStop, afterStop, new(big.Int).Sub(nonceAfterStop, nonceBefore))
+
+	balance2, _, _, _ := env.onchain.GetProviderBalance(ctx, env.userAddr, env.providerAddr)
+	t.Logf("balance after: %s neuron", balance2)
+}
+
+// TestE2E_InsufficientBalance verifies that a wallet with no on-chain deposit
+// is rejected with HTTP 402 before Daytona is ever called.
+func TestE2E_InsufficientBalance(t *testing.T) {
+	e2eSkip(t)
+	env := globalE2E
+	ctx := context.Background()
+
+	// Generate a fresh ephemeral key — never deposited, balance = 0.
+	ephemeralKey, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate ephemeral key: %v", err)
+	}
+	ephemeralHex := hex.EncodeToString(crypto.FromECDSA(ephemeralKey))
+
+	wa, mb, sh := e2eSignedHeadersRaw(ephemeralHex)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
+		env.srv.URL+"/api/sandbox", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Wallet-Address", wa)
+	req.Header.Set("X-Signed-Message", mb)
+	req.Header.Set("X-Wallet-Signature", sh)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /api/sandbox: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusPaymentRequired {
+		t.Fatalf("want 402 Payment Required, got %d; body: %s", resp.StatusCode, body)
+	}
+	t.Logf("correctly rejected with 402: %s", body)
+}
+
+// TestE2E_AutoStopInsufficientBalance verifies that a sandbox is automatically
+// stopped by the billing system when the user's on-chain balance is exhausted.
 //
-//  1. POST /api/sandbox injects the caller's wallet address into labels["daytona-owner"].
-//  2. GET /api/sandbox returns only the requesting user's sandboxes.
-//  3. GET /api/sandbox/:id returns 403 when accessed by a non-owner.
-//  4. GET /api/sandbox/:id returns 200 for the owner.
-func TestComponent_OwnershipFiltering(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
+// An ephemeral wallet is funded with exactly createFee + 1 compute period of
+// tokens.  After the create-fee voucher settles the balance drops to 1 neuron.
+// After the first periodic compute voucher settles it reaches 0.  The next
+// compute voucher returns StatusInsufficientBalance, causing the settler to
+// write a stop:sandbox:<id> key and the runStopHandler to call Daytona stop.
+func TestE2E_AutoStopInsufficientBalance(t *testing.T) {
+	e2eSkip(t)
+	env := globalE2E
+	ctx := context.Background()
 
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	// Deposit exactly createFee + 1 compute period.
+	// After create-fee settles: balance = 1 period of compute.
+	// After 1st periodic compute voucher settles: balance = 0.
+	// 2nd periodic voucher → StatusInsufficientBalance → auto-stop.
+	voucherIntervalSec := int64(env.voucherInterval / time.Second)
+	oneComputePeriod := new(big.Int).Mul(env.computePrice, big.NewInt(voucherIntervalSec))
+	depositWei := new(big.Int).Add(env.createFee, oneComputePeriod)
+	t.Logf("ephemeral deposit: %s neuron (createFee=%s + %ds×computePrice=%s)",
+		depositWei, env.createFee, voucherIntervalSec, env.computePrice)
 
-	mock := newOwnerMockDaytona(t)
-	dtona := daytona.NewClient(mock.srv.URL, "test-key")
-	srv := buildServer(t, dtona, &noopBillingHooks{}, rdb)
-
-	// Two distinct Anvil test wallets.
-	const (
-		userAKey = "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
-		userBKey = "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
-	)
-
-	// ── 1. Each user creates one sandbox ─────────────────────────────────────
-	sbAID := postSandboxGetID(t, ctx, srv.URL, userAKey)
-	sbBID := postSandboxGetID(t, ctx, srv.URL, userBKey)
-	t.Logf("userA sandbox: %s | userB sandbox: %s", sbAID, sbBID)
-
-	// ── 2. List: each user sees only their own sandbox ────────────────────────
-	listA := getSandboxList(t, ctx, srv.URL, userAKey)
-	if len(listA) != 1 || listA[0].ID != sbAID {
-		t.Fatalf("userA GET /sandbox: expected [{%s}], got %+v", sbAID, listA)
+	ephKey, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate ephemeral key: %v", err)
 	}
-	listB := getSandboxList(t, ctx, srv.URL, userBKey)
-	if len(listB) != 1 || listB[0].ID != sbBID {
-		t.Fatalf("userB GET /sandbox: expected [{%s}], got %+v", sbBID, listB)
-	}
-	t.Log("list filtering: PASS")
+	ephKeyHex := hex.EncodeToString(crypto.FromECDSA(ephKey))
+	t.Logf("ephemeral address: %s", crypto.PubkeyToAddress(ephKey.PublicKey).Hex())
 
-	// ── 3. Cross-owner GET returns 403 ───────────────────────────────────────
-	if got := getSandboxStatus(t, ctx, srv.URL, sbBID, userAKey); got != http.StatusForbidden {
-		t.Fatalf("GET /sandbox/%s as userA: expected 403, got %d", sbBID, got)
-	}
-	if got := getSandboxStatus(t, ctx, srv.URL, sbAID, userBKey); got != http.StatusForbidden {
-		t.Fatalf("GET /sandbox/%s as userB: expected 403, got %d", sbAID, got)
-	}
-	t.Log("cross-owner access control: PASS")
+	env.e2eSetupEphemeralAccount(t, ctx, ephKey, depositWei)
 
-	// ── 4. Owner GET returns 200 ──────────────────────────────────────────────
-	if got := getSandboxStatus(t, ctx, srv.URL, sbAID, userAKey); got != http.StatusOK {
-		t.Fatalf("GET /sandbox/%s as userA: expected 200, got %d", sbAID, got)
+	sandboxID := env.e2eCreateAs(t, ctx, ephKeyHex)
+	t.Logf("sandbox created: %s", sandboxID)
+
+	stopKey := "stop:sandbox:" + sandboxID
+
+	// Wait for the settler to detect InsufficientBalance and schedule a stop.
+	waitFor(t, fmt.Sprintf("stop key %q set", stopKey), 5*time.Minute, func() bool {
+		n, _ := env.rdb.Exists(ctx, stopKey).Result()
+		return n == 1
+	})
+	t.Logf("auto-stop scheduled: stop key set for sandbox %s", sandboxID)
+
+	// Wait for runStopHandler to call Daytona stop and delete the key.
+	waitFor(t, fmt.Sprintf("stop key %q deleted", stopKey), 2*time.Minute, func() bool {
+		n, _ := env.rdb.Exists(ctx, stopKey).Result()
+		return n == 0
+	})
+	t.Logf("auto-stop completed: sandbox %s stopped and key cleaned up", sandboxID)
+}
+
+// e2eCreateAs creates a sandbox via the proxy using the given private key hex.
+func (e *e2eEnv) e2eCreateAs(t *testing.T, ctx context.Context, privKeyHex string) string {
+	t.Helper()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, e.srv.URL+"/api/sandbox", strings.NewReader(`{}`))
+	wa, mb, sh := e2eSignedHeadersRaw(privKeyHex)
+	req.Header.Set("X-Wallet-Address", wa)
+	req.Header.Set("X-Signed-Message", mb)
+	req.Header.Set("X-Wallet-Signature", sh)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /api/sandbox as %s: %v", wa, err)
 	}
-	if got := getSandboxStatus(t, ctx, srv.URL, sbBID, userBKey); got != http.StatusOK {
-		t.Fatalf("GET /sandbox/%s as userB: expected 200, got %d", sbBID, got)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		t.Fatalf("POST /api/sandbox as %s: got %d; body: %s", wa, resp.StatusCode, body)
 	}
-	t.Log("owner access: PASS")
+	var result struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil || result.ID == "" {
+		t.Fatalf("cannot extract sandbox ID from %q", body)
+	}
+	t.Logf("created sandbox as %s: %s", wa, result.ID)
+	return result.ID
+}
+
+// e2eSetupEphemeralAccount prepares a fresh key for billing tests:
+//  1. Transfers 0.01 ETH from the main key to the ephemeral address for gas.
+//  2. Calls contract.Deposit(provider) with msg.value=depositWei from the ephemeral key.
+//  3. Calls contract.AcknowledgeTEESigner(provider, true) from the ephemeral key.
+func (e *e2eEnv) e2eSetupEphemeralAccount(t *testing.T, ctx context.Context, ephKey *ecdsa.PrivateKey, depositWei *big.Int) {
+	t.Helper()
+
+	ethClient, err := ethclient.Dial(e.cfg.Chain.RPCURL)
+	if err != nil {
+		t.Fatalf("dial rpc: %v", err)
+	}
+	defer ethClient.Close()
+
+	chainID := big.NewInt(e.cfg.Chain.ChainID)
+	contractAddr := common.HexToAddress(e.cfg.Chain.ContractAddress)
+	ephAddr := crypto.PubkeyToAddress(ephKey.PublicKey)
+
+	// Step 1: Fund the ephemeral address with enough 0G to cover gas for
+	// Deposit + AcknowledgeTEESigner. Use gasPrice×300k as an upper bound
+	// (Deposit ~150k gas + AcknowledgeTEESigner ~50k gas, 2× safety margin).
+	gasPrice, err := ethClient.SuggestGasPrice(ctx)
+	if err != nil {
+		t.Fatalf("suggest gas price: %v", err)
+	}
+	gasFund := new(big.Int).Mul(gasPrice, big.NewInt(300_000))
+
+	// Pre-flight: make sure main account can cover gasFund + cost of this transfer.
+	mainBalance, err := ethClient.BalanceAt(ctx, e.userAddr, nil)
+	if err != nil {
+		t.Fatalf("get main balance: %v", err)
+	}
+	needed := new(big.Int).Add(gasFund, new(big.Int).Mul(gasPrice, big.NewInt(21_000)))
+	if mainBalance.Cmp(needed) < 0 {
+		t.Skipf("main account %s has insufficient 0G: balance %s neuron, need ~%s neuron — fund with testnet 0G first",
+			e.userAddr.Hex(), mainBalance, needed)
+	}
+
+	mainNonce, err := ethClient.PendingNonceAt(ctx, e.userAddr)
+	if err != nil {
+		t.Fatalf("pending nonce for main: %v", err)
+	}
+	to := ephAddr
+	fundTx, err := types.SignNewTx(e.mainPrivKey, types.NewEIP155Signer(chainID), &types.LegacyTx{
+		Nonce:    mainNonce,
+		To:       &to,
+		Value:    gasFund,
+		Gas:      21000,
+		GasPrice: gasPrice,
+	})
+	if err != nil {
+		t.Fatalf("sign fund tx: %v", err)
+	}
+	if err := ethClient.SendTransaction(ctx, fundTx); err != nil {
+		t.Fatalf("send fund tx: %v", err)
+	}
+	if _, err := bind.WaitMined(ctx, ethClient, fundTx); err != nil {
+		t.Fatalf("wait fund tx: %v", err)
+	}
+	t.Logf("funded ephemeral %s with %s neuron for gas", ephAddr.Hex(), gasFund)
+
+	// Bind the contract for the ephemeral transactor.
+	contract, err := chain.NewSandboxServing(contractAddr, ethClient)
+	if err != nil {
+		t.Fatalf("bind contract: %v", err)
+	}
+	ephAuth, err := bind.NewKeyedTransactorWithChainID(ephKey, chainID)
+	if err != nil {
+		t.Fatalf("ephemeral transactor: %v", err)
+	}
+
+	// Step 2: Deposit into the contract from the ephemeral account.
+	// recipient = ephAddr so the balance is credited to the ephemeral user.
+	ephAuth.Value = depositWei
+	providerAddr := common.HexToAddress(e.cfg.Chain.ProviderAddress)
+	depositTx, err := contract.Deposit(ephAuth, ephAddr, providerAddr)
+	if err != nil {
+		t.Fatalf("deposit: %v", err)
+	}
+	if _, err := bind.WaitMined(ctx, ethClient, depositTx); err != nil {
+		t.Fatalf("wait deposit: %v", err)
+	}
+	ephAuth.Value = big.NewInt(0)
+	t.Logf("deposited %s neuron for ephemeral %s", depositWei, ephAddr.Hex())
+
+	// Step 3: Acknowledge TEE signer from the ephemeral account.
+	ackTx, err := contract.AcknowledgeTEESigner(ephAuth, e.providerAddr, true)
+	if err != nil {
+		t.Fatalf("acknowledgeTEESigner: %v", err)
+	}
+	if _, err := bind.WaitMined(ctx, ethClient, ackTx); err != nil {
+		t.Fatalf("wait ack tx: %v", err)
+	}
+	t.Logf("ephemeral %s acknowledged TEE signer for provider %s",
+		ephAddr.Hex(), e.providerAddr.Hex())
+}
+
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+// envOrDefault returns the value of key if set, otherwise dflt.
+func envOrDefault(key, dflt string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return dflt
+}
+
+// daytonaReachable returns true if Daytona responds with HTTP < 500.
+func daytonaReachable(baseURL, adminKey string) bool {
+	req, err := http.NewRequest(http.MethodGet, baseURL+"/api/sandbox", nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Authorization", "Bearer "+adminKey)
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode < 500
 }

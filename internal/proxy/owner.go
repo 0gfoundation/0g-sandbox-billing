@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/0gfoundation/0g-sandbox-billing/internal/daytona"
+	"github.com/0gfoundation/0g-sandbox/internal/daytona"
 )
 
 const ownerLabel = "daytona-owner"
