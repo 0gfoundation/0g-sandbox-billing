@@ -223,11 +223,11 @@ USER_KEY=$USER_KEY go run ./cmd/user/ create --api $API --name <friendly-name> -
 export SANDBOX_ID=<returned-id>
 ```
 
-Billing starts immediately. If user chose **openclaw** → skip to **OpenClaw Mode** below.
+Billing starts immediately. **Do NOT wait for the sandbox to be ready before proceeding to Step 7** — start the mode discussion immediately while the sandbox is starting up. If user chose **openclaw** → skip to **OpenClaw Mode** below.
 
 ### Step 7 — Recommend vibe coding mode
 
-The sandbox takes a few seconds to start. Use that time to recommend a mode:
+The sandbox takes a few seconds to start. Use that time to recommend a mode (do not ask the user to choose — infer from context and propose):
 
 | User's goal | Recommendation |
 |-------------|----------------|

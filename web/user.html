@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0G Sandbox</title>
+<script src="/static/ethers.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  color-scheme: light;
+  /* ── Brand accent: 0G purple-pink (#c084fc) ── */
+  --p:   oklch(72% 0.22 310);
+  --pd:  oklch(62% 0.24 310);
+  --pbg: oklch(96% 0.05 310);
+  --pbd: oklch(84% 0.12 310);
+  /* ── Neutrals — clean, no hue tint ── */
+  --text:   oklch(14% 0 0);
+  --text2:  oklch(40% 0 0);
+  --muted:  oklch(52% 0 0);
+  --border: oklch(91% 0 0);
+  --bg:     oklch(100% 0 0);
+  --surf:   oklch(100% 0 0);
+  --surf2:  oklch(97.5% 0 0);
+  /* ── Semantic ── */
+  --green: oklch(44% 0.15 145); --gbg: oklch(97% 0.03 145); --gbd: oklch(82% 0.08 145);
+  --red:   oklch(42% 0.18 25);  --rbg: oklch(97.5% 0.03 25);  --rbd: oklch(82% 0.09 25);
+  --orange:oklch(57% 0.16 55);  --obg: oklch(97.5% 0.03 55);  --obd: oklch(82% 0.09 55);
+  /* ── Typography ── */
+  --sans: 'Syne', -apple-system, sans-serif;
+  --mono: 'Roboto Mono', 'Courier New', monospace;
+  /* ── Motion ── */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --t-fast: 120ms; --t-base: 220ms; --t-slow: 350ms;
+  /* ── Radii ── */
+  --r-sm: 6px; --r: 10px; --r-lg: 14px;
+  /* ── Shadows — clean ── */
+  --sh-sm: 0 1px 2px oklch(0% 0 0 / 0.04);
+  --sh:    0 2px 8px oklch(0% 0 0 / 0.07), 0 1px 3px oklch(0% 0 0 / 0.04);
+  --sh-lg: 0 8px 28px oklch(0% 0 0 / 0.10), 0 3px 8px oklch(0% 0 0 / 0.05);
+}
+body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--text);background:var(--bg);min-height:100vh;-webkit-font-smoothing:antialiased;font-kerning:normal}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
+/* ─ Topbar ─ */
+.topbar{background:var(--surf);border-bottom:1px solid var(--border);height:60px;display:flex;align-items:center;padding:0 clamp(16px,4vw,40px);position:sticky;top:0;z-index:100}
+.logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px;letter-spacing:-.02em;color:var(--text)}
+.logo-sub{font-size:12px;color:var(--muted);font-weight:400;margin-left:2px}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.chain-tag{display:flex;align-items:center;gap:6px;background:var(--pbg);color:var(--pd);border:1px solid var(--pbd);border-radius:9999px;padding:4px 12px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0}
+.btn-connect{background:var(--text);color:#fff;border:none;border-radius:var(--r);padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);letter-spacing:-.01em;transition:background var(--t-fast) ease,transform var(--t-fast) ease}
+.btn-connect:hover{background:oklch(50% 0.28 303)}
+.btn-connect:active{background:oklch(42% 0.28 303);transform:translateY(1px)}
+.addr-chip{background:var(--surf2);color:var(--text);border:1px solid var(--border);border-radius:var(--r);padding:5px 12px;font-size:12px;font-family:var(--mono);cursor:pointer;user-select:none;transition:background var(--t-fast) ease,border-color var(--t-fast) ease;font-weight:500}
+.addr-chip:hover{background:oklch(94% 0 0);border-color:oklch(78% 0 0)}
+
+/* ─ Wallet Popover ─ */
+.wallet-popover{position:fixed;top:64px;right:clamp(12px,3vw,24px);width:264px;background:var(--surf);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-lg);z-index:200;overflow:hidden;display:none}
+.wallet-popover.open{display:block;animation:fadeDown var(--t-base) var(--ease-out)}
+@keyframes fadeDown{from{transform:translateY(-6px);opacity:0}to{transform:translateY(0);opacity:1}}
+.wp-head{padding:14px 16px;border-bottom:1px solid var(--border);background:var(--surf2)}
+.wp-label{font-size:10px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.07em;font-weight:600}
+.wp-addr{font-family:var(--mono);font-size:11.5px;color:var(--text);word-break:break-all;line-height:1.6}
+.wp-body{padding:12px 16px}
+.wp-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.wp-k{font-size:12px;color:var(--muted)}
+.wp-v{font-size:13px;font-weight:600;font-family:var(--mono);color:var(--text);font-variant-numeric:tabular-nums}
+.wp-actions{display:flex;gap:6px;margin-top:12px}
+.wp-btn{flex:1;padding:7px 0;border-radius:var(--r-sm);font-size:12px;font-weight:500;cursor:pointer;font-family:var(--sans);border:1px solid var(--border);background:var(--surf);color:var(--text);transition:background var(--t-fast)}
+.wp-btn:hover{background:var(--bg)}
+.wp-btn.danger{border-color:var(--rbd);color:var(--red)}
+.wp-btn.danger:hover{background:var(--rbg)}
+
+/* ─ Page ─ */
+.page{max-width:1100px;margin:0 auto;padding:clamp(24px,4vw,40px) clamp(16px,4vw,40px) 80px;animation:pageIn var(--t-slow) var(--ease-out)}
+@keyframes pageIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.two-col{display:grid;grid-template-columns:1fr 260px;gap:16px;align-items:start}
+@media(max-width:800px){.two-col{grid-template-columns:1fr}}
+
+/* ─ Card ─ */
+.card{background:var(--surf);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:16px;transition:border-color var(--t-base) var(--ease-out)}
+.card:hover{border-color:oklch(82% 0 0)}
+.card-head{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--surf)}
+.card-title{font-size:12px;font-weight:700;color:var(--text);letter-spacing:.05em;text-transform:uppercase}
+.card-meta{font-size:12px;color:var(--muted)}
+.card-body{padding:20px}
+
+/* ─ Info rows ─ */
+.info-row{display:flex;justify-content:space-between;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--border);gap:12px}
+.info-row:last-child{border-bottom:none}
+.ik{font-size:12px;color:var(--muted);font-weight:500;flex-shrink:0}
+.iv{font-family:var(--mono);font-size:12px;text-align:right;word-break:break-all;color:var(--text);font-variant-numeric:tabular-nums}
+.iv.purple{color:var(--pd);font-weight:600}
+.iv.green{color:var(--green);font-weight:500}
+.iv.big{font-size:22px;font-weight:700;font-family:var(--sans);color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+
+/* ─ Badges ─ */
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:9999px;border:1px solid transparent;letter-spacing:.06em;text-transform:uppercase;font-family:var(--sans)}
+.badge.green{background:var(--gbg);color:var(--green);border-color:var(--gbd)}
+.badge.red{background:var(--rbg);color:var(--red);border-color:var(--rbd)}
+.badge.purple{background:var(--pbg);color:var(--p);border-color:var(--pbd)}
+.badge.orange{background:var(--obg);color:var(--orange);border-color:var(--obd)}
+.badge.blue{background:oklch(96% 0.04 250);color:oklch(44% 0.18 250);border-color:oklch(82% 0.10 250)}
+.badge.gray{background:var(--surf2);color:var(--text2);border-color:var(--border)}
+
+/* ─ Buttons ─ */
+.btn{display:inline-flex;align-items:center;gap:5px;border:none;border-radius:var(--r-sm);padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);transition:background var(--t-fast) ease,border-color var(--t-fast) ease,color var(--t-fast) ease,transform var(--t-fast) ease;letter-spacing:-.01em;white-space:nowrap}
+.btn:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+/* Primary — black default; hover reveals brand purple */
+.btn-prim{background:var(--text);color:#fff}
+.btn-prim:not(:disabled):hover{background:oklch(50% 0.28 303)}
+.btn-prim:active{background:oklch(42% 0.28 303);transform:translateY(1px)}
+/* Ghost — white+border default; hover: light purple fill + purple border */
+.btn-ghost{background:var(--surf);color:var(--text);border:1px solid var(--border)}
+.btn-ghost:not(:disabled):hover{background:var(--pbg);border-color:var(--pbd);color:var(--pd)}
+.btn-ghost:active{background:var(--pbd);transform:translateY(1px)}
+/* Warn / Danger */
+.btn-warn{background:var(--obg);color:var(--orange);border:1px solid var(--obd)}
+.btn-warn:not(:disabled):hover{background:var(--obd)}
+.btn-sm{padding:4px 10px;font-size:11px;letter-spacing:.02em}
+.btn-danger{background:var(--rbg);color:var(--red);border:1px solid var(--rbd)}
+.btn-danger:not(:disabled):hover{background:var(--rbd)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+
+/* ─ Inline action rows ─ */
+.ia-row{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
+.ia-row:last-child{margin-bottom:0}
+.ia-label{font-size:11.5px;color:var(--muted);font-weight:500}
+.ia-input-row{display:flex;gap:6px;align-items:center}
+.ia-input{flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px;font-family:var(--mono);outline:none;transition:border-color var(--t-fast),box-shadow var(--t-fast);min-width:0;background:var(--surf);color:var(--text);font-variant-numeric:tabular-nums}
+.ia-input:focus{border-color:var(--p);box-shadow:0 0 0 3px var(--pbg)}
+.ia-unit{font-size:12px;color:var(--muted);white-space:nowrap;flex-shrink:0}
+.ia-hint{font-size:11px;color:var(--muted)}
+
+/* ─ Provider cards ─ */
+.pv-subscribed{border-color:var(--gbd)!important}
+.pv-pricing-row{display:flex;flex-wrap:wrap;gap:6px 16px;margin-bottom:12px;align-items:center}
+.pv-price-box{display:flex;align-items:baseline;gap:5px}
+.pv-price-val{font-size:13px;font-weight:700;font-family:var(--mono);color:var(--text);font-variant-numeric:tabular-nums}
+.pv-price-label{font-size:11px;color:var(--muted);font-weight:500}
+.pv-sandbox-section{border-top:1px solid var(--border);padding-top:14px;margin-top:4px}
+.pv-sandbox-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.pv-sandbox-list{display:flex;flex-direction:column}
+.pv-sandbox-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)}
+.pv-sandbox-row:last-child{border-bottom:none}
+.pv-sandbox-id{font-family:var(--mono);font-size:12px;flex:1;color:var(--text2)}
+.pv-sandbox-actions{display:flex;gap:5px}
+.pv-sandbox-empty{color:var(--muted);font-size:12.5px;padding:20px 0;text-align:center}
+
+/* ─ Table ─ */
+table{width:100%;border-collapse:collapse}
+thead th{padding:9px 14px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;background:var(--surf2);border-bottom:1px solid var(--border)}
+tbody td{padding:10px 14px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:middle}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:var(--surf2)}
+.mono{font-family:var(--mono);font-size:12px;color:var(--text2);font-variant-numeric:tabular-nums}
+
+/* ─ Tag ─ */
+.tag{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:9999px;font-size:10px;font-weight:700;border:1px solid transparent;letter-spacing:.06em;text-transform:uppercase}
+.tag.running{background:var(--gbg);color:var(--green);border-color:var(--gbd)}
+.tag.stopped{background:var(--surf2);color:var(--muted);border-color:var(--border)}
+.tag.starting{background:var(--obg);color:var(--orange);border-color:var(--obd)}
+.tag.archived{background:oklch(96% 0.04 250);color:oklch(44% 0.18 250);border-color:oklch(82% 0.10 250)}
+.tag.error{background:var(--rbg);color:var(--red);border-color:var(--rbd)}
+.tag-dot{width:5px;height:5px;border-radius:50%;background:currentColor;flex-shrink:0}
+
+/* ─ Modal ─ */
+.modal-bg{position:fixed;inset:0;background:oklch(0% 0 0 / 0.35);backdrop-filter:blur(2px);display:none;align-items:center;justify-content:center;z-index:300}
+.modal-bg.open{display:flex}
+.modal{background:var(--surf);border-radius:var(--r-lg);padding:28px;width:400px;max-width:95vw;box-shadow:var(--sh-lg);animation:modalin var(--t-base) var(--ease-out);border:1px solid var(--border)}
+@keyframes modalin{from{transform:translateY(-10px) scale(.98);opacity:0}to{transform:translateY(0) scale(1);opacity:1}}
+.modal-title{font-size:16px;font-weight:700;margin-bottom:20px;letter-spacing:-.01em;color:var(--text)}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.06em}
+.field input,.field select{width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px;font-family:var(--sans);outline:none;transition:border-color var(--t-fast) ease,box-shadow var(--t-fast) ease;background:var(--surf);color:var(--text)}
+.field input:focus,.field select:focus{border-color:var(--p);box-shadow:0 0 0 3px var(--pbg)}
+.field .hint{font-size:11.5px;color:var(--muted);margin-top:4px}
+.modal-btns{display:flex;gap:8px;margin-top:20px;justify-content:flex-end}
+
+/* ─ Misc ─ */
+.empty{color:var(--muted);font-size:13px;padding:32px 20px;text-align:center;line-height:1.6}
+.empty-icon{font-size:24px;margin-bottom:8px}
+.err{color:var(--red);font-size:12px;margin-top:4px}
+.loading{color:var(--muted);font-size:12px;margin-top:6px}
+.code-block{background:var(--surf2);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;font-family:var(--mono);font-size:12px;word-break:break-all;user-select:all;cursor:text;line-height:1.7;font-variant-ligatures:none}
+.wallet-required{text-align:center;padding:60px 20px;color:var(--muted)}
+.wallet-required .icon{font-size:36px;margin-bottom:12px}
+.wallet-required p{font-size:13.5px;margin-bottom:20px;max-width:280px;margin-left:auto;margin-right:auto;line-height:1.7}
+
+/* ─ Toast ─ */
+#toast{position:fixed;bottom:24px;right:24px;z-index:999;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.toast{background:var(--text);color:#fff;border-radius:var(--r);padding:10px 16px;font-size:13px;min-width:220px;max-width:360px;box-shadow:var(--sh-lg);animation:slidein var(--t-base) var(--ease-out);pointer-events:auto;line-height:1.5;font-weight:500}
+.toast.success{background:oklch(32% 0.12 145)}.toast.error{background:oklch(32% 0.14 25)}.toast.pending{background:oklch(36% 0.12 55)}
+.toast a{color:oklch(90% 0.03 264);text-decoration:underline;margin-left:6px}
+@keyframes slidein{from{transform:translateX(12px);opacity:0}to{transform:translateX(0);opacity:1}}
+@keyframes skel-pulse{0%,100%{opacity:.35}50%{opacity:.65}}
+.skel{background:var(--border);border-radius:var(--r-sm);display:inline-block;min-width:60px;min-height:14px;animation:skel-pulse 1.5s var(--ease-out) infinite;vertical-align:middle}
+</style>
+</head>
+<body>
+
+<!-- Topbar -->
+<header class="topbar">
+  <div class="logo">
+    <img src="/static/logo.svg" width="50" height="30" alt="0G" style="flex-shrink:0;display:block">
+    0G Sandbox<span class="logo-sub">Powered by 0G Network</span>
+  </div>
+  <div class="topbar-right">
+    <div class="chain-tag" id="chainTag"><div class="dot"></div>0G Galileo</div>
+    <button class="btn-connect" id="connectBtn" onclick="connectWallet()">Connect Wallet</button>
+  </div>
+</header>
+
+<!-- Wallet Popover -->
+<div class="wallet-popover" id="walletPopover">
+  <div class="wp-head">
+    <div class="wp-label">Wallet Address</div>
+    <div class="wp-addr" id="popAddr"></div>
+  </div>
+  <div class="wp-body">
+    <div class="wp-row">
+      <span class="wp-k">Native Balance</span>
+      <span class="wp-v" id="popBalance">—</span>
+    </div>
+    <div class="wp-actions">
+      <button class="wp-btn" onclick="copyWalletAddr()">Copy Address</button>
+      <button class="wp-btn danger" onclick="logout()">Logout</button>
+    </div>
+  </div>
+</div>
+
+<!-- User Content -->
+<div class="page">
+
+  <div id="userNoWallet" class="wallet-required">
+    <div class="icon">👛</div>
+    <p>Connect your wallet to manage your billing account and sandboxes.</p>
+    <button class="btn btn-prim" onclick="connectWallet()">Connect Wallet</button>
+  </div>
+
+  <div id="userContent" style="display:none">
+
+      <!-- Providers + Sandboxes -->
+      <div id="providerSection">
+        <div class="empty" style="padding:40px 0">
+          <span class="skel" style="width:100%;height:120px;display:block;border-radius:10px"></span>
+        </div>
+      </div>
+
+  </div>
+
+</div>
+
+<!-- ═══ Modals ═══ -->
+
+<div class="modal-bg" id="createModal">
+  <div class="modal">
+    <div class="modal-title">Create Sandbox</div>
+    <div class="field">
+      <label>Name (optional)</label>
+      <input id="sandboxName" type="text" placeholder="my-sandbox" maxlength="60">
+      <div class="hint">Leave blank to auto-generate a name.</div>
+    </div>
+    <div class="field">
+      <label>Snapshot (optional)</label>
+      <select id="snapshotSelect"><option value="">— Default (no snapshot) —</option></select>
+      <div class="hint">Select a pre-built environment, or leave blank for the default image.</div>
+    </div>
+    <div id="createErr"></div>
+    <div class="modal-btns">
+      <button class="btn btn-ghost" onclick="closeModal('createModal')">Cancel</button>
+      <button class="btn btn-prim" id="createBtn" onclick="doCreate()">Create &amp; Start</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="sshModal">
+  <div class="modal" style="width:480px">
+    <div class="modal-title">SSH Access</div>
+    <div class="field">
+      <label>Connect command (valid 60 min)</label>
+      <div class="code-block" id="sshCommand">Loading…</div>
+    </div>
+    <div style="font-size:12px;color:var(--muted)">The token is your SSH password — no key needed.</div>
+    <div class="modal-btns">
+      <button class="btn btn-ghost" onclick="closeModal('sshModal')">Close</button>
+      <button class="btn btn-prim" onclick="copySSH()">Copy</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="walletModal">
+  <div class="modal">
+    <div class="modal-title">Select Wallet</div>
+    <div id="walletList" style="display:flex;flex-direction:column;gap:8px;margin-top:4px"></div>
+    <div class="modal-btns"><button class="btn btn-ghost" onclick="closeModal('walletModal')">Cancel</button></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let walletAddr = null, signer = null, contract = null, info = null;
+let selectedProvider = null;
+const eip6963Providers = new Map();
+let _refreshTimer = null, _activeProvider = null;
+function _onAccountsChanged(a) {
+  if (!a || !a.length) { location.reload(); return; }
+  initWallet(a[0], _activeProvider);
+}
+
+const ABI = [
+  "function getBalance(address user, address provider) view returns (uint256 balance, uint256 pendingRefund, uint256 refundUnlockAt)",
+  "function isTEEAcknowledged(address user, address provider) view returns (bool)",
+  "function deposit(address recipient, address provider) payable",
+  "function acknowledgeTEESigner(address provider, bool acknowledged)",
+  "function requestRefund(address provider, uint256 amount)",
+  "function withdrawRefund(address provider)",
+];
+
+window.addEventListener('eip6963:announceProvider', e => eip6963Providers.set(e.detail.info.uuid, e.detail));
+window.dispatchEvent(new Event('eip6963:requestProvider'));
+
+window.onload = async () => {
+  info = await fetch('/api/info').then(r => r.json()).catch(() => null);
+  if (info) {
+    document.getElementById('chainTag').innerHTML = `<div class="dot"></div>Chain ${info.chain_id}`;
+  }
+  const lastUUID = localStorage.getItem('walletUUID');
+  if (lastUUID && eip6963Providers.has(lastUUID)) {
+    const p = eip6963Providers.get(lastUUID).provider;
+    const a = await p.request({ method:'eth_accounts' }).catch(()=>[]);
+    if (a.length) { await initWallet(a[0], p); return; }
+  }
+  if (window.ethereum) {
+    const a = await window.ethereum.request({ method:'eth_accounts' }).catch(()=>[]);
+    if (a.length) { await initWallet(a[0], window.ethereum); return; }
+  }
+};
+
+// ── Wallet Popover ────────────────────────────────────────────────────────────
+function toggleWalletPopover(e) {
+  e.stopPropagation();
+  const p = document.getElementById('walletPopover');
+  p.classList.toggle('open');
+}
+document.addEventListener('click', e => {
+  const p = document.getElementById('walletPopover');
+  if (p.classList.contains('open') && !p.contains(e.target)) p.classList.remove('open');
+});
+function copyWalletAddr() {
+  navigator.clipboard.writeText(walletAddr).then(()=>toast('Address copied','success'));
+}
+
+// ── Wallet ────────────────────────────────────────────────────────────────────
+function connectWallet() {
+  const list = document.getElementById('walletList'); list.innerHTML = '';
+  const wallets = [...eip6963Providers.values()];
+  if (window.ethereum && !wallets.length) wallets.push({ info:{ uuid:'__legacy__', name:'Browser Wallet', icon:'' }, provider:window.ethereum });
+  if (!wallets.length) { list.innerHTML='<p style="color:var(--muted);font-size:13px">No wallets detected.</p>'; openModal('walletModal'); return; }
+  wallets.forEach(({ info:wi, provider:prov }) => {
+    const btn = document.createElement('button');
+    btn.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surf);cursor:pointer;font-family:inherit;font-size:13.5px;font-weight:500;width:100%;transition:background .15s';
+    btn.onmouseover = () => btn.style.background='var(--pbg)';
+    btn.onmouseout  = () => btn.style.background='var(--surf)';
+    if (wi.icon) { const img=document.createElement('img'); img.src=wi.icon; img.width=img.height=28; img.style.borderRadius='6px'; btn.appendChild(img); }
+    btn.appendChild(document.createTextNode(wi.name));
+    btn.onclick = () => { closeModal('walletModal'); selectWallet(wi.uuid, prov); };
+    list.appendChild(btn);
+  });
+  openModal('walletModal');
+}
+
+async function selectWallet(uuid, prov) {
+  try {
+    await ensureChain(prov);
+    const accounts = await prov.request({ method:'eth_requestAccounts' });
+    if (uuid !== '__legacy__') localStorage.setItem('walletUUID', uuid);
+    await initWallet(accounts[0], prov);
+  } catch(e) { toast(e.message,'error'); }
+}
+
+async function initWallet(addr, prov) {
+  walletAddr = addr;
+  const provider = new ethers.BrowserProvider(prov);
+  signer = await provider.getSigner();
+  contract = new ethers.Contract(info.contract_address, ABI, signer);
+
+  document.querySelectorAll('.addr-chip,.logout-btn').forEach(el=>el.remove());
+  document.getElementById('connectBtn').style.display = 'none';
+  const chip = document.createElement('div');
+  chip.className='addr-chip'; chip.textContent=shortAddr(addr); chip.title=addr;
+  chip.onclick = toggleWalletPopover;
+  document.querySelector('.topbar-right').prepend(chip);
+  document.getElementById('popAddr').textContent = addr;
+
+  document.getElementById('userNoWallet').style.display='none';
+  document.getElementById('userContent').style.display='';
+
+  await loadUserData();
+
+  if (_activeProvider && _activeProvider !== prov) try { _activeProvider.removeListener('accountsChanged',_onAccountsChanged); } catch(_){}
+  if (_activeProvider !== prov) { prov.on('accountsChanged',_onAccountsChanged); _activeProvider=prov; }
+  if (_refreshTimer) clearInterval(_refreshTimer);
+  _refreshTimer = setInterval(()=>{ if(walletAddr){ loadUserData(); } }, 30000);
+}
+
+async function ensureChain(prov) {
+  if (!info) return;
+  const hex = '0x'+info.chain_id.toString(16);
+  try { await prov.request({ method:'wallet_switchEthereumChain', params:[{chainId:hex}] }); }
+  catch(e) { if(e.code===4902) await prov.request({ method:'wallet_addEthereumChain', params:[{chainId:hex,chainName:'0G Galileo Testnet',nativeCurrency:{name:'0G',symbol:'0G',decimals:18},rpcUrls:[info.rpc_url],blockExplorerUrls:['https://chainscan-galileo.0g.ai']}] }); }
+}
+
+async function logout() {
+  if (_activeProvider) {
+    try { await _activeProvider.request({ method:'wallet_revokePermissions', params:[{eth_accounts:{}}] }); } catch(_){}
+    try { _activeProvider.removeListener('accountsChanged',_onAccountsChanged); } catch(_){}
+    _activeProvider = null;
+  }
+  walletAddr=null; signer=null; contract=null; selectedProvider=null;
+  if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer=null; }
+  localStorage.removeItem('walletUUID');
+  document.querySelectorAll('.addr-chip,.logout-btn').forEach(el=>el.remove());
+  document.getElementById('connectBtn').style.display='';
+  document.getElementById('walletPopover').classList.remove('open');
+  document.getElementById('popAddr').textContent='';
+  document.getElementById('popBalance').textContent='—';
+  document.getElementById('userNoWallet').style.display='';
+  document.getElementById('userContent').style.display='none';
+}
+
+// ── User Data ─────────────────────────────────────────────────────────────────
+async function loadUserData() {
+  if (!walletAddr) return;
+  try {
+    const provider = new ethers.BrowserProvider(_activeProvider);
+    const nativeBal = await provider.getBalance(walletAddr);
+    document.getElementById('popBalance').textContent = fmtNeuron(nativeBal.toString());
+  } catch(e) { console.error(e); }
+  await loadProviders();
+}
+
+// ── Providers + Sandboxes ─────────────────────────────────────────────────────
+let _pollTimer = null;
+
+async function loadProviders() {
+  if (!contract || !walletAddr) return;
+  const section = document.getElementById('providerSection');
+  try {
+    const providers = await fetch('/api/providers').then(r=>r.json()).catch(()=>[]);
+    if (!providers?.length) {
+      section.innerHTML = '<div class="empty" style="padding:40px 0">No providers registered yet.</div>';
+      return;
+    }
+
+    // Fetch sandboxes from each provider in parallel
+    const sbxByProvider = {};
+    await Promise.all(providers.map(async p => {
+      try {
+        const r = await fetch(`${p.url}/api/sandbox_list?wallet=${encodeURIComponent(walletAddr)}`);
+        sbxByProvider[p.address.toLowerCase()] = r.ok ? (await r.json() || []) : [];
+      } catch(_) { sbxByProvider[p.address.toLowerCase()] = []; }
+    }));
+
+    const [ackedArr, balancesArr] = await Promise.all([
+      Promise.all(providers.map(p => contract.isTEEAcknowledged(walletAddr, p.address).catch(()=>false))),
+      Promise.all(providers.map(p => contract.getBalance(walletAddr, p.address).catch(()=>[0n,0n,0n]))),
+    ]);
+
+    section.innerHTML = '';
+    providers.forEach((p, i) => {
+      const isAcked = ackedArr[i];
+      const mySbx   = sbxByProvider[p.address.toLowerCase()] || [];
+      const [bal, pendingRefund] = balancesArr[i];
+
+      const card = document.createElement('div');
+      card.className = 'card' + (isAcked ? ' pv-subscribed' : '');
+      card.id = 'pv-' + p.address.toLowerCase();
+      card.innerHTML = `
+        <div class="card-head">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span class="card-title" title="${p.address}">${shortAddr(p.address)}</span>
+            <span class="badge purple">v${p.signer_version}</span>
+            ${isAcked ? '<span class="badge green">✓ Subscribed</span>' : ''}
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+            <button class="btn btn-sm btn-ghost" onclick="loadProviders()">↻</button>
+            ${isAcked
+              ? `<button class="btn btn-sm btn-danger" onclick="doUnsubscribe('${p.address}',this)">Unsubscribe</button>`
+              : `<button class="btn btn-sm btn-prim" onclick="doSubscribe('${p.address}',this)">Subscribe</button>`
+            }
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="pv-pricing-row">
+            <div class="pv-price-box">
+              <span class="pv-price-label">CPU/min</span>
+              <span class="pv-price-val">${fmtNeuron(p.price_per_cpu_per_min)}</span>
+            </div>
+            <div class="pv-price-box">
+              <span class="pv-price-label">Mem/min</span>
+              <span class="pv-price-val">${fmtNeuron(p.price_per_mem_gb_per_min)}</span>
+            </div>
+            <div class="pv-price-box">
+              <span class="pv-price-label">Create fee</span>
+              <span class="pv-price-val">${fmtNeuron(p.create_fee)}</span>
+            </div>
+            <div class="pv-price-box">
+              <span class="pv-price-label">TEE</span>
+              <span class="pv-price-val" style="font-size:12px" title="${p.tee_signer}">${shortAddr(p.tee_signer)}</span>
+            </div>
+          </div>
+
+          ${isAcked ? `
+          <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+              <span style="font-size:12px;font-weight:600;color:var(--text2)">Your Balance</span>
+              <span style="font-size:15px;font-weight:700;font-family:var(--mono);color:var(--text)">${fmtNeuron(bal.toString())}</span>
+            </div>
+            ${BigInt(pendingRefund.toString())>0n ? `<div style="font-size:11.5px;color:var(--muted);margin-bottom:8px">Pending refund: ${fmtNeuron(pendingRefund.toString())}</div>` : ''}
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <input type="number" step="0.001" min="0.001" value="0.1" id="dep-amt-${p.address}" class="ia-input" style="width:80px">
+              <span class="ia-unit">0G</span>
+              <button class="btn btn-prim btn-sm" onclick="doDeposit('${p.address}',this)">⬆ Deposit</button>
+              <button class="btn btn-ghost btn-sm" onclick="doRefund('${p.address}',this)">↩ Refund</button>
+            </div>
+            <div class="err" id="dep-err-${p.address}" style="margin-top:4px"></div>
+          </div>` : ''}
+
+          <div class="pv-sandbox-section">
+            <div class="pv-sandbox-header">
+              <span style="font-size:12.5px;font-weight:600">Sandboxes</span>
+              ${isAcked ? `<button class="btn btn-sm btn-prim" onclick="setSelectedProvider(${JSON.stringify(p)});openModal('createModal')">+ Create</button>` : ''}
+            </div>
+            <div class="pv-sandbox-list">
+              ${renderSandboxRows(mySbx, p)}
+            </div>
+          </div>
+        </div>`;
+      section.appendChild(card);
+    });
+
+    const allSbx = Object.values(sbxByProvider).flat();
+    const transient = allSbx.some(s=>['starting','archiving','stopping'].includes((s.state||'').toLowerCase()));
+    transient ? _startPoll() : _stopPoll();
+  } catch(e) {
+    section.innerHTML = `<div class="empty">Failed to load: ${e.message}</div>`;
+  }
+}
+
+function setSelectedProvider(p) {
+  selectedProvider = p;
+}
+
+function sandboxLabel(s) {
+  const name = s.name && s.name !== s.id ? s.name : null;
+  return name
+    ? `<span style="font-weight:500">${name}</span> <span class="pv-sandbox-id" style="font-size:11px">${s.id?.slice(0,8)}…</span>`
+    : `<span class="pv-sandbox-id">${s.id?.slice(0,14)||'—'}…</span>`;
+}
+
+function renderSandboxRows(sandboxes, p) {
+  if (!sandboxes?.length) return '<div class="pv-sandbox-empty"><div style="font-size:22px;margin-bottom:6px">📭</div>No sandboxes yet. Create one to get started.</div>';
+  const pJson = JSON.stringify(p).replace(/"/g, '&quot;');
+  return sandboxes.map(s => `
+    <div class="pv-sandbox-row">
+      <span style="flex:1;min-width:0">${sandboxLabel(s)}</span>
+      ${stateTag(s.state)}
+      <div class="pv-sandbox-actions">
+        ${(s.state||'').toLowerCase()==='started' ? `<button class="btn btn-sm btn-ghost" onclick="setSelectedProvider(JSON.parse(this.dataset.p));doSSH('${s.id}')" data-p="${pJson}">SSH</button>` : ''}
+        ${['started','starting'].includes((s.state||'').toLowerCase()) ? `<button class="btn btn-sm btn-danger" onclick="setSelectedProvider(JSON.parse(this.dataset.p));doStop('${s.id}','${(s.name&&s.name!==s.id?s.name:s.id?.slice(0,8))||s.id}')" data-p="${pJson}">Stop</button>` : ''}
+        ${['archived','stopped'].includes((s.state||'').toLowerCase()) ? `<button class="btn btn-sm btn-prim" onclick="setSelectedProvider(JSON.parse(this.dataset.p));doStart('${s.id}')" data-p="${pJson}">Start</button>` : ''}
+        ${['archived','stopped','error'].includes((s.state||'').toLowerCase()) ? `<button class="btn btn-sm btn-ghost" onclick="setSelectedProvider(JSON.parse(this.dataset.p));doDelete('${s.id}','${(s.name&&s.name!==s.id?s.name:s.id?.slice(0,8))||s.id}')" data-p="${pJson}">Delete</button>` : ''}
+      </div>
+    </div>`).join('');
+}
+
+async function doSubscribe(addr, btn) {
+  btn.disabled = true;
+  await sendTx('Subscribe', () => contract.acknowledgeTEESigner(addr, true), {
+    onSuccess: () => loadProviders(),
+    onError:   () => { btn.disabled=false; },
+  });
+}
+
+async function doUnsubscribe(addr, btn) {
+  btn.disabled = true;
+  await sendTx('Unsubscribe', () => contract.acknowledgeTEESigner(addr, false), {
+    onSuccess: () => loadProviders(),
+    onError:   () => { btn.disabled=false; },
+  });
+}
+
+function _startPoll() {
+  if (_pollTimer) return;
+  _pollTimer = setInterval(async () => {
+    if (!selectedProvider) { await loadProviders(); return; }
+    const r = await fetch(`${selectedProvider.url}/api/sandbox_list?wallet=${encodeURIComponent(walletAddr)}`).catch(()=>null);
+    if (!r?.ok) return;
+    const list = await r.json().catch(()=>[]);
+    if (!list.some(s=>['starting','archiving','stopping'].includes((s.state||'').toLowerCase()))) {
+      _stopPoll(); await loadProviders();
+    }
+  }, 5000);
+}
+function _stopPoll() { if (_pollTimer) { clearInterval(_pollTimer); _pollTimer=null; } }
+
+// ── User Actions ──────────────────────────────────────────────────────────────
+async function doDeposit(providerAddr, btn) {
+  const amt = document.getElementById(`dep-amt-${providerAddr}`).value;
+  if (!amt || parseFloat(amt)<=0) { document.getElementById(`dep-err-${providerAddr}`).textContent='Enter a valid amount'; return; }
+  document.getElementById(`dep-err-${providerAddr}`).textContent='';
+  if (btn) { btn.disabled=true; btn.textContent='…'; }
+  await sendTx(`Deposit ${amt} 0G`, ()=>contract.deposit(walletAddr, providerAddr, {value:ethers.parseEther(amt)}), {
+    onSuccess: ()=>{ loadUserData(); loadProviders(); }, errEl:`dep-err-${providerAddr}`,
+  });
+  if (btn) { btn.disabled=false; btn.textContent='⬆ Deposit'; }
+}
+
+async function doRefund(providerAddr, btn) {
+  const amt = document.getElementById(`dep-amt-${providerAddr}`).value;
+  if (!amt || parseFloat(amt)<=0) { document.getElementById(`dep-err-${providerAddr}`).textContent='Enter a valid amount'; return; }
+  document.getElementById(`dep-err-${providerAddr}`).textContent='';
+  if (btn) { btn.disabled=true; btn.textContent='…'; }
+  await sendTx('Refund request', ()=>contract.requestRefund(providerAddr, ethers.parseEther(amt)), {
+    onSuccess: ()=>{ loadUserData(); loadProviders(); }, errEl:`dep-err-${providerAddr}`,
+  });
+  if (btn) { btn.disabled=false; btn.textContent='↩ Refund'; }
+}
+
+async function fetchSandboxIds() {
+  if (!selectedProvider) return new Set();
+  try { const r=await fetch(`${selectedProvider.url}/api/sandbox_list?wallet=${encodeURIComponent(walletAddr)}`); if(!r.ok) return new Set(); return new Set((await r.json()||[]).map(s=>s.id)); }
+  catch(_) { return new Set(); }
+}
+
+async function doCreate() {
+  if (!selectedProvider) { setErr('createErr','No provider selected'); return; }
+  const name=document.getElementById('sandboxName').value.trim();
+  const snapshot=document.getElementById('snapshotSelect').value;
+  setErr('createErr',''); setLoading('createErr','');
+  const btn=document.getElementById('createBtn'); btn.disabled=true; btn.textContent='Creating… (may take ~60s)';
+  const prevIds=await fetchSandboxIds();
+  const body={};
+  if (name) body.name=name;
+  if (snapshot) body.snapshot=snapshot;
+  try {
+    const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),180000);
+    const resp=await signedFetch('POST','/api/sandbox',body,ctrl.signal); clearTimeout(timer);
+    let data={}; try{ data=await resp.json(); }catch(_){}
+    if (!resp.ok) {
+      if (resp.status===402) { setErr('createErr',`Insufficient balance (have ${fmtNeuron(data.balance)}, need ${fmtNeuron(data.required)}). Deposit first.`); return; }
+      if (resp.status===409) { setErr('createErr',`Name "${name}" is already taken — choose a different name.`); return; }
+      setLoading('createErr','Checking if sandbox was created…');
+      await new Promise(r=>setTimeout(r,3000));
+      const created=[...(await fetchSandboxIds())].find(id=>!prevIds.has(id));
+      if (created) { try{await signedFetch('POST',`/api/sandbox/${created}/ensure-billing`);}catch(_){} toast('Sandbox created!','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; await loadProviders(); return; }
+      setErr('createErr',data.error||`HTTP ${resp.status} — please try again.`); return;
+    }
+    toast('Sandbox created!','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; await loadProviders();
+  } catch(e) {
+    if (e.name==='AbortError') {
+      setLoading('createErr','Checking if sandbox was created…'); await new Promise(r=>setTimeout(r,3000));
+      const created=[...(await fetchSandboxIds())].find(id=>!prevIds.has(id));
+      if (created) { try{await signedFetch('POST',`/api/sandbox/${created}/ensure-billing`);}catch(_){} toast('Sandbox created!','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; await loadProviders(); return; }
+      setErr('createErr','Request timed out — please try again.');
+    } else { setErr('createErr',e.message); }
+  }
+  btn.disabled=false; btn.textContent='Create & Start';
+}
+
+async function doStop(id, label) {
+  if (!confirm(`Stop sandbox "${label||id}"?`)) return;
+  const r=await signedFetch('POST',`/api/sandbox/${id}/stop`).catch(e=>{toast(e.message,'error');return null});
+  if (!r) return;
+  if (!r.ok) { const d=await r.json().catch(()=>{}); toast(d?.error||'Failed','error'); return; }
+  toast('Sandbox stopped','success'); await loadProviders();
+}
+
+async function doStart(id) {
+  const r=await signedFetch('POST',`/api/sandbox/${id}/start`).catch(e=>{toast(e.message,'error');return null});
+  if (!r) return;
+  if (!r.ok) { let d={}; try{d=await r.json();}catch(_){} toast(d.error||'Failed to start','error'); return; }
+  toast('Sandbox starting…','success'); await loadProviders();
+}
+
+async function doDelete(id, label) {
+  if (!confirm(`Delete sandbox "${label||id}"? This cannot be undone.`)) return;
+  const r=await signedFetch('DELETE',`/api/sandbox/${id}`).catch(e=>{toast(e.message,'error');return null});
+  if (!r) return;
+  if (!r.ok) { let d={}; try{d=await r.json();}catch(_){} toast(d.error||'Failed to delete','error'); return; }
+  toast('Sandbox deleted','success'); await loadProviders();
+}
+
+async function doSSH(id) {
+  document.getElementById('sshCommand').textContent='Loading…'; openModal('sshModal');
+  try {
+    const resp=await signedFetch('POST',`/api/sandbox/${id}/ssh-access`);
+    const data=await resp.json().catch(()=>({}));
+    if (!resp.ok) { document.getElementById('sshCommand').textContent=data.error||'Failed'; return; }
+    const cmd=data.sshCommand||'';
+    document.getElementById('sshCommand').textContent=cmd.includes('@localhost')?cmd.replace('@localhost','@'+window.location.hostname):cmd;
+  } catch(e) { document.getElementById('sshCommand').textContent=e.message; }
+}
+
+function copySSH() {
+  navigator.clipboard.writeText(document.getElementById('sshCommand').textContent)
+    .then(()=>toast('Copied!','success')).catch(()=>toast('Copy failed','error'));
+}
+
+async function loadSnapshots() {
+  if (!selectedProvider) return;
+  try {
+    const snaps=await fetch(`${selectedProvider.url}/api/snapshots`).then(r=>r.ok?r.json():[]).catch(()=>[]);
+    const sel=document.getElementById('snapshotSelect');
+    sel.innerHTML='<option value="">— Default (no snapshot) —</option>';
+    (snaps||[]).filter(s=>s.state==='active').forEach(s=>{
+      const opt=document.createElement('option');
+      opt.value=s.name; opt.textContent=`${s.name}  (${s.cpu}C / ${s.mem}GB)`;
+      sel.appendChild(opt);
+    });
+  } catch(_) {}
+}
+
+// ── Auth-signed fetch ─────────────────────────────────────────────────────────
+function genUUID() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{ const r=crypto.getRandomValues(new Uint8Array(1))[0]&15; return(c==='x'?r:(r&0x3|0x8)).toString(16); });
+}
+async function signedFetch(method, path, body=null, signal=null) {
+  const baseURL = selectedProvider ? selectedProvider.url : '';
+  const msg={action:method+':'+path,expires_at:Math.floor(Date.now()/1000)+300,nonce:genUUID(),payload:body||{},resource_id:''};
+  const msgStr=JSON.stringify(msg), sig=await signer.signMessage(msgStr);
+  return fetch(baseURL+path,{method,headers:{'Content-Type':'application/json','X-Wallet-Address':walletAddr,'X-Signed-Message':btoa(msgStr),'X-Wallet-Signature':sig},body:body?JSON.stringify(body):undefined,signal});
+}
+
+// ── Modals ─────────────────────────────────────────────────────────────────────
+function openModal(id)  { document.getElementById(id).classList.add('open'); if(id==='createModal') loadSnapshots(); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-bg').forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) m.classList.remove('open'); }));
+
+// ── Tx helpers ────────────────────────────────────────────────────────────────
+function cleanErr(e) {
+  if (e.reason) return e.reason;
+  if (e.message) { const m=e.message,cut=m.indexOf('(action='); if(cut>0) return m.slice(0,cut).trim(); return m.length>140?m.slice(0,140)+'…':m; }
+  return String(e);
+}
+function pushToast(msg,type) {
+  const el=document.createElement('div'); el.className='toast'+(type&&type!=='info'?' '+type:''); el.textContent=msg;
+  document.getElementById('toast').appendChild(el); return el;
+}
+function updateToast(el,msg,type,hash,autoRemove) {
+  el.className='toast'+(type&&type!=='info'?' '+type:'');
+  if (hash) { el.innerHTML=''; const s=document.createElement('span'); s.textContent=msg; el.appendChild(s); const a=document.createElement('a'); a.href='https://chainscan-galileo.0g.ai/tx/'+hash; a.target='_blank'; a.rel='noopener'; a.textContent='↗ View tx'; el.appendChild(a); }
+  else { el.textContent=msg; }
+  if (autoRemove) setTimeout(()=>el.remove(),type==='error'?8000:6000);
+}
+async function sendTx(label,txFn,{onSuccess,onError,errEl}={}) {
+  const t=pushToast(label+'…','pending');
+  try {
+    const tx=await txFn(); updateToast(t,label+' submitted','pending',tx.hash);
+    const receipt=await tx.wait(); updateToast(t,label+' confirmed','success',tx.hash,true);
+    if(onSuccess) await onSuccess(receipt);
+  } catch(e) {
+    const msg=cleanErr(e); updateToast(t,label+' failed: '+msg,'error',null,true);
+    if(errEl){ const node=typeof errEl==='string'?document.getElementById(errEl):errEl; if(node) node.textContent=msg; }
+    if(onError) onError(e);
+  }
+}
+function toast(msg,type='info') { const el=pushToast(msg,type); setTimeout(()=>el.remove(),4000); }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function stateBadge(s) {
+  switch((s||'').toLowerCase()){case'started':return'green';case'starting':return'blue';case'archived':case'archiving':return'gray';case'error':return'red';default:return'';}
+}
+function fmtNeuron(s) {
+  if(!s||s==='0') return '0 0G';
+  const n=BigInt(s); if(n===0n) return '0 0G';
+  const val=Number(n)/1e18;
+  return val>=0.000001 ? val.toFixed(6).replace(/\.?0+$/,'')+' 0G' : val.toExponential(2)+' 0G';
+}
+function fmtTime(ts) { return ts?new Date(ts*1000).toLocaleString():'—'; }
+function shortAddr(a) { if(!a||a.length<12) return a||'—'; return a.slice(0,8)+'…'+a.slice(-6); }
+function stateTag(state) {
+  const s=(state||'').toLowerCase();
+  const cls=s==='started'?'running':s==='archived'?'archived':s==='stopped'?'stopped':s==='error'?'error':'starting';
+  return `<span class="tag ${cls}"><span class="tag-dot"></span>${state||'—'}</span>`;
+}
+function setErr(id,msg){ const el=document.getElementById(id); if(!el) return; el.textContent=msg; el.className=msg?'err':''; }
+function setLoading(id,msg){ const el=document.getElementById(id); if(!el) return; el.textContent=msg; el.className=msg?'loading':''; }
+function setBusy(id,busy){ const el=document.getElementById(id); if(el){ el.disabled=busy; el.textContent=busy?'…':(el.dataset.label||el.textContent); } }
+</script>
+</body>
+</html>

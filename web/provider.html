@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0G Sandbox — Provider</title>
+<script src="/static/ethers.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  color-scheme: light;
+  --p:   oklch(72% 0.22 310);
+  --pd:  oklch(62% 0.24 310);
+  --pbg: oklch(96% 0.05 310);
+  --pbd: oklch(84% 0.12 310);
+  --text:   oklch(14% 0 0);
+  --text2:  oklch(40% 0 0);
+  --muted:  oklch(52% 0 0);
+  --border: oklch(91% 0 0);
+  --bg:     oklch(100% 0 0);
+  --surf:   oklch(100% 0 0);
+  --surf2:  oklch(97.5% 0 0);
+  --green: oklch(44% 0.15 145); --gbg: oklch(97% 0.03 145); --gbd: oklch(82% 0.08 145);
+  --red:   oklch(42% 0.18 25);  --rbg: oklch(97.5% 0.03 25);  --rbd: oklch(82% 0.09 25);
+  --orange:oklch(57% 0.16 55);  --obg: oklch(97.5% 0.03 55);  --obd: oklch(82% 0.09 55);
+  --sans: 'Syne', -apple-system, sans-serif;
+  --mono: 'Roboto Mono', 'Courier New', monospace;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --t-fast: 120ms; --t-base: 220ms; --t-slow: 350ms;
+  --r-sm: 6px; --r: 10px; --r-lg: 14px;
+  --sh-sm: 0 1px 2px oklch(0% 0 0 / 0.04);
+  --sh:    0 2px 8px oklch(0% 0 0 / 0.07), 0 1px 3px oklch(0% 0 0 / 0.04);
+  --sh-lg: 0 8px 28px oklch(0% 0 0 / 0.10), 0 3px 8px oklch(0% 0 0 / 0.05);
+}
+body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--text);background:var(--bg);min-height:100vh;-webkit-font-smoothing:antialiased;font-kerning:normal}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
+/* ─ Topbar ─ */
+.topbar{background:var(--surf);border-bottom:1px solid var(--border);height:60px;display:flex;align-items:center;padding:0 clamp(16px,4vw,40px);position:sticky;top:0;z-index:100}
+.logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px;letter-spacing:-.02em;color:var(--text)}
+.logo-sub{font-size:12px;color:var(--muted);font-weight:400;margin-left:2px}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.chain-tag{display:flex;align-items:center;gap:6px;background:var(--pbg);color:var(--pd);border:1px solid var(--pbd);border-radius:9999px;padding:4px 12px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0}
+.btn-connect{background:var(--text);color:#fff;border:none;border-radius:var(--r);padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);letter-spacing:-.01em;transition:background var(--t-fast) ease,transform var(--t-fast) ease}
+.btn-connect:hover{background:oklch(50% 0.28 303)}
+.btn-connect:active{background:oklch(42% 0.28 303);transform:translateY(1px)}
+.addr-chip{background:var(--surf2);color:var(--text);border:1px solid var(--border);border-radius:var(--r);padding:5px 12px;font-size:12px;font-family:var(--mono);cursor:pointer;user-select:none;transition:background var(--t-fast) ease,border-color var(--t-fast) ease;font-weight:500}
+.addr-chip:hover{background:oklch(94% 0 0);border-color:oklch(78% 0 0)}
+
+/* ─ Wallet Popover ─ */
+.wallet-popover{position:fixed;top:64px;right:clamp(12px,3vw,24px);width:264px;background:var(--surf);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-lg);z-index:200;overflow:hidden;display:none}
+.wallet-popover.open{display:block;animation:fadeDown var(--t-base) var(--ease-out)}
+@keyframes fadeDown{from{transform:translateY(-6px);opacity:0}to{transform:translateY(0);opacity:1}}
+.wp-head{padding:14px 16px;border-bottom:1px solid var(--border);background:var(--surf2)}
+.wp-label{font-size:10px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.07em;font-weight:600}
+.wp-addr{font-family:var(--mono);font-size:11.5px;color:var(--text);word-break:break-all;line-height:1.6}
+.wp-body{padding:12px 16px}
+.wp-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.wp-k{font-size:12px;color:var(--muted)}
+.wp-v{font-size:13px;font-weight:600;font-family:var(--mono);color:var(--text);font-variant-numeric:tabular-nums}
+.wp-actions{display:flex;gap:6px;margin-top:12px}
+.wp-btn{flex:1;padding:7px 0;border-radius:var(--r-sm);font-size:12px;font-weight:500;cursor:pointer;font-family:var(--sans);border:1px solid var(--border);background:var(--surf);color:var(--text);transition:background var(--t-fast)}
+.wp-btn:hover{background:var(--bg)}
+.wp-btn.danger{border-color:var(--rbd);color:var(--red)}
+.wp-btn.danger:hover{background:var(--rbg)}
+
+/* ─ Page ─ */
+.page{max-width:1100px;margin:0 auto;padding:clamp(24px,4vw,40px) clamp(16px,4vw,40px) 80px;animation:pageIn var(--t-slow) var(--ease-out)}
+@keyframes pageIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.two-col{display:grid;grid-template-columns:1fr 260px;gap:16px;align-items:start}
+@media(max-width:800px){.two-col{grid-template-columns:1fr}}
+
+/* ─ Card ─ */
+.card{background:var(--surf);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:16px;transition:border-color var(--t-base) var(--ease-out)}
+.card:hover{border-color:oklch(82% 0 0)}
+.card-head{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--surf)}
+.card-title{font-size:12px;font-weight:700;color:var(--text);letter-spacing:.05em;text-transform:uppercase}
+.card-meta{font-size:12px;color:var(--muted)}
+.card-body{padding:20px}
+
+/* ─ Info rows ─ */
+.info-row{display:flex;justify-content:space-between;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--border);gap:12px}
+.info-row:last-child{border-bottom:none}
+.ik{font-size:12px;color:var(--muted);font-weight:500;flex-shrink:0}
+.iv{font-family:var(--mono);font-size:12px;text-align:right;word-break:break-all;color:var(--text);font-variant-numeric:tabular-nums}
+.iv.purple{color:var(--pd);font-weight:600}
+.iv.green{color:var(--green);font-weight:500}
+.iv.big{font-size:22px;font-weight:700;font-family:var(--sans);color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+
+/* ─ Badges ─ */
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:9999px;border:1px solid transparent;letter-spacing:.06em;text-transform:uppercase;font-family:var(--sans)}
+.badge.green{background:var(--gbg);color:var(--green);border-color:var(--gbd)}
+.badge.red{background:var(--rbg);color:var(--red);border-color:var(--rbd)}
+.badge.purple{background:var(--pbg);color:var(--p);border-color:var(--pbd)}
+.badge.orange{background:var(--obg);color:var(--orange);border-color:var(--obd)}
+.badge.blue{background:oklch(96% 0.04 250);color:oklch(44% 0.18 250);border-color:oklch(82% 0.10 250)}
+.badge.gray{background:var(--surf2);color:var(--text2);border-color:var(--border)}
+
+/* ─ Buttons ─ */
+.btn{display:inline-flex;align-items:center;gap:5px;border:none;border-radius:var(--r-sm);padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);transition:background var(--t-fast) ease,border-color var(--t-fast) ease,color var(--t-fast) ease,transform var(--t-fast) ease;letter-spacing:-.01em;white-space:nowrap}
+.btn:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+.btn-prim{background:var(--text);color:#fff}
+.btn-prim:not(:disabled):hover{background:oklch(50% 0.28 303)}
+.btn-prim:active{background:oklch(42% 0.28 303);transform:translateY(1px)}
+.btn-ghost{background:var(--surf);color:var(--text);border:1px solid var(--border)}
+.btn-ghost:not(:disabled):hover{background:var(--pbg);border-color:var(--pbd);color:var(--pd)}
+.btn-ghost:active{background:var(--pbd);transform:translateY(1px)}
+.btn-warn{background:var(--obg);color:var(--orange);border:1px solid var(--obd)}
+.btn-warn:not(:disabled):hover{background:var(--obd)}
+.btn-sm{padding:4px 10px;font-size:11px;letter-spacing:.02em}
+.btn-danger{background:var(--rbg);color:var(--red);border:1px solid var(--rbd)}
+.btn-danger:not(:disabled):hover{background:var(--rbd)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+
+/* ─ Table ─ */
+table{width:100%;border-collapse:collapse}
+thead th{padding:9px 14px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;background:var(--surf2);border-bottom:1px solid var(--border)}
+tbody td{padding:10px 14px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:middle}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:var(--surf2)}
+.mono{font-family:var(--mono);font-size:12px;color:var(--text2);font-variant-numeric:tabular-nums}
+
+/* ─ Modal ─ */
+.modal-bg{position:fixed;inset:0;background:oklch(0% 0 0 / 0.35);backdrop-filter:blur(2px);display:none;align-items:center;justify-content:center;z-index:300}
+.modal-bg.open{display:flex}
+.modal{background:var(--surf);border-radius:var(--r-lg);padding:28px;width:400px;max-width:95vw;box-shadow:var(--sh-lg);animation:modalin var(--t-base) var(--ease-out);border:1px solid var(--border)}
+@keyframes modalin{from{transform:translateY(-10px) scale(.98);opacity:0}to{transform:translateY(0) scale(1);opacity:1}}
+.modal-title{font-size:16px;font-weight:700;margin-bottom:20px;letter-spacing:-.01em;color:var(--text)}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.06em}
+.field input,.field select{width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px;font-family:var(--sans);outline:none;transition:border-color var(--t-fast) ease,box-shadow var(--t-fast) ease;background:var(--surf);color:var(--text)}
+.field input:focus,.field select:focus{border-color:var(--p);box-shadow:0 0 0 3px var(--pbg)}
+.field .hint{font-size:11.5px;color:var(--muted);margin-top:4px}
+.modal-btns{display:flex;gap:8px;margin-top:20px;justify-content:flex-end}
+
+/* ─ Misc ─ */
+.empty{color:var(--muted);font-size:13px;padding:32px 20px;text-align:center;line-height:1.6}
+.empty-icon{font-size:24px;margin-bottom:8px}
+.err{color:var(--red);font-size:12px;margin-top:4px}
+.loading{color:var(--muted);font-size:12px;margin-top:6px}
+.wallet-required{text-align:center;padding:60px 20px;color:var(--muted)}
+.wallet-required .icon{font-size:36px;margin-bottom:12px}
+.wallet-required p{font-size:13.5px;margin-bottom:20px;max-width:280px;margin-left:auto;margin-right:auto;line-height:1.7}
+
+/* ─ Toast ─ */
+#toast{position:fixed;bottom:24px;right:24px;z-index:999;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.toast{background:var(--text);color:#fff;border-radius:var(--r);padding:10px 16px;font-size:13px;min-width:220px;max-width:360px;box-shadow:var(--sh-lg);animation:slidein var(--t-base) var(--ease-out);pointer-events:auto;line-height:1.5;font-weight:500}
+.toast.success{background:oklch(32% 0.12 145)}.toast.error{background:oklch(32% 0.14 25)}.toast.pending{background:oklch(36% 0.12 55)}
+.toast a{color:oklch(90% 0.03 264);text-decoration:underline;margin-left:6px}
+@keyframes slidein{from{transform:translateX(12px);opacity:0}to{transform:translateX(0);opacity:1}}
+</style>
+</head>
+<body>
+
+<!-- Topbar -->
+<header class="topbar">
+  <div class="logo">
+    <img src="/static/logo.svg" width="50" height="30" alt="0G" style="flex-shrink:0;display:block">
+    0G Sandbox<span class="logo-sub">Provider Dashboard</span>
+  </div>
+  <div class="topbar-right">
+    <div class="chain-tag" id="chainTag"><div class="dot"></div>0G Galileo</div>
+    <button class="btn-connect" id="connectBtn" onclick="connectWallet()">Connect Wallet</button>
+  </div>
+</header>
+
+<!-- Wallet Popover -->
+<div class="wallet-popover" id="walletPopover">
+  <div class="wp-head">
+    <div class="wp-label">Wallet Address</div>
+    <div class="wp-addr" id="popAddr"></div>
+  </div>
+  <div class="wp-body">
+    <div class="wp-row">
+      <span class="wp-k">Native Balance</span>
+      <span class="wp-v" id="popBalance">—</span>
+    </div>
+    <div class="wp-actions">
+      <button class="wp-btn" onclick="copyWalletAddr()">Copy Address</button>
+      <button class="wp-btn danger" onclick="logout()">Logout</button>
+    </div>
+  </div>
+</div>
+
+<!-- Provider Content -->
+<div class="page">
+
+  <div id="providerNoWallet" class="wallet-required">
+    <div class="icon">🏭</div>
+    <p>Connect your wallet to manage your provider service.</p>
+    <button class="btn btn-prim" onclick="connectWallet()">Connect Wallet</button>
+  </div>
+
+  <div id="providerContent" style="display:none">
+    <div class="two-col">
+
+      <div>
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">Service Status</span>
+            <button class="btn btn-sm btn-prim" onclick="openModal('serviceModal')">Register / Update</button>
+          </div>
+          <div class="card-body">
+            <div class="info-row"><span class="ik">Registered</span><span id="svcRegistered">—</span></div>
+            <div class="info-row"><span class="ik">Service URL</span><span class="iv" id="svcUrl">—</span></div>
+            <div class="info-row"><span class="ik">TEE Signer</span><span class="iv purple" id="svcTEE">—</span></div>
+            <div class="info-row"><span class="ik">CPU Price/min</span><span class="iv" id="svcCPUPrice">—</span></div>
+            <div class="info-row"><span class="ik">Mem Price/GB/min</span><span class="iv" id="svcMemPrice">—</span></div>
+            <div class="info-row"><span class="ik">Create Fee</span><span class="iv" id="svcFee">—</span></div>
+            <div class="info-row"><span class="ik">Required Stake</span><span class="iv" id="svcStake">—</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">Earnings</span><button class="btn btn-sm btn-ghost" onclick="loadProviderData()">↻</button></div>
+          <div class="card-body">
+            <div class="info-row"><span class="ik">Accumulated</span><span class="iv big" id="providerEarnings">—</span></div>
+            <div class="info-row"><span class="ik">Staked</span><span class="iv" id="providerStaked">—</span></div>
+            <button class="btn btn-sm btn-prim" style="margin-top:14px" onclick="withdrawEarnings()">Withdraw Earnings</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div id="snapshotsSection" class="card" style="margin-top:4px;display:none">
+      <div class="card-head">
+        <span class="card-title">Snapshots</span>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm btn-ghost" onclick="loadProviderSnapshots()">↻</button>
+          <button class="btn btn-sm btn-ghost" onclick="openModal('importModal')">↓ Import Image</button>
+          <button class="btn btn-sm btn-prim" onclick="openSnapshotModal()">+ New</button>
+        </div>
+      </div>
+      <div class="card-body" style="padding:0">
+        <div id="snapshotTable"><div class="empty">Click ↻ to load snapshots.</div></div>
+      </div>
+    </div>
+
+    <div id="allSandboxesSection" class="card" style="margin-top:4px;display:none">
+      <div class="card-head">
+        <span class="card-title">All Sandboxes</span>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm btn-warn" id="archiveAllBtn" onclick="doArchiveAll()">Archive All</button>
+          <button class="btn btn-sm btn-ghost" onclick="loadAllSandboxes()">↻</button>
+        </div>
+      </div>
+      <div class="card-body" style="padding:0">
+        <div id="allSandboxTable"><div class="empty">Click Refresh to load.</div></div>
+      </div>
+    </div>
+
+    <div id="eventsSection" class="card" style="margin-top:16px;display:none">
+      <div class="card-head">
+        <span class="card-title">Voucher Settlement History</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="evtRange" style="font-size:12px;padding:3px 8px;border:1px solid var(--border);border-radius:4px">
+            <option value="1800">Last 1h</option>
+            <option value="43200" selected>Last 24h</option>
+            <option value="302400">Last 7d</option>
+            <option value="0">All history</option>
+          </select>
+          <button class="btn btn-sm btn-ghost" onclick="loadEvents()">Load</button>
+          <span id="evtMeta" style="font-size:11px;color:var(--muted)"></span>
+        </div>
+      </div>
+      <div class="card-body" style="padding:0">
+        <div id="eventsTable"><div class="empty">Click Load to fetch on-chain events.</div></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══ Modals ═══ -->
+
+<div class="modal-bg" id="serviceModal">
+  <div class="modal">
+    <div class="modal-title">Register / Update Service</div>
+    <div class="field"><label>Service URL</label><input id="svcUrlInput" type="text" placeholder="https://your-daytona-url"></div>
+    <div class="field"><label>TEE Signer Address</label><input id="svcTEEInput" type="text" placeholder="0x..."></div>
+    <div class="field"><label>CPU Price / min (neuron)</label><input id="svcCPUPriceInput" type="number" value="1000000000000000" min="0"></div>
+    <div class="field"><label>Mem Price / GB / min (neuron)</label><input id="svcMemPriceInput" type="number" value="500000000000000" min="0"></div>
+    <div class="field"><label>Create Fee (neuron)</label><input id="svcFeeInput" type="number" value="5000000" min="0"></div>
+    <div class="field">
+      <label>Stake (0G) — required for first registration</label>
+      <input id="svcStakeInput" type="number" step="0.001" value="0" min="0">
+    </div>
+    <div class="err" id="serviceErr"></div>
+    <div class="modal-btns">
+      <button class="btn btn-ghost" onclick="closeModal('serviceModal')">Cancel</button>
+      <button class="btn btn-prim" onclick="doRegisterService()">Submit</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="snapshotModal">
+  <div class="modal">
+    <div class="modal-title">Register Snapshot</div>
+    <div class="field"><label>Image</label><select id="snapImageSelect" style="width:100%"><option value="">Loading…</option></select></div>
+    <div class="field"><label>Name</label><input id="snapNameInput" type="text" placeholder="my-snapshot"></div>
+    <div class="field"><label>Resources</label><select id="snapPresetSelect" style="width:100%">
+      <option value="1:1:3">Small — 1 CPU / 1 GB RAM / 3 GB Disk</option>
+      <option value="2:4:10">Medium — 2 CPU / 4 GB RAM / 10 GB Disk</option>
+      <option value="4:8:20">Large — 4 CPU / 8 GB RAM / 20 GB Disk</option>
+    </select></div>
+    <div class="err" id="snapshotErr"></div>
+    <div class="modal-btns">
+      <button class="btn btn-ghost" onclick="closeModal('snapshotModal')">Cancel</button>
+      <button class="btn btn-prim" id="snapshotSubmitBtn" onclick="doRegisterSnapshot()">Register</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="importModal">
+  <div class="modal">
+    <div class="modal-title">Import Image from External Registry</div>
+    <div class="field"><label>Source Image</label><input id="importSrc" type="text" placeholder="e.g. docker.io/library/ubuntu:22.04"></div>
+    <div class="field"><label>Username <span style="color:var(--muted);font-weight:400">(optional)</span></label><input id="importUser" type="text" placeholder="registry username"></div>
+    <div class="field"><label>Password <span style="color:var(--muted);font-weight:400">(optional)</span></label><input id="importPass" type="password" placeholder="registry password or token"></div>
+    <div class="field"><label>Target Name</label><input id="importName" type="text" placeholder="my-image (stored as registry:6000/daytona/my-image)"></div>
+    <div class="field"><label>Target Tag</label><input id="importTag" type="text" placeholder="1.0.0 (not latest)"></div>
+    <div class="err" id="importErr"></div>
+    <div id="importProgress" style="display:none;font-size:12px;color:var(--muted);margin-top:4px">Pulling image… this may take a few minutes for large images.</div>
+    <div class="modal-btns">
+      <button class="btn btn-ghost" onclick="closeModal('importModal')">Cancel</button>
+      <button class="btn btn-prim" id="importSubmitBtn" onclick="doImportImage()">Import</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="walletModal">
+  <div class="modal">
+    <div class="modal-title">Select Wallet</div>
+    <div id="walletList" style="display:flex;flex-direction:column;gap:8px;margin-top:4px"></div>
+    <div class="modal-btns"><button class="btn btn-ghost" onclick="closeModal('walletModal')">Cancel</button></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── Config from URL params ────────────────────────────────────────────────────
+const _params = new URLSearchParams(window.location.search);
+const CONTRACT_ADDRESS = _params.get('contract') || '0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3';
+const RPC_URL          = _params.get('rpc')      || 'https://evmrpc-testnet.0g.ai';
+const CHAIN_ID         = parseInt(_params.get('chain_id') || '16602', 10);
+const providerApiUrl   = _params.get('api') || '';
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let walletAddr = null, signer = null, contract = null;
+const eip6963Providers = new Map();
+let _refreshTimer = null, _activeProvider = null;
+function _onAccountsChanged(a) {
+  if (!a || !a.length) { location.reload(); return; }
+  initWallet(a[0], _activeProvider);
+}
+
+// Synthetic info object (mirrors what billing server returns)
+const info = {
+  contract_address: CONTRACT_ADDRESS,
+  chain_id: CHAIN_ID,
+  rpc_url: RPC_URL,
+};
+
+const ABI = [
+  "function providerStake() view returns (uint256)",
+  "function services(address) view returns (string url, address teeSignerAddress, uint256 pricePerCPUPerMin, uint256 createFee, uint256 signerVersion, uint256 pricePerMemGBPerMin)",
+  "function serviceExists(address) view returns (bool)",
+  "function providerEarnings(address) view returns (uint256)",
+  "function providerStakes(address) view returns (uint256)",
+  "function addOrUpdateService(string url, address teeSignerAddress, uint256 pricePerCPUPerMin, uint256 createFee, uint256 pricePerMemGBPerMin) payable",
+  "function withdrawEarnings()",
+];
+
+window.addEventListener('eip6963:announceProvider', e => eip6963Providers.set(e.detail.info.uuid, e.detail));
+window.dispatchEvent(new Event('eip6963:requestProvider'));
+
+window.onload = async () => {
+  document.getElementById('chainTag').innerHTML = `<div class="dot"></div>Chain ${CHAIN_ID}`;
+
+  // Show API sections if providerApiUrl is set
+  if (providerApiUrl) {
+    document.getElementById('snapshotsSection').style.display = '';
+    document.getElementById('allSandboxesSection').style.display = '';
+    document.getElementById('eventsSection').style.display = '';
+  }
+
+  const lastUUID = localStorage.getItem('walletUUID');
+  if (lastUUID && eip6963Providers.has(lastUUID)) {
+    const p = eip6963Providers.get(lastUUID).provider;
+    const a = await p.request({ method:'eth_accounts' }).catch(()=>[]);
+    if (a.length) { await initWallet(a[0], p); return; }
+  }
+  if (window.ethereum) {
+    const a = await window.ethereum.request({ method:'eth_accounts' }).catch(()=>[]);
+    if (a.length) { await initWallet(a[0], window.ethereum); return; }
+  }
+};
+
+// ── Wallet Popover ────────────────────────────────────────────────────────────
+function toggleWalletPopover(e) {
+  e.stopPropagation();
+  const p = document.getElementById('walletPopover');
+  p.classList.toggle('open');
+}
+document.addEventListener('click', e => {
+  const p = document.getElementById('walletPopover');
+  if (p.classList.contains('open') && !p.contains(e.target)) p.classList.remove('open');
+});
+function copyWalletAddr() {
+  navigator.clipboard.writeText(walletAddr).then(()=>toast('Address copied','success'));
+}
+
+// ── Wallet ────────────────────────────────────────────────────────────────────
+function connectWallet() {
+  const list = document.getElementById('walletList'); list.innerHTML = '';
+  const wallets = [...eip6963Providers.values()];
+  if (window.ethereum && !wallets.length) wallets.push({ info:{ uuid:'__legacy__', name:'Browser Wallet', icon:'' }, provider:window.ethereum });
+  if (!wallets.length) { list.innerHTML='<p style="color:var(--muted);font-size:13px">No wallets detected.</p>'; openModal('walletModal'); return; }
+  wallets.forEach(({ info:wi, provider:prov }) => {
+    const btn = document.createElement('button');
+    btn.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surf);cursor:pointer;font-family:inherit;font-size:13.5px;font-weight:500;width:100%;transition:background .15s';
+    btn.onmouseover = () => btn.style.background='var(--pbg)';
+    btn.onmouseout  = () => btn.style.background='var(--surf)';
+    if (wi.icon) { const img=document.createElement('img'); img.src=wi.icon; img.width=img.height=28; img.style.borderRadius='6px'; btn.appendChild(img); }
+    btn.appendChild(document.createTextNode(wi.name));
+    btn.onclick = () => { closeModal('walletModal'); selectWallet(wi.uuid, prov); };
+    list.appendChild(btn);
+  });
+  openModal('walletModal');
+}
+
+async function selectWallet(uuid, prov) {
+  try {
+    await ensureChain(prov);
+    const accounts = await prov.request({ method:'eth_requestAccounts' });
+    if (uuid !== '__legacy__') localStorage.setItem('walletUUID', uuid);
+    await initWallet(accounts[0], prov);
+  } catch(e) { toast(e.message,'error'); }
+}
+
+async function initWallet(addr, prov) {
+  walletAddr = addr;
+  const provider = new ethers.BrowserProvider(prov);
+  signer = await provider.getSigner();
+  contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
+
+  document.querySelectorAll('.addr-chip,.logout-btn').forEach(el=>el.remove());
+  document.getElementById('connectBtn').style.display = 'none';
+  const chip = document.createElement('div');
+  chip.className='addr-chip'; chip.textContent=shortAddr(addr); chip.title=addr;
+  chip.onclick = toggleWalletPopover;
+  document.querySelector('.topbar-right').prepend(chip);
+  document.getElementById('popAddr').textContent = addr;
+
+  document.getElementById('providerNoWallet').style.display='none';
+  document.getElementById('providerContent').style.display='';
+
+  await loadProviderData();
+
+  if (_activeProvider && _activeProvider !== prov) try { _activeProvider.removeListener('accountsChanged',_onAccountsChanged); } catch(_){}
+  if (_activeProvider !== prov) { prov.on('accountsChanged',_onAccountsChanged); _activeProvider=prov; }
+  if (_refreshTimer) clearInterval(_refreshTimer);
+  _refreshTimer = setInterval(()=>{ if(walletAddr) loadProviderData(); }, 30000);
+
+  // Update native balance
+  try {
+    const nativeBal = await provider.getBalance(addr);
+    document.getElementById('popBalance').textContent = fmtNeuron(nativeBal.toString());
+  } catch(_) {}
+}
+
+async function ensureChain(prov) {
+  const hex = '0x'+CHAIN_ID.toString(16);
+  try { await prov.request({ method:'wallet_switchEthereumChain', params:[{chainId:hex}] }); }
+  catch(e) { if(e.code===4902) await prov.request({ method:'wallet_addEthereumChain', params:[{chainId:hex,chainName:'0G Galileo Testnet',nativeCurrency:{name:'0G',symbol:'0G',decimals:18},rpcUrls:[RPC_URL],blockExplorerUrls:['https://chainscan-galileo.0g.ai']}] }); }
+}
+
+async function logout() {
+  if (_activeProvider) {
+    try { await _activeProvider.request({ method:'wallet_revokePermissions', params:[{eth_accounts:{}}] }); } catch(_){}
+    try { _activeProvider.removeListener('accountsChanged',_onAccountsChanged); } catch(_){}
+    _activeProvider = null;
+  }
+  walletAddr=null; signer=null; contract=null;
+  if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer=null; }
+  localStorage.removeItem('walletUUID');
+  document.querySelectorAll('.addr-chip,.logout-btn').forEach(el=>el.remove());
+  document.getElementById('connectBtn').style.display='';
+  document.getElementById('walletPopover').classList.remove('open');
+  document.getElementById('popAddr').textContent='';
+  document.getElementById('popBalance').textContent='—';
+  document.getElementById('providerNoWallet').style.display='';
+  document.getElementById('providerContent').style.display='none';
+}
+
+// ── Provider Data ─────────────────────────────────────────────────────────────
+async function loadProviderData() {
+  if (!contract || !walletAddr) return;
+  try {
+    const exists=await contract.serviceExists(walletAddr);
+    document.getElementById('svcRegistered').innerHTML=exists?'<span class="badge green">✓ Registered</span>':'<span class="badge red">✗ Not Registered</span>';
+    if (exists) {
+      const svc=await contract.services(walletAddr);
+      document.getElementById('svcUrl').textContent=svc.url||'—';
+      document.getElementById('svcTEE').textContent=shortAddr(svc.teeSignerAddress); document.getElementById('svcTEE').title=svc.teeSignerAddress;
+      document.getElementById('svcCPUPrice').textContent=fmtNeuron(svc.pricePerCPUPerMin.toString())+'/min';
+      document.getElementById('svcMemPrice').textContent=fmtNeuron(svc.pricePerMemGBPerMin.toString())+'/GB/min';
+      document.getElementById('svcFee').textContent=fmtNeuron(svc.createFee.toString());
+    }
+    const stake=await contract.providerStake(); document.getElementById('svcStake').textContent=fmtNeuron(stake.toString());
+    const earn=await contract.providerEarnings(walletAddr); document.getElementById('providerEarnings').textContent=fmtNeuron(earn.toString());
+    const staked=await contract.providerStakes(walletAddr); document.getElementById('providerStaked').textContent=fmtNeuron(staked.toString());
+  } catch(e) { console.error(e); }
+}
+
+async function doRegisterService() {
+  const url=document.getElementById('svcUrlInput').value.trim(), tee=document.getElementById('svcTEEInput').value.trim(),
+        cpuPrice=document.getElementById('svcCPUPriceInput').value, memPrice=document.getElementById('svcMemPriceInput').value,
+        fee=document.getElementById('svcFeeInput').value, stake=document.getElementById('svcStakeInput').value;
+  if (!url||!tee) { setErr('serviceErr','URL and TEE address are required'); return; }
+  setErr('serviceErr','');
+  const value=stake&&parseFloat(stake)>0?ethers.parseEther(stake):0n;
+  await sendTx('Service update',()=>contract.addOrUpdateService(url,tee,BigInt(cpuPrice),BigInt(fee),BigInt(memPrice),{value}),{
+    onSuccess:async()=>{ closeModal('serviceModal'); await loadProviderData(); }, errEl:'serviceErr',
+  });
+}
+
+async function withdrawEarnings() {
+  await sendTx('Withdraw earnings',()=>contract.withdrawEarnings(),{ onSuccess:()=>loadProviderData() });
+}
+
+async function doArchiveAll() {
+  if (!confirm('Archive All Sandboxes\n\nThis will stop all running sandboxes and back up their state to object storage.\n\n• User sandboxes will not be lost and can be restored after redeploy\n• Billing sessions will be closed\n• Only use before server redeploy\n\nConfirm?')) return;
+  const btn=document.getElementById('archiveAllBtn'); btn.disabled=true; btn.textContent='Archiving…';
+  try {
+    const resp=await signedFetch('POST','/api/archive-all'); const data=await resp.json().catch(()=>({}));
+    if (!resp.ok) { toast(data.error||`HTTP ${resp.status}`,'error'); return; }
+    const n=(data.archived||[]).length,f=(data.failed||[]).length;
+    toast(f>0?`Archived ${n}, failed ${f} — check logs`:`Archived ${n} sandbox(es). Safe to redeploy.`,f>0?'error':'success');
+    await loadAllSandboxes();
+  } catch(e) { toast(e.message,'error'); }
+  finally { btn.disabled=false; btn.textContent='Archive All'; }
+}
+
+// ── Snapshot Management ────────────────────────────────────────────────────────
+async function loadProviderSnapshots() {
+  const el=document.getElementById('snapshotTable');
+  el.innerHTML='<div class="empty">Loading…</div>';
+  try {
+    const snaps=await fetch(providerApiUrl+'/api/snapshots').then(r=>r.ok?r.json():[]).catch(()=>[]);
+    if (!snaps.length) { el.innerHTML='<div class="empty">No snapshots yet.</div>'; return; }
+    const statColor={active:'green',pending:'orange',error:'red',pulling:'orange'};
+    el.innerHTML=`<table><thead><tr><th>Name</th><th>Image</th><th>Spec</th><th>Status</th><th></th></tr></thead><tbody>${
+      snaps.map(s=>`<tr>
+        <td style="font-weight:500">${s.name}</td>
+        <td style="font-size:11px;color:var(--muted);word-break:break-all">${s.imageName}</td>
+        <td style="white-space:nowrap">${s.cpu}C / ${s.mem}GB / ${s.disk}GB disk</td>
+        <td><span class="badge ${statColor[s.state]||'red'}">${s.state}</span></td>
+        <td><button class="btn btn-sm btn-warn" onclick="doDeleteSnapshot('${s.id}','${s.name}')">Delete</button></td>
+      </tr>`).join('')
+    }</tbody></table>`;
+  } catch(e) { el.innerHTML=`<div class="empty">Error: ${e.message}</div>`; }
+}
+
+async function openSnapshotModal() {
+  openModal('snapshotModal');
+  loadRegistryImages();
+}
+
+async function loadRegistryImages() {
+  const sel=document.getElementById('snapImageSelect');
+  sel.innerHTML='<option value="">Loading…</option>';
+  try {
+    const images=await fetch(providerApiUrl+'/api/registry/images').then(r=>r.ok?r.json():[]).catch(()=>[]);
+    if (!images.length) { sel.innerHTML='<option value="">No images in registry</option>'; return; }
+    sel.innerHTML=images.map(img=>`<option value="${img}">${img}</option>`).join('');
+  } catch(e) { sel.innerHTML='<option value="">Error loading images</option>'; }
+}
+
+async function doRegisterSnapshot() {
+  const image=document.getElementById('snapImageSelect').value;
+  const name=document.getElementById('snapNameInput').value.trim();
+  const preset=document.getElementById('snapPresetSelect').value;
+  const [cpu,mem,disk]=preset.split(':').map(Number);
+  if (!image||!name) { setErr('snapshotErr','Image and name are required'); return; }
+  setErr('snapshotErr','');
+  const btn=document.getElementById('snapshotSubmitBtn'); btn.disabled=true; btn.textContent='Registering…';
+  try {
+    const resp=await signedFetch('POST','/api/snapshots',{imageName:image,name,cpu,memory:mem,disk});
+    const data=await resp.json().catch(()=>({}));
+    if (!resp.ok) { setErr('snapshotErr',data.error||`HTTP ${resp.status}`); return; }
+    toast(`Snapshot "${name}" registered (state: pending → active in ~30s)`,'success');
+    closeModal('snapshotModal');
+    document.getElementById('snapNameInput').value='';
+    await loadProviderSnapshots();
+  } catch(e) { setErr('snapshotErr',e.message); }
+  finally { btn.disabled=false; btn.textContent='Register'; }
+}
+
+async function doDeleteSnapshot(id, name) {
+  if (!confirm(`Delete snapshot "${name}"?`)) return;
+  const resp=await signedFetch('DELETE',`/api/snapshots/${id}`).catch(e=>{toast(e.message,'error');return null});
+  if (!resp) return;
+  if (resp.ok) { toast(`Snapshot "${name}" deleted`,'success'); await loadProviderSnapshots(); return; }
+  const d=await resp.json().catch(()=>{}); toast(d?.error||`Delete failed (HTTP ${resp.status})`,'error');
+}
+
+async function doImportImage() {
+  const src=document.getElementById('importSrc').value.trim();
+  const username=document.getElementById('importUser').value.trim();
+  const password=document.getElementById('importPass').value;
+  const name=document.getElementById('importName').value.trim();
+  const tag=document.getElementById('importTag').value.trim();
+  if (!src||!name||!tag) { setErr('importErr','Source image, target name, and tag are required'); return; }
+  setErr('importErr','');
+  const btn=document.getElementById('importSubmitBtn'); btn.disabled=true; btn.textContent='Importing…';
+  document.getElementById('importProgress').style.display='block';
+  try {
+    const resp=await signedFetch('POST','/api/registry/pull',{src,username,password,name,tag});
+    const data=await resp.json().catch(()=>({}));
+    if (!resp.ok) { setErr('importErr',data.error||`HTTP ${resp.status}`); return; }
+    toast(`Image imported: ${data.image}`,'success');
+    closeModal('importModal');
+    document.getElementById('importSrc').value='';
+    document.getElementById('importUser').value='';
+    document.getElementById('importPass').value='';
+    document.getElementById('importName').value='';
+    document.getElementById('importTag').value='';
+  } catch(e) { setErr('importErr',e.message); }
+  finally {
+    btn.disabled=false; btn.textContent='Import';
+    document.getElementById('importProgress').style.display='none';
+  }
+}
+
+// ── All Sandboxes ─────────────────────────────────────────────────────────────
+async function loadAllSandboxes() {
+  const el=document.getElementById('allSandboxTable');
+  if (!walletAddr) { el.innerHTML='<div class="empty">Connect wallet first.</div>'; return; }
+  el.innerHTML='<div class="empty">Loading…</div>';
+  try {
+    const resp=await signedFetch('GET','/api/sessions'); const data=await resp.json().catch(()=>[]);
+    if (!resp.ok) { el.innerHTML=`<div class="empty">${data.error||'Failed to load'}</div>`; return; }
+    if (!data?.length) { el.innerHTML='<div class="empty"><div class="empty-icon">📭</div>No sandboxes found.</div>'; return; }
+    el.innerHTML=`<table><thead><tr><th>Sandbox ID</th><th>Owner</th><th>State</th><th>Accrued</th><th></th></tr></thead><tbody>${
+      data.map(s=>`<tr><td><span class="mono">${s.sandbox_id}</span></td><td><span class="mono" title="${s.owner||''}">${s.owner?s.owner.slice(0,10)+'…':'—'}</span></td><td><span class="badge ${stateBadge(s.state)}">${s.state||'—'}</span></td><td>${s.accrued_neuron?fmtNeuron(s.accrued_neuron):'—'}</td><td><button class="btn btn-sm btn-ghost" style="color:var(--red)" onclick="doForceDelete('${s.sandbox_id}')">Delete</button></td></tr>`).join('')
+    }</tbody></table>`;
+  } catch(e) { el.innerHTML=`<div class="empty">Error: ${e.message}</div>`; }
+}
+
+async function doForceDelete(id) {
+  if (!confirm(`Delete sandbox ${id}?\nThis cannot be undone.`)) return;
+  const resp=await signedFetch('DELETE',`/api/sandbox/${id}/force`); const data=await resp.json().catch(()=>({}));
+  if (!resp.ok) { toast(data.error||'Delete failed','error'); return; }
+  toast(`Sandbox ${id.slice(0,8)}… deleted`,'success'); loadAllSandboxes();
+}
+
+// ── Events ────────────────────────────────────────────────────────────────────
+async function loadEvents() {
+  const el=document.getElementById('eventsTable'),meta=document.getElementById('evtMeta');
+  if (!walletAddr) { el.innerHTML='<div class="empty">Connect wallet first.</div>'; return; }
+  el.innerHTML='<div class="empty">Loading…</div>'; meta.textContent='';
+  try {
+    const resp=await signedFetch('GET','/api/events?lookback='+parseInt(document.getElementById('evtRange').value));
+    const data=await resp.json().catch(()=>({}));
+    if (!resp.ok) { el.innerHTML=`<div class="empty">${data.error||'Failed'}</div>`; return; }
+    const evts=data.events||[]; meta.textContent=`block ${data.from_block} → ${data.current_block}`;
+    if (!evts.length) { el.innerHTML='<div class="empty"><div class="empty-icon">📋</div>No events in this range.</div>'; return; }
+    const exp='https://chainscan-galileo.0g.ai/tx/', byUser={};
+    [...evts].reverse().forEach(e=>{ (byUser[e.user]=byUser[e.user]||[]).push(e); });
+    el.innerHTML=`<table><thead><tr><th>Time</th><th>Fee</th><th>Nonce</th><th>Status</th><th>Tx</th></tr></thead><tbody>${
+      Object.entries(byUser).map(([user,ues])=>`
+        <tr style="background:var(--pbg)"><td colspan="5" style="padding:6px 12px;font-size:12px;font-weight:600;color:var(--p)">User: <span class="mono" title="${user}">${user}</span> <span style="font-weight:400;color:var(--muted)">${ues.length} voucher(s)</span></td></tr>
+        ${ues.map(e=>`<tr><td style="font-size:12px;white-space:nowrap">${fmtTime(e.timestamp)}</td><td>${fmtNeuron(e.total_fee)}</td><td>nonce ${e.nonce}</td><td><span class="badge ${e.status==='SUCCESS'?'green':e.status==='INSUFFICIENT_BALANCE'?'orange':'red'}">${e.status}</span></td><td><a href="${exp}${e.tx_hash}" target="_blank" style="font-size:11px;color:var(--p)">↗ tx</a></td></tr>`).join('')}`).join('')
+    }</tbody></table>`;
+  } catch(e) { el.innerHTML=`<div class="empty">Error: ${e.message}</div>`; }
+}
+
+// ── Auth-signed fetch ─────────────────────────────────────────────────────────
+function genUUID() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{ const r=crypto.getRandomValues(new Uint8Array(1))[0]&15; return(c==='x'?r:(r&0x3|0x8)).toString(16); });
+}
+async function signedFetch(method, path, body=null, signal=null) {
+  const baseURL = providerApiUrl;
+  const msg={action:method+':'+path,expires_at:Math.floor(Date.now()/1000)+300,nonce:genUUID(),payload:body||{},resource_id:''};
+  const msgStr=JSON.stringify(msg), sig=await signer.signMessage(msgStr);
+  return fetch(baseURL+path,{method,headers:{'Content-Type':'application/json','X-Wallet-Address':walletAddr,'X-Signed-Message':btoa(msgStr),'X-Wallet-Signature':sig},body:body?JSON.stringify(body):undefined,signal});
+}
+
+// ── Modals ─────────────────────────────────────────────────────────────────────
+function openModal(id)  { document.getElementById(id).classList.add('open'); if(id==='snapshotModal') loadRegistryImages(); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-bg').forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) m.classList.remove('open'); }));
+
+// ── Tx helpers ────────────────────────────────────────────────────────────────
+function cleanErr(e) {
+  if (e.reason) return e.reason;
+  if (e.message) { const m=e.message,cut=m.indexOf('(action='); if(cut>0) return m.slice(0,cut).trim(); return m.length>140?m.slice(0,140)+'…':m; }
+  return String(e);
+}
+function pushToast(msg,type) {
+  const el=document.createElement('div'); el.className='toast'+(type&&type!=='info'?' '+type:''); el.textContent=msg;
+  document.getElementById('toast').appendChild(el); return el;
+}
+function updateToast(el,msg,type,hash,autoRemove) {
+  el.className='toast'+(type&&type!=='info'?' '+type:'');
+  if (hash) { el.innerHTML=''; const s=document.createElement('span'); s.textContent=msg; el.appendChild(s); const a=document.createElement('a'); a.href='https://chainscan-galileo.0g.ai/tx/'+hash; a.target='_blank'; a.rel='noopener'; a.textContent='↗ View tx'; el.appendChild(a); }
+  else { el.textContent=msg; }
+  if (autoRemove) setTimeout(()=>el.remove(),type==='error'?8000:6000);
+}
+async function sendTx(label,txFn,{onSuccess,onError,errEl}={}) {
+  const t=pushToast(label+'…','pending');
+  try {
+    const tx=await txFn(); updateToast(t,label+' submitted','pending',tx.hash);
+    const receipt=await tx.wait(); updateToast(t,label+' confirmed','success',tx.hash,true);
+    if(onSuccess) await onSuccess(receipt);
+  } catch(e) {
+    const msg=cleanErr(e); updateToast(t,label+' failed: '+msg,'error',null,true);
+    if(errEl){ const node=typeof errEl==='string'?document.getElementById(errEl):errEl; if(node) node.textContent=msg; }
+    if(onError) onError(e);
+  }
+}
+function toast(msg,type='info') { const el=pushToast(msg,type); setTimeout(()=>el.remove(),4000); }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function stateBadge(s) {
+  switch((s||'').toLowerCase()){case'started':return'green';case'starting':return'blue';case'archived':case'archiving':return'gray';case'error':return'red';default:return'';}
+}
+function fmtNeuron(s) {
+  if(!s||s==='0') return '0 0G';
+  const n=BigInt(s); if(n===0n) return '0 0G';
+  const val=Number(n)/1e18;
+  return val>=0.000001 ? val.toFixed(6).replace(/\.?0+$/,'')+' 0G' : val.toExponential(2)+' 0G';
+}
+function fmtTime(ts) { return ts?new Date(ts*1000).toLocaleString():'—'; }
+function shortAddr(a) { if(!a||a.length<12) return a||'—'; return a.slice(0,8)+'…'+a.slice(-6); }
+function setErr(id,msg){ const el=document.getElementById(id); if(!el) return; el.textContent=msg; el.className=msg?'err':''; }
+function setLoading(id,msg){ const el=document.getElementById(id); if(!el) return; el.textContent=msg; el.className=msg?'loading':''; }
+function setBusy(id,busy){ const el=document.getElementById(id); if(el){ el.disabled=busy; el.textContent=busy?'…':(el.dataset.label||el.textContent); } }
+</script>
+</body>
+</html>

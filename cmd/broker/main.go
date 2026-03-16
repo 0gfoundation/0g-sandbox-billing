@@ -18,6 +18,7 @@ import (
 	"github.com/0gfoundation/0g-sandbox/internal/config"
 	"github.com/0gfoundation/0g-sandbox/internal/indexer"
 	"github.com/0gfoundation/0g-sandbox/internal/tee"
+	"github.com/0gfoundation/0g-sandbox/web"
 )
 
 func main() {
@@ -93,6 +94,29 @@ func main() {
 
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	r.GET("/api/info", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"contract_address": cfg.Chain.ContractAddress,
+			"chain_id":         cfg.Chain.ChainID,
+			"rpc_url":          cfg.Chain.RPCURL,
+		})
+	})
+
+	r.GET("/", func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		c.Data(http.StatusOK, "text/html; charset=utf-8", web.UserHTML)
+	})
+	r.GET("/provider", func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		c.Data(http.StatusOK, "text/html; charset=utf-8", web.ProviderHTML)
+	})
+	r.GET("/static/ethers.js", func(c *gin.Context) {
+		c.Data(http.StatusOK, "application/javascript; charset=utf-8", web.EthersJS)
+	})
+	r.GET("/static/logo.svg", func(c *gin.Context) {
+		c.Data(http.StatusOK, "image/svg+xml", web.LogoSVG)
 	})
 
 	r.GET("/api/providers", func(c *gin.Context) {
