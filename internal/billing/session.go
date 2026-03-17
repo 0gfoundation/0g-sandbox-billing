@@ -15,8 +15,7 @@ type Session struct {
 	SandboxID     string
 	Owner         string
 	Provider      string
-	StartTime     int64
-	LastVoucherAt int64
+	NextVoucherAt int64  // unix timestamp when the next period should be pre-charged
 	PricePerSec   string // neuron/sec as decimal; empty = use flat rate fallback
 }
 
@@ -30,8 +29,7 @@ func CreateSession(ctx context.Context, rdb *redis.Client, s Session) error {
 		"sandbox_id", s.SandboxID,
 		"owner", s.Owner,
 		"provider", s.Provider,
-		"start_time", s.StartTime,
-		"last_voucher_at", s.LastVoucherAt,
+		"next_voucher_at", s.NextVoucherAt,
 		"price_per_sec", s.PricePerSec,
 	).Err()
 }
@@ -47,8 +45,8 @@ func GetSession(ctx context.Context, rdb *redis.Client, sandboxID string) (*Sess
 	return sessionFromMap(vals)
 }
 
-func UpdateLastVoucherAt(ctx context.Context, rdb *redis.Client, sandboxID string, t int64) error {
-	return rdb.HSet(ctx, sessionKey(sandboxID), "last_voucher_at", t).Err()
+func UpdateNextVoucherAt(ctx context.Context, rdb *redis.Client, sandboxID string, t int64) error {
+	return rdb.HSet(ctx, sessionKey(sandboxID), "next_voucher_at", t).Err()
 }
 
 func DeleteSession(ctx context.Context, rdb *redis.Client, sandboxID string) error {
@@ -84,14 +82,12 @@ func ScanAllSessions(ctx context.Context, rdb *redis.Client) ([]Session, error) 
 }
 
 func sessionFromMap(m map[string]string) (*Session, error) {
-	startTime, _ := strconv.ParseInt(m["start_time"], 10, 64)
-	lastVoucherAt, _ := strconv.ParseInt(m["last_voucher_at"], 10, 64)
+	nextVoucherAt, _ := strconv.ParseInt(m["next_voucher_at"], 10, 64)
 	return &Session{
 		SandboxID:     m["sandbox_id"],
 		Owner:         m["owner"],
 		Provider:      m["provider"],
-		StartTime:     startTime,
-		LastVoucherAt: lastVoucherAt,
+		NextVoucherAt: nextVoucherAt,
 		PricePerSec:   m["price_per_sec"],
 	}, nil
 }

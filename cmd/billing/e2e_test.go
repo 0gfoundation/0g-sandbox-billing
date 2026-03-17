@@ -201,7 +201,7 @@ func setupE2E(teeKeyHex string) (*e2eEnv, error) {
 		onchain,
 		zap.NewNop(),
 	)
-	bh := billing.NewEventHandler(rdb, providerAddr.Hex(), computePrice, createFee, signer, zap.NewNop())
+	bh := billing.NewEventHandler(rdb, providerAddr.Hex(), computePrice, createFee, new(big.Int), new(big.Int), cfg.Billing.VoucherIntervalSec, signer, zap.NewNop())
 
 	// Proxy server
 	gin.SetMode(gin.TestMode)
@@ -215,7 +215,7 @@ func setupE2E(teeKeyHex string) (*e2eEnv, error) {
 	bgCtx, cancel := context.WithCancel(context.Background())
 	stopCh := make(chan settler.StopSignal, 100)
 	go settler.Run(bgCtx, cfg, rdb, onchain, stopCh, zap.NewNop())
-	go billing.RunGenerator(bgCtx, cfg, rdb, signer, zap.NewNop())
+	go billing.RunGenerator(bgCtx, rdb, bh, zap.NewNop())
 	go runStopHandler(bgCtx, stopCh, dtona, rdb, zap.NewNop(), nil)
 
 	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, providerAddr.Hex())

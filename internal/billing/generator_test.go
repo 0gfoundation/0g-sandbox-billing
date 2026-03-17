@@ -9,19 +9,29 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-
-	"github.com/0gfoundation/0g-sandbox/internal/config"
 )
 
-// ── helpers ───────────────────────────────────────────────────────────────────
+// newTestHandlerWithInterval creates an EventHandler with a custom interval.
+func newTestHandlerWithInterval(t *testing.T, ms *mockSigner, intervalSec int64) (*EventHandler, *testRedisWrapper) {
+	t.Helper()
+	rdb, _ := newTestRedis(t)
+	h := NewEventHandler(
+		rdb,
+		testProvider,
+		big.NewInt(pricePerSec),
+		big.NewInt(createFeeVal),
+		new(big.Int),
+		new(big.Int),
+		intervalSec,
+		ms,
+		zap.NewNop(),
+	)
+	return h, &testRedisWrapper{rdb: rdb}
+}
 
-// testConfig builds the minimal *config.Config that runGeneration needs.
-func testConfig(intervalSec int64, pricePerSec string) *config.Config {
-	return &config.Config{
-		Billing: config.BillingConfig{
-			VoucherIntervalSec: intervalSec,
-			ComputePricePerSec: pricePerSec,
-		},
+type testRedisWrapper struct {
+	rdb interface {
+		// placeholder — direct access to rdb via h is sufficient
 	}
 }
 
@@ -30,125 +40,123 @@ func testConfig(intervalSec int64, pricePerSec string) *config.Config {
 func TestRunGeneration_NoSessions_NoVouchers(t *testing.T) {
 	rdb, _ := newTestRedis(t)
 	ms := &mockSigner{}
-	cfg := testConfig(3600, "100")
+	h := NewEventHandler(rdb, testProvider, big.NewInt(100), big.NewInt(0), new(big.Int), new(big.Int), 3600, ms, zap.NewNop())
 
-	runGeneration(context.Background(), cfg, rdb, ms, big.NewInt(100), zap.NewNop())
+	runGeneration(context.Background(), rdb, h, zap.NewNop())
 
 	if ms.count() != 0 {
 		t.Errorf("expected 0 vouchers for empty Redis, got %d", ms.count())
 	}
 }
 
-// ── Too recent: no voucher ────────────────────────────────────────────────────
+// ── Session whose NextVoucherAt is in the future: no voucher ─────────────────
 
-func TestRunGeneration_SessionTooRecent_NoVoucher(t *testing.T) {
+func TestRunGeneration_SessionNotDue_NoVoucher(t *testing.T) {
 	rdb, _ := newTestRedis(t)
 	ms := &mockSigner{}
-	cfg := testConfig(3600, "100")
+	const intervalSec = int64(3600)
+	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(0), new(big.Int), new(big.Int), intervalSec, ms, zap.NewNop())
 	ctx := context.Background()
 
-	// LastVoucherAt = now → periodEnd = now → elapsed = 0 → no voucher
-	now := time.Now().Unix()
+	// NextVoucherAt = future → not due yet
+	future := time.Now().Unix() + intervalSec
 	CreateSession(ctx, rdb, Session{ //nolint:errcheck
-		SandboxID: "sb-fresh", Owner: testOwner, Provider: testProvider,
-		StartTime: now, LastVoucherAt: now,
+		SandboxID: "sb-future", Owner: testOwner, Provider: testProvider,
+		NextVoucherAt: future,
 	})
 
-	runGeneration(ctx, cfg, rdb, ms, big.NewInt(100), zap.NewNop())
+	runGeneration(ctx, rdb, h, zap.NewNop())
 
 	if ms.count() != 0 {
-		t.Errorf("expected 0 vouchers for fresh session, got %d", ms.count())
+		t.Errorf("expected 0 vouchers for future NextVoucherAt, got %d", ms.count())
 	}
 }
 
-// ── Normal: session within interval ──────────────────────────────────────────
+// ── Normal: NextVoucherAt has elapsed → pre-charge next period ───────────────
 
-func TestRunGeneration_SessionWithinInterval_CorrectFee(t *testing.T) {
+func TestRunGeneration_SessionDue_EmitsPeriodVoucher(t *testing.T) {
 	rdb, _ := newTestRedis(t)
 	ms := &mockSigner{}
-	// intervalSec = 7200 (2 h), pricePerSec = 50, session = 120 s ago
-	// periodEnd = now (capped), elapsed = 120 s, fee = 120 * 50 = 6000
-	cfg := testConfig(7200, "50")
+	const intervalSec = int64(3600)
+	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(0), new(big.Int), new(big.Int), intervalSec, ms, zap.NewNop())
 	ctx := context.Background()
-	const pricePerSec = int64(50)
 
-	pastTime := time.Now().Unix() - 120
+	// NextVoucherAt = now - 10s → period is due
+	due := time.Now().Unix() - 10
 	CreateSession(ctx, rdb, Session{ //nolint:errcheck
-		SandboxID: "sb-partial", Owner: testOwner, Provider: testProvider,
-		StartTime: pastTime, LastVoucherAt: pastTime,
+		SandboxID: "sb-due", Owner: testOwner, Provider: testProvider,
+		NextVoucherAt: due, PricePerSec: "100",
 	})
 
-	runGeneration(ctx, cfg, rdb, ms, big.NewInt(pricePerSec), zap.NewNop())
+	runGeneration(ctx, rdb, h, zap.NewNop())
 
 	v := ms.last()
 	if v == nil {
 		t.Fatal("expected voucher, got none")
 	}
-	if v.SandboxID != "sb-partial" {
-		t.Errorf("SandboxID: got %q want %q", v.SandboxID, "sb-partial")
+	if v.SandboxID != "sb-due" {
+		t.Errorf("SandboxID: got %q want %q", v.SandboxID, "sb-due")
 	}
-	want := int64(120 * pricePerSec) // 120 secs * 50 neuron/sec = 6000
-	if v.TotalFee.Int64() != want {
-		t.Errorf("TotalFee: got %d want %d", v.TotalFee.Int64(), want)
-	}
-}
-
-// ── Hard cap: session older than interval ─────────────────────────────────────
-
-func TestRunGeneration_HardCap_OneIntervalMax(t *testing.T) {
-	rdb, _ := newTestRedis(t)
-	ms := &mockSigner{}
-	const intervalSec = int64(3600)
-	const pricePerSec = int64(100)
-	cfg := testConfig(intervalSec, "100")
-	ctx := context.Background()
-
-	// Session is 2 intervals old; generator should only cover one interval
-	// periodStart = now - 2*3600, periodEnd = periodStart + 3600 = now - 3600
-	// elapsed = 3600 s, fee = 3600 * 100 = 360000
-	old := time.Now().Unix() - 2*intervalSec
-	CreateSession(ctx, rdb, Session{ //nolint:errcheck
-		SandboxID: "sb-old", Owner: testOwner, Provider: testProvider,
-		StartTime: old, LastVoucherAt: old,
-	})
-
-	runGeneration(ctx, cfg, rdb, ms, big.NewInt(pricePerSec), zap.NewNop())
-
-	v := ms.last()
-	if v == nil {
-		t.Fatal("expected voucher, got none")
-	}
-	want := intervalSec * pricePerSec // 3600 secs * 100 neuron/sec = 360000
-	if v.TotalFee.Int64() != want {
-		t.Errorf("TotalFee: got %d want %d (hard-cap check)", v.TotalFee.Int64(), want)
+	// Fee = intervalSec × pricePerSec
+	wantFee := intervalSec * pricePerSec
+	if v.TotalFee.Int64() != wantFee {
+		t.Errorf("TotalFee: got %d want %d", v.TotalFee.Int64(), wantFee)
 	}
 }
 
-// ── LastVoucherAt updated to periodEnd ───────────────────────────────────────
+// ── NextVoucherAt is updated after pre-charge ─────────────────────────────────
 
-func TestRunGeneration_UpdatesLastVoucherAt(t *testing.T) {
+func TestRunGeneration_UpdatesNextVoucherAt(t *testing.T) {
 	rdb, _ := newTestRedis(t)
 	ms := &mockSigner{}
 	const intervalSec = int64(3600)
-	cfg := testConfig(intervalSec, "100")
+	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(0), new(big.Int), new(big.Int), intervalSec, ms, zap.NewNop())
 	ctx := context.Background()
 
-	// Session 2 intervals old → periodEnd = LastVoucherAt + intervalSec
-	old := time.Now().Unix() - 2*intervalSec
+	due := time.Now().Unix() - 10
 	CreateSession(ctx, rdb, Session{ //nolint:errcheck
 		SandboxID: "sb-adv", Owner: testOwner, Provider: testProvider,
-		StartTime: old, LastVoucherAt: old,
+		NextVoucherAt: due, PricePerSec: "100",
 	})
 
-	runGeneration(ctx, cfg, rdb, ms, big.NewInt(100), zap.NewNop())
+	runGeneration(ctx, rdb, h, zap.NewNop())
 
 	sess, err := GetSession(ctx, rdb, "sb-adv")
 	if err != nil || sess == nil {
 		t.Fatalf("GetSession: err=%v sess=%v", err, sess)
 	}
-	expectedEnd := old + intervalSec
-	if sess.LastVoucherAt != expectedEnd {
-		t.Errorf("LastVoucherAt: got %d want %d", sess.LastVoucherAt, expectedEnd)
+	// NextVoucherAt must advance by intervalSec
+	expected := due + intervalSec
+	if sess.NextVoucherAt != expected {
+		t.Errorf("NextVoucherAt: got %d want %d", sess.NextVoucherAt, expected)
+	}
+}
+
+// ── Idempotent: second run with updated NextVoucherAt does nothing ────────────
+
+func TestRunGeneration_AfterUpdate_NoDoubleVoucher(t *testing.T) {
+	rdb, _ := newTestRedis(t)
+	ms := &mockSigner{}
+	const intervalSec = int64(3600)
+	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(0), new(big.Int), new(big.Int), intervalSec, ms, zap.NewNop())
+	ctx := context.Background()
+
+	due := time.Now().Unix() - 10
+	CreateSession(ctx, rdb, Session{ //nolint:errcheck
+		SandboxID: "sb-idem", Owner: testOwner, Provider: testProvider,
+		NextVoucherAt: due, PricePerSec: "100",
+	})
+
+	// First run → voucher emitted, NextVoucherAt = due + interval (future)
+	runGeneration(ctx, rdb, h, zap.NewNop())
+	if ms.count() != 1 {
+		t.Fatalf("first run: expected 1 voucher, got %d", ms.count())
+	}
+
+	// Second run immediately → NextVoucherAt is now in the future → no voucher
+	runGeneration(ctx, rdb, h, zap.NewNop())
+	if ms.count() != 1 {
+		t.Errorf("second run: expected still 1 voucher total, got %d", ms.count())
 	}
 }
 
@@ -157,24 +165,24 @@ func TestRunGeneration_UpdatesLastVoucherAt(t *testing.T) {
 func TestRunGeneration_MultipleSessions_OneVoucherEach(t *testing.T) {
 	rdb, _ := newTestRedis(t)
 	ms := &mockSigner{}
-	cfg := testConfig(7200, "10")
+	const intervalSec = int64(3600)
+	h := NewEventHandler(rdb, testProvider, big.NewInt(10), big.NewInt(0), new(big.Int), new(big.Int), intervalSec, ms, zap.NewNop())
 	ctx := context.Background()
 
-	past := time.Now().Unix() - 120
+	due := time.Now().Unix() - 10
 	for _, id := range []string{"sb-m1", "sb-m2", "sb-m3"} {
 		CreateSession(ctx, rdb, Session{ //nolint:errcheck
 			SandboxID: id, Owner: testOwner, Provider: testProvider,
-			StartTime: past, LastVoucherAt: past,
+			NextVoucherAt: due, PricePerSec: "10",
 		})
 	}
 
-	runGeneration(ctx, cfg, rdb, ms, big.NewInt(10), zap.NewNop())
+	runGeneration(ctx, rdb, h, zap.NewNop())
 
 	if ms.count() != 3 {
 		t.Errorf("expected 3 vouchers for 3 sessions, got %d", ms.count())
 	}
 
-	// Collect voucher sandbox IDs and verify all three appear
 	var ids []string
 	for _, v := range ms.vouchers {
 		ids = append(ids, v.SandboxID)
@@ -193,25 +201,26 @@ func TestRunGeneration_MultipleSessions_OneVoucherEach(t *testing.T) {
 func TestRunGeneration_IncrNonceError_SkipsSession(t *testing.T) {
 	rdb, _ := newTestRedis(t)
 	ms := &mockSigner{incrErr: errors.New("nonce store down")}
-	cfg := testConfig(3600, "100")
+	const intervalSec = int64(3600)
+	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(0), new(big.Int), new(big.Int), intervalSec, ms, zap.NewNop())
 	ctx := context.Background()
 
-	past := time.Now().Unix() - 120
+	due := time.Now().Unix() - 10
 	CreateSession(ctx, rdb, Session{ //nolint:errcheck
 		SandboxID: "sb-nonce-err", Owner: testOwner, Provider: testProvider,
-		StartTime: past, LastVoucherAt: past,
+		NextVoucherAt: due, PricePerSec: "100",
 	})
 
-	runGeneration(ctx, cfg, rdb, ms, big.NewInt(100), zap.NewNop())
+	runGeneration(ctx, rdb, h, zap.NewNop())
 
 	if ms.count() != 0 {
 		t.Errorf("expected 0 vouchers on nonce error, got %d", ms.count())
 	}
-	// LastVoucherAt must NOT be advanced
+	// NextVoucherAt must NOT be advanced on error
 	sess, _ := GetSession(ctx, rdb, "sb-nonce-err")
-	if sess.LastVoucherAt != past {
-		t.Errorf("LastVoucherAt should be unchanged on nonce error: got %d want %d",
-			sess.LastVoucherAt, past)
+	if sess.NextVoucherAt != due {
+		t.Errorf("NextVoucherAt should be unchanged on nonce error: got %d want %d",
+			sess.NextVoucherAt, due)
 	}
 }
 
@@ -220,24 +229,24 @@ func TestRunGeneration_IncrNonceError_SkipsSession(t *testing.T) {
 func TestRunGeneration_IncrNonceError_OtherSessionsUnaffected(t *testing.T) {
 	rdb, _ := newTestRedis(t)
 
-	// Fail only for the specific owner that has "nonce-fail" in its address
 	failOwner := "0xFAILFAILFAILFAILFAILFAILFAILFAILFAILFA"
 	okOwner := "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	ms := &selectiveErrSigner{failOwner: failOwner}
-	cfg := testConfig(7200, "10")
+	const intervalSec = int64(3600)
+	h := NewEventHandler(rdb, testProvider, big.NewInt(10), big.NewInt(0), new(big.Int), new(big.Int), intervalSec, ms, zap.NewNop())
 	ctx := context.Background()
 
-	past := time.Now().Unix() - 120
+	due := time.Now().Unix() - 10
 	CreateSession(ctx, rdb, Session{ //nolint:errcheck
 		SandboxID: "sb-fail", Owner: failOwner, Provider: testProvider,
-		StartTime: past, LastVoucherAt: past,
+		NextVoucherAt: due, PricePerSec: "10",
 	})
 	CreateSession(ctx, rdb, Session{ //nolint:errcheck
 		SandboxID: "sb-ok", Owner: okOwner, Provider: testProvider,
-		StartTime: past, LastVoucherAt: past,
+		NextVoucherAt: due, PricePerSec: "10",
 	})
 
-	runGeneration(ctx, cfg, rdb, ms, big.NewInt(10), zap.NewNop())
+	runGeneration(ctx, rdb, h, zap.NewNop())
 
 	if ms.count() != 1 {
 		t.Errorf("expected 1 voucher (ok session only), got %d", ms.count())
@@ -260,27 +269,27 @@ func (s *selectiveErrSigner) IncrNonce(ctx context.Context, owner, provider stri
 	return s.mockSigner.IncrNonce(ctx, owner, provider)
 }
 
-// ── SignAndEnqueue error: LastVoucherAt NOT updated ───────────────────────────
+// ── Enqueue error: NextVoucherAt NOT updated ──────────────────────────────────
 
-func TestRunGeneration_EnqueueError_LastVoucherAtUnchanged(t *testing.T) {
+func TestRunGeneration_EnqueueError_NextVoucherAtUnchanged(t *testing.T) {
 	rdb, _ := newTestRedis(t)
 	ms := &mockSigner{enqErr: errors.New("enqueue failed")}
 	const intervalSec = int64(3600)
-	cfg := testConfig(intervalSec, "100")
+	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(0), new(big.Int), new(big.Int), intervalSec, ms, zap.NewNop())
 	ctx := context.Background()
 
-	past := time.Now().Unix() - 2*intervalSec
+	due := time.Now().Unix() - 10
 	CreateSession(ctx, rdb, Session{ //nolint:errcheck
 		SandboxID: "sb-enq-err", Owner: testOwner, Provider: testProvider,
-		StartTime: past, LastVoucherAt: past,
+		NextVoucherAt: due, PricePerSec: "100",
 	})
 
-	runGeneration(ctx, cfg, rdb, ms, big.NewInt(100), zap.NewNop())
+	runGeneration(ctx, rdb, h, zap.NewNop())
 
 	sess, _ := GetSession(ctx, rdb, "sb-enq-err")
-	if sess.LastVoucherAt != past {
-		t.Errorf("LastVoucherAt must not advance on enqueue error: got %d want %d",
-			sess.LastVoucherAt, past)
+	if sess.NextVoucherAt != due {
+		t.Errorf("NextVoucherAt must not advance on enqueue error: got %d want %d",
+			sess.NextVoucherAt, due)
 	}
 }
 
@@ -289,16 +298,16 @@ func TestRunGeneration_EnqueueError_LastVoucherAtUnchanged(t *testing.T) {
 func TestRunGeneration_VoucherHasCorrectAddresses(t *testing.T) {
 	rdb, _ := newTestRedis(t)
 	ms := &mockSigner{}
-	cfg := testConfig(7200, "100")
+	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(0), new(big.Int), new(big.Int), 3600, ms, zap.NewNop())
 	ctx := context.Background()
 
-	past := time.Now().Unix() - 60
+	due := time.Now().Unix() - 10
 	CreateSession(ctx, rdb, Session{ //nolint:errcheck
 		SandboxID: "sb-addr", Owner: testOwner, Provider: testProvider,
-		StartTime: past, LastVoucherAt: past,
+		NextVoucherAt: due, PricePerSec: "100",
 	})
 
-	runGeneration(ctx, cfg, rdb, ms, big.NewInt(100), zap.NewNop())
+	runGeneration(ctx, rdb, h, zap.NewNop())
 
 	v := ms.last()
 	if v == nil {
@@ -316,31 +325,31 @@ func TestRunGeneration_VoucherHasCorrectAddresses(t *testing.T) {
 	}
 }
 
-// ── Idempotent: re-run after session too recent does nothing ──────────────────
+// ── Flat-rate fallback when PricePerSec is empty ─────────────────────────────
 
-func TestRunGeneration_AfterUpdate_NoDoubleVoucher(t *testing.T) {
+func TestRunGeneration_FlatRateFallback(t *testing.T) {
 	rdb, _ := newTestRedis(t)
 	ms := &mockSigner{}
-	// 2-hour interval; session is 30 minutes old
-	cfg := testConfig(7200, "100")
+	const intervalSec = int64(60)
+	flatRate := int64(50)
+	h := NewEventHandler(rdb, testProvider, big.NewInt(flatRate), big.NewInt(0), new(big.Int), new(big.Int), intervalSec, ms, zap.NewNop())
 	ctx := context.Background()
 
-	past := time.Now().Unix() - 1800 // 30 min ago
+	due := time.Now().Unix() - 10
 	CreateSession(ctx, rdb, Session{ //nolint:errcheck
-		SandboxID: "sb-idem", Owner: testOwner, Provider: testProvider,
-		StartTime: past, LastVoucherAt: past,
+		SandboxID: "sb-flat", Owner: testOwner, Provider: testProvider,
+		NextVoucherAt: due,
+		// PricePerSec intentionally empty → falls back to h.computePricePerSec
 	})
 
-	// First run → voucher emitted, LastVoucherAt = now
-	runGeneration(ctx, cfg, rdb, ms, big.NewInt(100), zap.NewNop())
-	if ms.count() != 1 {
-		t.Fatalf("first run: expected 1 voucher, got %d", ms.count())
-	}
+	runGeneration(ctx, rdb, h, zap.NewNop())
 
-	// Second run immediately after → LastVoucherAt just updated to ~now,
-	// so elapsed ≈ 0 → no new voucher
-	runGeneration(ctx, cfg, rdb, ms, big.NewInt(100), zap.NewNop())
-	if ms.count() != 1 {
-		t.Errorf("second run: expected still 1 voucher total, got %d", ms.count())
+	v := ms.last()
+	if v == nil {
+		t.Fatal("expected voucher with flat rate")
+	}
+	wantFee := intervalSec * flatRate
+	if v.TotalFee.Int64() != wantFee {
+		t.Errorf("flat rate TotalFee: got %d want %d", v.TotalFee.Int64(), wantFee)
 	}
 }

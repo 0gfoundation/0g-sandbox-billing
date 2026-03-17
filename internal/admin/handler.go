@@ -2,7 +2,6 @@
 package admin
 
 import (
-	"math/big"
 	"net/http"
 	"strings"
 	"time"
@@ -70,17 +69,16 @@ func (h *Handler) status(c *gin.Context) {
 		return
 	}
 
-	// Next flush ETA: interval minus elapsed since earliest LastVoucherAt.
+	// Next flush ETA: time until the earliest NextVoucherAt.
 	var nextFlush int64
-	var oldest int64
+	var earliest int64
 	for _, s := range sessions {
-		if oldest == 0 || s.LastVoucherAt < oldest {
-			oldest = s.LastVoucherAt
+		if earliest == 0 || s.NextVoucherAt < earliest {
+			earliest = s.NextVoucherAt
 		}
 	}
-	if oldest > 0 {
-		nextAt := oldest + h.cfg.Billing.VoucherIntervalSec
-		if eta := nextAt - time.Now().Unix(); eta > 0 {
+	if earliest > 0 {
+		if eta := earliest - time.Now().Unix(); eta > 0 {
 			nextFlush = eta
 		}
 	}
@@ -103,9 +101,8 @@ type sandboxInfo struct {
 	SandboxID     string `json:"sandbox_id"`
 	Owner         string `json:"owner"`
 	Provider      string `json:"provider"`
-	StartTime     int64  `json:"start_time"`
-	LastVoucherAt int64  `json:"last_voucher_at"`
-	AccruedNeuron string `json:"accrued_neuron"`
+	NextVoucherAt int64  `json:"next_voucher_at"`
+	PricePerSec   string `json:"price_per_sec"`
 }
 
 func (h *Handler) sandboxes(c *gin.Context) {
@@ -115,26 +112,14 @@ func (h *Handler) sandboxes(c *gin.Context) {
 		return
 	}
 
-	pricePerSec, _ := new(big.Int).SetString(h.cfg.Billing.ComputePricePerSec, 10)
-	now := time.Now().Unix()
-
 	result := make([]sandboxInfo, 0, len(sessions))
 	for _, s := range sessions {
-		var accrued string
-		if pricePerSec != nil && s.StartTime > 0 {
-			elapsed := now - s.StartTime
-			if elapsed < 0 {
-				elapsed = 0
-			}
-			accrued = new(big.Int).Mul(pricePerSec, big.NewInt(elapsed)).String()
-		}
 		result = append(result, sandboxInfo{
 			SandboxID:     s.SandboxID,
 			Owner:         s.Owner,
 			Provider:      s.Provider,
-			StartTime:     s.StartTime,
-			LastVoucherAt: s.LastVoucherAt,
-			AccruedNeuron: accrued,
+			NextVoucherAt: s.NextVoucherAt,
+			PricePerSec:   s.PricePerSec,
 		})
 	}
 

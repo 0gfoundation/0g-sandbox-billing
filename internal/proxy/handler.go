@@ -13,7 +13,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/gin-gonic/gin"
@@ -553,14 +552,12 @@ func (h *Handler) handleSessions(c *gin.Context) {
 		sessionMap[s.SandboxID] = s
 	}
 
-	now := time.Now().Unix()
 	type row struct {
 		SandboxID     string `json:"sandbox_id"`
 		Owner         string `json:"owner"`
 		State         string `json:"state"`
-		StartTime     int64  `json:"start_time,omitempty"`
-		LastVoucherAt int64  `json:"last_voucher_at,omitempty"`
-		AccruedNeuron string `json:"accrued_neuron,omitempty"`
+		NextVoucherAt int64  `json:"next_voucher_at,omitempty"`
+		PricePerSec   string `json:"price_per_sec,omitempty"`
 	}
 	result := make([]row, 0, len(sandboxes))
 	for _, sb := range sandboxes {
@@ -570,14 +567,8 @@ func (h *Handler) handleSessions(c *gin.Context) {
 			State:     sb.State,
 		}
 		if sess, ok := sessionMap[sb.ID]; ok {
-			elapsed := now - sess.StartTime
-			if elapsed < 0 {
-				elapsed = 0
-			}
-			accrued := new(big.Int).Mul(big.NewInt(elapsed), h.computePricePerSec)
-			r.StartTime = sess.StartTime
-			r.LastVoucherAt = sess.LastVoucherAt
-			r.AccruedNeuron = accrued.String()
+			r.NextVoucherAt = sess.NextVoucherAt
+			r.PricePerSec = sess.PricePerSec
 		}
 		result = append(result, r)
 	}

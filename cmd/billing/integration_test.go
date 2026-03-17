@@ -443,7 +443,7 @@ func TestComponent_HappyPath(t *testing.T) {
 	signer := billing.NewSigner(fix.providerKey, e2eChainID, fix.proxyAddr, fix.providerAddr,
 		rdb, &e2eNonceReader{fix.contract}, zap.NewNop())
 	bh := billing.NewEventHandler(rdb, fix.providerAddr.Hex(),
-		big.NewInt(0), big.NewInt(100), new(big.Int), new(big.Int), signer, zap.NewNop())
+		big.NewInt(0), big.NewInt(100), new(big.Int), new(big.Int), 1, signer, zap.NewNop())
 
 	srv := buildServer(t, dtona, bh, rdb)
 
@@ -526,7 +526,7 @@ func TestComponent_InsufficientBalance(t *testing.T) {
 	signer := billing.NewSigner(fix.providerKey, e2eChainID, fix.proxyAddr, fix.providerAddr,
 		rdb, &e2eNonceReader{fix.contract}, zap.NewNop())
 	bh := billing.NewEventHandler(rdb, fix.providerAddr.Hex(),
-		big.NewInt(0), big.NewInt(100), new(big.Int), new(big.Int), signer, zap.NewNop())
+		big.NewInt(0), big.NewInt(100), new(big.Int), new(big.Int), 1, signer, zap.NewNop())
 
 	srv := buildServer(t, dtona, bh, rdb)
 

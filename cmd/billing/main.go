@@ -163,6 +163,7 @@ func main() {
 		createFee,
 		pricePerCPUPerSec,
 		pricePerMemGBPerSec,
+		cfg.Billing.VoucherIntervalSec,
 		signer,
 		log,
 	)
@@ -177,7 +178,7 @@ func main() {
 	// Recovery must start after stopCh is ready but before settler writes to it.
 	go recoverPendingStops(ctx, rdb, stopCh, log)
 	go settler.Run(ctx, cfg, rdb, onchain, stopCh, log)
-	go billing.RunGenerator(ctx, cfg, rdb, signer, computePricePerSec, log)
+	go billing.RunGenerator(ctx, rdb, billingHandler, log)
 
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	gin.SetMode(gin.ReleaseMode)

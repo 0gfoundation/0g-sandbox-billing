@@ -22,6 +22,7 @@ type EventHandler struct {
 	pricePerCPUPerSec   *big.Int // per CPU core/sec (0 = use flat rate)
 	pricePerMemGBPerSec *big.Int // per GB memory/sec (0 = use flat rate)
 	createFee           *big.Int
+	voucherIntervalSec  int64
 	signer              VoucherSigner
 	log                 *zap.Logger
 }
@@ -39,6 +40,7 @@ func NewEventHandler(
 	createFee *big.Int,
 	pricePerCPUPerSec *big.Int,
 	pricePerMemGBPerSec *big.Int,
+	voucherIntervalSec int64,
 	signer VoucherSigner,
 	log *zap.Logger,
 ) *EventHandler {
@@ -49,6 +51,7 @@ func NewEventHandler(
 		pricePerCPUPerSec:   pricePerCPUPerSec,
 		pricePerMemGBPerSec: pricePerMemGBPerSec,
 		createFee:           createFee,
+		voucherIntervalSec:  voucherIntervalSec,
 		signer:              signer,
 		log:                 log,
 	}
@@ -67,19 +70,35 @@ func (h *EventHandler) computePrice(cpu, memGB int) *big.Int {
 	return new(big.Int).Set(h.computePricePerSec)
 }
 
-// priceFromSession returns the per-second rate stored in the session, or falls
-// back to the flat rate if the session was created before per-resource pricing.
-func (h *EventHandler) priceFromSession(sess *Session) *big.Int {
-	if sess.PricePerSec != "" {
-		if p, ok := new(big.Int).SetString(sess.PricePerSec, 10); ok && p.Sign() > 0 {
-			return p
-		}
+// emitPeriodVoucher signs and enqueues a pre-charge voucher covering one full
+// voucherIntervalSec window starting at periodStart. Returns the next
+// NextVoucherAt value (periodStart + voucherIntervalSec).
+func (h *EventHandler) emitPeriodVoucher(ctx context.Context, sandboxID, ownerAddr string, price *big.Int, periodStart int64) (int64, error) {
+	nextVoucherAt := periodStart + h.voucherIntervalSec
+	fee := new(big.Int).Mul(price, big.NewInt(h.voucherIntervalSec))
+	if fee.Sign() == 0 {
+		return nextVoucherAt, nil
 	}
-	return h.computePricePerSec
+	nonce, err := h.signer.IncrNonce(ctx, ownerAddr, h.providerAddress)
+	if err != nil {
+		return 0, err
+	}
+	v := &voucher.SandboxVoucher{
+		SandboxID: sandboxID,
+		User:      common.HexToAddress(ownerAddr),
+		Provider:  common.HexToAddress(h.providerAddress),
+		TotalFee:  fee,
+		UsageHash: voucher.BuildUsageHash(sandboxID, periodStart, nextVoucherAt, h.voucherIntervalSec),
+		Nonce:     nonce,
+	}
+	if err := h.signer.SignAndEnqueue(ctx, v); err != nil {
+		return 0, err
+	}
+	return nextVoucherAt, nil
 }
 
-// OnCreate handles POST /sandbox success: generate createFee voucher and start
-// compute session immediately (Daytona auto-starts sandboxes on create).
+// OnCreate handles POST /sandbox success: emit createFee voucher, pre-charge
+// the first compute period, and open the billing session.
 // cpu and memGB are the sandbox's allocated resources used to compute billing rate.
 func (h *EventHandler) OnCreate(ctx context.Context, sandboxID, ownerAddr string, cpu, memGB int) {
 	nonce, err := h.signer.IncrNonce(ctx, ownerAddr, h.providerAddress)
@@ -97,32 +116,41 @@ func (h *EventHandler) OnCreate(ctx context.Context, sandboxID, ownerAddr string
 		Nonce:     nonce,
 	}
 	if err := h.signer.SignAndEnqueue(ctx, v); err != nil {
-		h.log.Error("OnCreate: sign/enqueue", zap.String("sandbox", sandboxID), zap.Error(err))
+		h.log.Error("OnCreate: sign/enqueue create-fee", zap.String("sandbox", sandboxID), zap.Error(err))
 		return
 	}
+
 	price := h.computePrice(cpu, memGB)
+	nextVoucherAt, err := h.emitPeriodVoucher(ctx, sandboxID, ownerAddr, price, now)
+	if err != nil {
+		h.log.Error("OnCreate: emit first period", zap.String("sandbox", sandboxID), zap.Error(err))
+		return
+	}
+
 	s := Session{
 		SandboxID:     sandboxID,
 		Owner:         ownerAddr,
 		Provider:      h.providerAddress,
-		StartTime:     now,
-		LastVoucherAt: now,
+		NextVoucherAt: nextVoucherAt,
 		PricePerSec:   price.String(),
 	}
 	if err := CreateSession(ctx, h.rdb, s); err != nil {
 		h.log.Error("OnCreate: create session", zap.String("sandbox", sandboxID), zap.Error(err))
 	}
+	periodFee := new(big.Int).Mul(price, big.NewInt(h.voucherIntervalSec))
+	totalUpfront := new(big.Int).Add(h.createFee, periodFee)
 	_ = events.Push(ctx, h.rdb, events.Event{
 		Type:      events.TypeCreated,
-		Message:   fmt.Sprintf("Sandbox %s created, create-fee %s neuron, rate %s neuron/sec", sandboxID, h.createFee.String(), price.String()),
+		Message:   fmt.Sprintf("Sandbox %s created, create-fee %s + first-period %s neuron, rate %s neuron/sec", sandboxID, h.createFee.String(), periodFee.String(), price.String()),
 		SandboxID: sandboxID,
 		User:      ownerAddr,
-		Amount:    h.createFee.String(),
+		Amount:    totalUpfront.String(),
 	})
 }
 
 // OnStart handles POST /sandbox/:id/start success: create billing session if
 // none exists (idempotent — OnCreate already opens a session on initial start).
+// Pre-charges the first compute period, same as OnCreate.
 // cpu and memGB are the sandbox's allocated resources used to compute billing rate.
 func (h *EventHandler) OnStart(ctx context.Context, sandboxID, ownerAddr string, cpu, memGB int) {
 	existing, err := GetSession(ctx, h.rdb, sandboxID)
@@ -135,12 +163,16 @@ func (h *EventHandler) OnStart(ctx context.Context, sandboxID, ownerAddr string,
 	}
 	price := h.computePrice(cpu, memGB)
 	now := time.Now().Unix()
+	nextVoucherAt, err := h.emitPeriodVoucher(ctx, sandboxID, ownerAddr, price, now)
+	if err != nil {
+		h.log.Error("OnStart: emit first period", zap.String("sandbox", sandboxID), zap.Error(err))
+		return
+	}
 	s := Session{
 		SandboxID:     sandboxID,
 		Owner:         ownerAddr,
 		Provider:      h.providerAddress,
-		StartTime:     now,
-		LastVoucherAt: now,
+		NextVoucherAt: nextVoucherAt,
 		PricePerSec:   price.String(),
 	}
 	if err := CreateSession(ctx, h.rdb, s); err != nil {
@@ -148,9 +180,9 @@ func (h *EventHandler) OnStart(ctx context.Context, sandboxID, ownerAddr string,
 	}
 }
 
-// OnStop handles POST /sandbox/:id/stop success: generate final voucher + delete session.
+// OnStop handles POST /sandbox/:id/stop success: delete billing session.
+// No final voucher is emitted — the current period was already pre-charged.
 func (h *EventHandler) OnStop(ctx context.Context, sandboxID string) {
-	h.generateFinalVoucher(ctx, sandboxID)
 	if err := DeleteSession(ctx, h.rdb, sandboxID); err != nil {
 		h.log.Warn("OnStop: delete session", zap.String("sandbox", sandboxID), zap.Error(err))
 	}
@@ -158,7 +190,6 @@ func (h *EventHandler) OnStop(ctx context.Context, sandboxID string) {
 
 // OnDelete handles DELETE /sandbox/:id success.
 func (h *EventHandler) OnDelete(ctx context.Context, sandboxID string) {
-	h.generateFinalVoucher(ctx, sandboxID)
 	if err := DeleteSession(ctx, h.rdb, sandboxID); err != nil {
 		h.log.Warn("OnDelete: delete session", zap.String("sandbox", sandboxID), zap.Error(err))
 	}
@@ -184,50 +215,3 @@ func (h *EventHandler) EnsureSession(ctx context.Context, sandboxID, ownerAddr s
 	}
 	h.OnCreate(ctx, sandboxID, ownerAddr, 0, 0) // resources unknown at recovery; uses flat rate
 }
-
-func (h *EventHandler) generateFinalVoucher(ctx context.Context, sandboxID string) {
-	sess, err := GetSession(ctx, h.rdb, sandboxID)
-	if err != nil {
-		h.log.Error("generateFinalVoucher: get session", zap.String("sandbox", sandboxID), zap.Error(err))
-		return
-	}
-	if sess == nil {
-		return // no active session, nothing to bill
-	}
-
-	now := time.Now().Unix()
-	periodStart := sess.LastVoucherAt
-	periodEnd := now
-	elapsedSec := periodEnd - periodStart
-	if elapsedSec <= 0 {
-		return
-	}
-
-	totalFee := new(big.Int).Mul(big.NewInt(elapsedSec), h.priceFromSession(sess))
-	nonce, err := h.signer.IncrNonce(ctx, sess.Owner, h.providerAddress)
-	if err != nil {
-		h.log.Error("generateFinalVoucher: incr nonce", zap.String("sandbox", sandboxID), zap.Error(err))
-		return
-	}
-
-	v := &voucher.SandboxVoucher{
-		SandboxID: sandboxID,
-		User:      common.HexToAddress(sess.Owner),
-		Provider:  common.HexToAddress(h.providerAddress),
-		TotalFee:  totalFee,
-		Nonce:     nonce,
-		UsageHash: voucher.BuildUsageHash(sandboxID, periodStart, periodEnd, elapsedSec),
-	}
-	if err := h.signer.SignAndEnqueue(ctx, v); err != nil {
-		h.log.Error("generateFinalVoucher: sign/enqueue", zap.String("sandbox", sandboxID), zap.Error(err))
-		return
-	}
-	_ = events.Push(ctx, h.rdb, events.Event{
-		Type:      events.TypeStopped,
-		Message:   fmt.Sprintf("Final voucher signed for sandbox %s, %s neuron", sandboxID, totalFee.String()),
-		SandboxID: sandboxID,
-		User:      sess.Owner,
-		Amount:    totalFee.String(),
-	})
-}
-

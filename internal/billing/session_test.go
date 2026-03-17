@@ -20,8 +20,7 @@ var testSession = Session{
 	SandboxID:     "sb-test-001",
 	Owner:         "0xABCDEF1234567890ABCDEF1234567890ABCDEF12",
 	Provider:      "0x1111111111111111111111111111111111111111",
-	StartTime:     1_700_000_000,
-	LastVoucherAt: 1_700_000_000,
+	NextVoucherAt: 1_700_003_600,
 }
 
 // ── CreateSession / GetSession ───────────────────────────────────────────────
@@ -51,11 +50,8 @@ func TestCreateSession_GetSession(t *testing.T) {
 	if got.Provider != testSession.Provider {
 		t.Errorf("Provider: got %q want %q", got.Provider, testSession.Provider)
 	}
-	if got.StartTime != testSession.StartTime {
-		t.Errorf("StartTime: got %d want %d", got.StartTime, testSession.StartTime)
-	}
-	if got.LastVoucherAt != testSession.LastVoucherAt {
-		t.Errorf("LastVoucherAt: got %d want %d", got.LastVoucherAt, testSession.LastVoucherAt)
+	if got.NextVoucherAt != testSession.NextVoucherAt {
+		t.Errorf("NextVoucherAt: got %d want %d", got.NextVoucherAt, testSession.NextVoucherAt)
 	}
 }
 
@@ -72,9 +68,9 @@ func TestGetSession_NotFound(t *testing.T) {
 	}
 }
 
-// ── UpdateLastVoucherAt ───────────────────────────────────────────────────────
+// ── UpdateNextVoucherAt ───────────────────────────────────────────────────────
 
-func TestUpdateLastVoucherAt(t *testing.T) {
+func TestUpdateNextVoucherAt(t *testing.T) {
 	rdb, _ := newTestRedis(t)
 	ctx := context.Background()
 
@@ -82,21 +78,18 @@ func TestUpdateLastVoucherAt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	newTs := int64(1_700_003_600)
-	if err := UpdateLastVoucherAt(ctx, rdb, testSession.SandboxID, newTs); err != nil {
-		t.Fatalf("UpdateLastVoucherAt: %v", err)
+	newTs := int64(1_700_007_200)
+	if err := UpdateNextVoucherAt(ctx, rdb, testSession.SandboxID, newTs); err != nil {
+		t.Fatalf("UpdateNextVoucherAt: %v", err)
 	}
 
 	got, _ := GetSession(ctx, rdb, testSession.SandboxID)
-	if got.LastVoucherAt != newTs {
-		t.Errorf("LastVoucherAt: got %d want %d", got.LastVoucherAt, newTs)
+	if got.NextVoucherAt != newTs {
+		t.Errorf("NextVoucherAt: got %d want %d", got.NextVoucherAt, newTs)
 	}
 	// Other fields must be unchanged
 	if got.Owner != testSession.Owner {
 		t.Errorf("Owner changed unexpectedly: %q", got.Owner)
-	}
-	if got.StartTime != testSession.StartTime {
-		t.Errorf("StartTime changed unexpectedly: %d", got.StartTime)
 	}
 }
 
@@ -151,9 +144,9 @@ func TestScanAllSessions_Multiple(t *testing.T) {
 	ctx := context.Background()
 
 	sess := []Session{
-		{SandboxID: "sb-001", Owner: "0xAAAA", Provider: "0xPPPP", StartTime: 1000, LastVoucherAt: 1000},
-		{SandboxID: "sb-002", Owner: "0xBBBB", Provider: "0xPPPP", StartTime: 2000, LastVoucherAt: 2000},
-		{SandboxID: "sb-003", Owner: "0xCCCC", Provider: "0xPPPP", StartTime: 3000, LastVoucherAt: 3000},
+		{SandboxID: "sb-001", Owner: "0xAAAA", Provider: "0xPPPP", NextVoucherAt: 1000},
+		{SandboxID: "sb-002", Owner: "0xBBBB", Provider: "0xPPPP", NextVoucherAt: 2000},
+		{SandboxID: "sb-003", Owner: "0xCCCC", Provider: "0xPPPP", NextVoucherAt: 3000},
 	}
 	for _, s := range sess {
 		CreateSession(ctx, rdb, s) //nolint:errcheck
@@ -178,8 +171,8 @@ func TestScanAllSessions_Multiple(t *testing.T) {
 		if got[i].Owner != sess[i].Owner {
 			t.Errorf("[%d] Owner: got %q want %q", i, got[i].Owner, sess[i].Owner)
 		}
-		if got[i].StartTime != sess[i].StartTime {
-			t.Errorf("[%d] StartTime: got %d want %d", i, got[i].StartTime, sess[i].StartTime)
+		if got[i].NextVoucherAt != sess[i].NextVoucherAt {
+			t.Errorf("[%d] NextVoucherAt: got %d want %d", i, got[i].NextVoucherAt, sess[i].NextVoucherAt)
 		}
 	}
 }
@@ -189,8 +182,8 @@ func TestScanAllSessions_IgnoresUnrelatedKeys(t *testing.T) {
 	ctx := context.Background()
 
 	// Write unrelated keys
-	rdb.Set(ctx, "nonce:abc", 1, 0)             //nolint:errcheck
-	rdb.Set(ctx, "stop:sandbox:sb-x", "reason", 0) //nolint:errcheck
+	rdb.Set(ctx, "nonce:abc", 1, 0)                       //nolint:errcheck
+	rdb.Set(ctx, "stop:sandbox:sb-x", "reason", 0)        //nolint:errcheck
 	rdb.HSet(ctx, "voucher:queue:0xPROV", "field", "val") //nolint:errcheck
 
 	// And one real session
@@ -212,8 +205,8 @@ func TestScanAllSessions_AfterDelete(t *testing.T) {
 	rdb, _ := newTestRedis(t)
 	ctx := context.Background()
 
-	CreateSession(ctx, rdb, Session{SandboxID: "sb-A", Owner: "0xA", Provider: "0xP", StartTime: 1, LastVoucherAt: 1}) //nolint:errcheck
-	CreateSession(ctx, rdb, Session{SandboxID: "sb-B", Owner: "0xB", Provider: "0xP", StartTime: 2, LastVoucherAt: 2}) //nolint:errcheck
+	CreateSession(ctx, rdb, Session{SandboxID: "sb-A", Owner: "0xA", Provider: "0xP", NextVoucherAt: 1}) //nolint:errcheck
+	CreateSession(ctx, rdb, Session{SandboxID: "sb-B", Owner: "0xB", Provider: "0xP", NextVoucherAt: 2}) //nolint:errcheck
 
 	DeleteSession(ctx, rdb, "sb-A") //nolint:errcheck
 
