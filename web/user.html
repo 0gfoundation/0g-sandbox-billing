@@ -460,13 +460,16 @@ async function loadProviders(forceChain=false) {
       return;
     }
 
-    // Fetch sandboxes from each provider in parallel (always fresh)
-    const sbxByProvider = {};
+    // Fetch sandboxes + health from each provider in parallel (always fresh)
+    const sbxByProvider = {}, healthByProvider = {};
     await Promise.all(providers.map(async p => {
-      try {
-        const r = await fetch(`/proxy/${p.address}/api/sandbox_list?wallet=${encodeURIComponent(walletAddr)}`);
-        sbxByProvider[p.address.toLowerCase()] = r.ok ? (await r.json() || []) : [];
-      } catch(_) { sbxByProvider[p.address.toLowerCase()] = []; }
+      const key = p.address.toLowerCase();
+      const [sbxRes, healthRes] = await Promise.allSettled([
+        fetch(`/proxy/${p.address}/api/sandbox_list?wallet=${encodeURIComponent(walletAddr)}`),
+        Promise.race([fetch(`/proxy/${p.address}/healthz`), new Promise((_,r)=>setTimeout(()=>r(new Error('timeout')),3000))]),
+      ]);
+      sbxByProvider[key] = (sbxRes.status==='fulfilled' && sbxRes.value.ok) ? (await sbxRes.value.json().catch(()=>[])) : [];
+      healthByProvider[key] = healthRes.status==='fulfilled' && healthRes.value.ok;
     }));
 
     // On-chain data: use cache when possible to avoid slow RPC round-trips.
@@ -487,13 +490,22 @@ async function loadProviders(forceChain=false) {
       });
     }
 
+    // Sort: online first, then offline
+    const sortedIdx = providers.map((_,i)=>i).sort((a,b) => {
+      const ha = healthByProvider[providers[a].address.toLowerCase()] ? 1 : 0;
+      const hb = healthByProvider[providers[b].address.toLowerCase()] ? 1 : 0;
+      return hb - ha;
+    });
+
     section.innerHTML = '';
-    providers.forEach((p, i) => {
+    sortedIdx.forEach(i => {
+      const p = providers[i];
       const isAcked = ackedArr[i];
       const mySbx   = sbxByProvider[p.address.toLowerCase()] || [];
       const [bal, pendingRefund] = balancesArr[i];
       const pJson = JSON.stringify(p).replace(/"/g, '&quot;');
 
+      const isUp = healthByProvider[p.address.toLowerCase()];
       const card = document.createElement('div');
       card.className = 'card' + (isAcked ? ' pv-subscribed' : '');
       card.id = 'pv-' + p.address.toLowerCase();
@@ -502,6 +514,7 @@ async function loadProviders(forceChain=false) {
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <span class="card-title" title="${p.address}">${shortAddr(p.address)}</span>
             <span class="badge purple">v${p.signer_version}</span>
+            <span class="tag ${isUp ? 'running' : 'error'}" title="${isUp ? 'Provider reachable' : 'Provider unreachable'}"><span class="tag-dot"></span>${isUp ? 'Online' : 'Offline'}</span>
             ${isAcked ? '<span class="badge green">✓ Subscribed</span>' : ''}
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">

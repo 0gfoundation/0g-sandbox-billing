@@ -80,6 +80,9 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--text);ba
 @keyframes pageIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 .two-col{display:grid;grid-template-columns:1fr 280px;gap:16px;align-items:start}
 @media(max-width:800px){.two-col{grid-template-columns:1fr}}
+.three-col{display:grid;grid-template-columns:1fr 1fr 220px;gap:16px;align-items:start}
+@media(max-width:1000px){.three-col{grid-template-columns:1fr 1fr}}
+@media(max-width:640px){.three-col{grid-template-columns:1fr}}
 
 /* ─ Card ─ */
 .card{background:var(--surf);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:16px;transition:border-color var(--t-base) var(--ease-out)}
@@ -206,10 +209,10 @@ tbody tr:hover td{background:var(--surf2)}
 
   <div id="mainContent" style="display:none">
 
-    <!-- ── Service + Earnings ── -->
-    <div class="two-col">
+    <!-- ── Service + Contract + Earnings ── -->
+    <div class="three-col">
 
-      <!-- Service Status -->
+      <!-- Service Registration -->
       <div class="card">
         <div class="card-head">
           <span class="card-title">Service Registration</span>
@@ -217,37 +220,36 @@ tbody tr:hover td{background:var(--surf2)}
         </div>
         <div class="card-body">
           <div class="info-row"><span class="ik">Status</span><span id="svcRegistered">—</span></div>
+          <div class="info-row"><span class="ik">Provider Addr</span><span class="iv mono" id="infoProvider" title="" style="font-size:11px">—</span></div>
           <div class="info-row"><span class="ik">Service URL</span><span class="iv" id="svcUrl">—</span></div>
           <div class="info-row"><span class="ik">TEE Signer</span><span class="iv purple" id="svcTEE" title="">—</span></div>
           <div class="info-row"><span class="ik">CPU Price / min</span><span class="iv" id="svcCPUPrice">—</span></div>
           <div class="info-row"><span class="ik">Mem Price / GB / min</span><span class="iv" id="svcMemPrice">—</span></div>
           <div class="info-row"><span class="ik">Create Fee</span><span class="iv" id="svcFee">—</span></div>
+        </div>
+      </div>
+
+      <!-- Contract -->
+      <div class="card">
+        <div class="card-head"><span class="card-title">Contract</span></div>
+        <div class="card-body">
+          <div class="info-row"><span class="ik">Address</span><span class="iv mono" id="infoContract" title="" style="font-size:11px">—</span></div>
+          <div class="info-row"><span class="ik">Chain ID</span><span class="iv" id="infoChain">—</span></div>
+          <div class="info-row"><span class="ik">Owner</span><span class="iv purple" id="contractOwner" title="" style="font-size:11px">—</span></div>
           <div class="info-row"><span class="ik">Required Stake</span><span class="iv" id="svcStake">—</span></div>
         </div>
       </div>
 
       <!-- Earnings -->
-      <div>
-        <div class="card">
-          <div class="card-head">
-            <span class="card-title">Earnings</span>
-            <button class="btn btn-sm btn-ghost" onclick="loadProviderData()">↻</button>
-          </div>
-          <div class="card-body">
-            <div class="info-row"><span class="ik">Accumulated</span><span class="iv big" id="providerEarnings">—</span></div>
-            <div class="info-row"><span class="ik">Staked</span><span class="iv" id="providerStaked">—</span></div>
-            <button class="btn btn-sm btn-prim" style="margin-top:14px" onclick="withdrawEarnings()">Withdraw Earnings</button>
-          </div>
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">Earnings</span>
+          <button class="btn btn-sm btn-ghost" onclick="loadProviderData()">↻</button>
         </div>
-
-        <!-- Server info card -->
-        <div class="card">
-          <div class="card-head"><span class="card-title">Server Info</span></div>
-          <div class="card-body">
-            <div class="info-row"><span class="ik">Contract</span><span class="iv" id="infoContract" style="font-size:11px">—</span></div>
-            <div class="info-row"><span class="ik">Chain ID</span><span class="iv" id="infoChain">—</span></div>
-            <div class="info-row"><span class="ik">Provider Addr</span><span class="iv" id="infoProvider" style="font-size:11px">—</span></div>
-          </div>
+        <div class="card-body">
+          <div class="info-row"><span class="ik">Accumulated</span><span class="iv big" id="providerEarnings">—</span></div>
+          <div class="info-row"><span class="ik">Staked</span><span class="iv" id="providerStaked">—</span></div>
+          <button class="btn btn-sm btn-prim" style="margin-top:14px" onclick="withdrawEarnings()">Withdraw Earnings</button>
         </div>
       </div>
 
@@ -396,6 +398,7 @@ const ABI = [
   "function providerStakes(address) view returns (uint256)",
   "function addOrUpdateService(string url, address teeSignerAddress, uint256 pricePerCPUPerMin, uint256 createFee, uint256 pricePerMemGBPerMin) payable",
   "function withdrawEarnings()",
+  "function owner() view returns (address)",
 ];
 
 window.addEventListener('eip6963:announceProvider', e => eip6963Providers.set(e.detail.info.uuid, e.detail));
@@ -406,11 +409,9 @@ window.onload = async () => {
   info = await fetch('/info').then(r => r.json()).catch(() => null);
   if (info) {
     document.getElementById('chainTag').innerHTML = `<div class="dot"></div>Chain ${info.chain_id}`;
-    document.getElementById('infoContract').textContent = info.contract_address || '—';
-    document.getElementById('infoContract').title = info.contract_address || '';
+    const cEl = document.getElementById('infoContract'); cEl.textContent = shortAddr(info.contract_address||'') || '—'; cEl.title = info.contract_address || '';
     document.getElementById('infoChain').textContent = info.chain_id || '—';
-    document.getElementById('infoProvider').textContent = info.provider_address || '—';
-    document.getElementById('infoProvider').title = info.provider_address || '';
+    const pEl = document.getElementById('infoProvider'); pEl.textContent = shortAddr(info.provider_address||'') || '—'; pEl.title = info.provider_address || '';
     // Pre-fill TEE signer with provider address from server info
     if (info.tee_signer) document.getElementById('svcTEEInput').value = info.tee_signer;
     else if (info.provider_address) document.getElementById('svcTEEInput').value = info.provider_address;
@@ -547,12 +548,16 @@ async function loadProviderData() {
       document.getElementById('svcMemPrice').textContent = fmtNeuron(svc.pricePerMemGBPerMin.toString()) + '/GB/min';
       document.getElementById('svcFee').textContent = fmtNeuron(svc.createFee.toString());
     }
-    const stake = await contract.providerStake();
+    const [stake, earn, staked, owner] = await Promise.all([
+      contract.providerStake(),
+      contract.providerEarnings(walletAddr),
+      contract.providerStakes(walletAddr),
+      contract.owner().catch(() => null),
+    ]);
     document.getElementById('svcStake').textContent = fmtNeuron(stake.toString());
-    const earn = await contract.providerEarnings(walletAddr);
     document.getElementById('providerEarnings').textContent = fmtNeuron(earn.toString());
-    const staked = await contract.providerStakes(walletAddr);
     document.getElementById('providerStaked').textContent = fmtNeuron(staked.toString());
+    if (owner) { const el = document.getElementById('contractOwner'); el.textContent = shortAddr(owner); el.title = owner; }
   } catch (e) { console.error(e); }
 }
 
