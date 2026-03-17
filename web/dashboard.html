@@ -301,6 +301,11 @@ tbody tr:hover td{background:var(--surf2)}
       </div>
       <div class="card-body" style="padding:0">
         <div id="eventsTable"><div class="empty">Click Load to fetch on-chain events.</div></div>
+        <div id="evtPager" style="display:none;padding:8px 16px;display:flex;align-items:center;gap:8px;border-top:1px solid var(--border)">
+          <button class="btn btn-sm btn-ghost" id="evtPrev" onclick="evtChangePage(-1)">‹ Prev</button>
+          <span id="evtPageInfo" style="font-size:12px;color:var(--muted)"></span>
+          <button class="btn btn-sm btn-ghost" id="evtNext" onclick="evtChangePage(1)">Next ›</button>
+        </div>
       </div>
     </div>
 
@@ -711,19 +716,29 @@ async function doForceDelete(id) {
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────
-async function loadEvents() {
+let evtCurrentPage = 0;
+const EVT_PAGE_SIZE = 50;
+
+async function loadEvents(page) {
+  if (page === undefined) { evtCurrentPage = 0; page = 0; }
   const el = document.getElementById('eventsTable'), meta = document.getElementById('evtMeta');
+  const pager = document.getElementById('evtPager');
   if (!walletAddr) { el.innerHTML = '<div class="empty">Connect wallet first.</div>'; return; }
   el.innerHTML = '<div class="empty">Loading…</div>'; meta.textContent = '';
+  pager.style.display = 'none';
   try {
-    const resp = await signedFetch('GET', '/api/events?lookback=' + parseInt(document.getElementById('evtRange').value));
+    const lookback = parseInt(document.getElementById('evtRange').value);
+    const url = `/api/events?lookback=${lookback}&page=${page}&page_size=${EVT_PAGE_SIZE}`;
+    const resp = await signedFetch('GET', url);
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) { el.innerHTML = `<div class="empty">${esc(data.error || 'Failed')}</div>`; return; }
     const evts = data.events || [];
+    const total = data.total || 0;
+    const totalPages = Math.max(1, Math.ceil(total / EVT_PAGE_SIZE));
     meta.textContent = `block ${data.from_block} → ${data.current_block}`;
     if (!evts.length) { el.innerHTML = '<div class="empty"><div class="empty-icon">📋</div>No events in this range.</div>'; return; }
     const exp = 'https://chainscan-galileo.0g.ai/tx/', byUser = {};
-    [...evts].reverse().forEach(e => { (byUser[e.user] = byUser[e.user] || []).push(e); });
+    evts.forEach(e => { (byUser[e.user] = byUser[e.user] || []).push(e); });
     el.innerHTML = `<table><thead><tr><th>Time</th><th>User</th><th>Fee</th><th>Nonce</th><th>Status</th><th>Tx</th></tr></thead><tbody>${
       Object.entries(byUser).map(([user, ues]) =>
         ues.map((e, i) => `<tr>
@@ -736,7 +751,17 @@ async function loadEvents() {
         </tr>`).join('')
       ).join('')
     }</tbody></table>`;
+    if (totalPages > 1) {
+      pager.style.display = 'flex';
+      document.getElementById('evtPageInfo').textContent = `Page ${page + 1} / ${totalPages}  (${total} total)`;
+      document.getElementById('evtPrev').disabled = page === 0;
+      document.getElementById('evtNext').disabled = page >= totalPages - 1;
+    }
   } catch (e) { el.innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`; }
+}
+function evtChangePage(delta) {
+  evtCurrentPage += delta;
+  loadEvents(evtCurrentPage);
 }
 
 // ── Auth-signed fetch ─────────────────────────────────────────────────────────

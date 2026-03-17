@@ -238,11 +238,13 @@ type VoucherEvent struct {
 // GetVoucherEvents queries VoucherSettled logs from the contract.
 // lookback is the number of blocks to look back from the current latest block.
 // lookback=0 means all history (from block 1).
-// Returns the events, the current (latest) block number, and any error.
-func (c *Client) GetVoucherEvents(ctx context.Context, lookback uint64) ([]VoucherEvent, uint64, error) {
+// page/pageSize control which slice to return (page is 0-indexed, newest-first).
+// pageSize=0 returns all events without pagination.
+// Returns the page of events, the total count, the current (latest) block number, and any error.
+func (c *Client) GetVoucherEvents(ctx context.Context, lookback uint64, page, pageSize int) ([]VoucherEvent, int, uint64, error) {
 	latest, err := c.eth.BlockNumber(ctx)
 	if err != nil {
-		return nil, 0, fmt.Errorf("get block number: %w", err)
+		return nil, 0, 0, fmt.Errorf("get block number: %w", err)
 	}
 	var fromBlock uint64 = 1
 	if lookback > 0 && latest > lookback {
@@ -256,12 +258,29 @@ func (c *Client) GetVoucherEvents(ctx context.Context, lookback uint64) ([]Vouch
 	}
 	logs, err := c.eth.FilterLogs(ctx, query)
 	if err != nil {
-		return nil, latest, fmt.Errorf("FilterLogs: %w", err)
+		return nil, 0, latest, fmt.Errorf("FilterLogs: %w", err)
 	}
 
-	// Collect unique block numbers, then fetch their timestamps concurrently.
+	total := len(logs)
+
+	// Determine the slice of logs for this page (logs are ascending; we want newest-first).
+	pageLogs := logs
+	if pageSize > 0 {
+		start := page * pageSize
+		end := start + pageSize
+		if start >= total {
+			return []VoucherEvent{}, total, latest, nil
+		}
+		if end > total {
+			end = total
+		}
+		// Slice from the end (newest logs are at the tail).
+		pageLogs = logs[total-end : total-start]
+	}
+
+	// Collect unique block numbers for this page only, then fetch timestamps.
 	blockNums := make(map[uint64]uint64) // block → timestamp
-	for _, l := range logs {
+	for _, l := range pageLogs {
 		blockNums[l.BlockNumber] = 0
 	}
 	type tsResult struct {
@@ -272,7 +291,7 @@ func (c *Client) GetVoucherEvents(ctx context.Context, lookback uint64) ([]Vouch
 	// if the HTTP client disconnects mid-request.
 	fetchCtx, fetchCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer fetchCancel()
-	sem := make(chan struct{}, 20) // cap at 20 concurrent RPC calls
+	sem := make(chan struct{}, 5) // cap at 5 concurrent RPC calls
 	ch := make(chan tsResult, len(blockNums))
 	var wg sync.WaitGroup
 	for bn := range blockNums {
@@ -295,8 +314,9 @@ func (c *Client) GetVoucherEvents(ctx context.Context, lookback uint64) ([]Vouch
 		blockNums[r.bn] = r.ts
 	}
 
-	events := make([]VoucherEvent, 0, len(logs))
-	for _, l := range logs {
+	events := make([]VoucherEvent, 0, len(pageLogs))
+	for i := len(pageLogs) - 1; i >= 0; i-- {
+		l := pageLogs[i]
 		ev, err := c.contract.ParseVoucherSettled(l)
 		if err != nil {
 			continue
@@ -312,7 +332,7 @@ func (c *Client) GetVoucherEvents(ctx context.Context, lookback uint64) ([]Vouch
 			Timestamp: blockNums[l.BlockNumber],
 		})
 	}
-	return events, latest, nil
+	return events, total, latest, nil
 }
 
 // GetLastNonce returns the last settled nonce for a (user, provider) pair from the contract.

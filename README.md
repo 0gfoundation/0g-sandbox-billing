@@ -296,7 +296,7 @@ The billing server runs inside a 0G Tapp TEE enclave. Deploy via `tapp-cli`:
 
 ```bash
 # Build the image
-docker build -t billing:latest .
+docker build --target sandbox -t 0g-sandbox:dev .
 
 # Deploy (or redeploy after changes)
 tapp-cli -s http://<tapp-server>:50051 stop-app  --app-id 0g-sandbox

@@ -49,9 +49,10 @@ type AckChecker interface {
 
 // EventFetcher retrieves on-chain VoucherSettled events.
 // lookback is blocks to look back; 0 = all history.
-// Returns events, current block number, and any error.
+// page/pageSize control pagination (0-indexed, newest-first); pageSize=0 returns all.
+// Returns events, total count, current block number, and any error.
 type EventFetcher interface {
-	GetVoucherEvents(ctx context.Context, lookback uint64) ([]chain.VoucherEvent, uint64, error)
+	GetVoucherEvents(ctx context.Context, lookback uint64, page, pageSize int) ([]chain.VoucherEvent, int, uint64, error)
 }
 
 // Handler wires up all proxy routes onto a Gin engine.
@@ -485,7 +486,25 @@ func (h *Handler) handleEvents(c *gin.Context) {
 		}
 		lookback = n
 	}
-	evts, currentBlock, err := h.eventFetcher.GetVoucherEvents(c.Request.Context(), lookback)
+	page := 0
+	if s := c.Query("page"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid page"})
+			return
+		}
+		page = n
+	}
+	pageSize := 50
+	if s := c.Query("page_size"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid page_size"})
+			return
+		}
+		pageSize = n
+	}
+	evts, total, currentBlock, err := h.eventFetcher.GetVoucherEvents(c.Request.Context(), lookback, page, pageSize)
 	if err != nil {
 		h.log.Error("GetVoucherEvents", zap.Error(err))
 		c.JSON(http.StatusBadGateway, gin.H{"error": "chain query failed"})
@@ -521,6 +540,9 @@ func (h *Handler) handleEvents(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"current_block": currentBlock,
 		"from_block":    fromBlock,
+		"total":         total,
+		"page":          page,
+		"page_size":     pageSize,
 		"events":        result,
 	})
 }

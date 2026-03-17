@@ -271,7 +271,7 @@ tapp-cli -s $TAPP_SERVER start-service --app-id 0g-sandbox --service-name billin
 
 ```bash
 # 1. Build and push
-docker build -t eliza-registry-vpc.ap-southeast-1.cr.aliyuncs.com/eliza/0g-sandbox:latest .
+docker build --target sandbox -t eliza-registry-vpc.ap-southeast-1.cr.aliyuncs.com/eliza/0g-sandbox:latest .
 docker push eliza-registry-vpc.ap-southeast-1.cr.aliyuncs.com/eliza/0g-sandbox:latest
 
 # 2. Redeploy
