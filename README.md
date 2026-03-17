@@ -341,6 +341,94 @@ Sandboxes are automatically stopped when the user's balance is exhausted.
 
 ---
 
+## Broker: User Entry Portal
+
+The **Broker** is a TEE-hosted service that acts as the entry point for users. Rather than
+connecting directly to a provider, users connect to the Broker, which handles provider
+discovery, request routing, and automatic balance top-ups on their behalf.
+
+```
+User ──► Broker (TEE)
+              │
+              ├── Provider Marketplace   index provider URLs from chain events
+              ├── Reverse Proxy          route /proxy/:addr/* → provider backend (no CORS)
+              ├── Balance Monitor        poll on-chain balance every T_monitor seconds
+              └── Payment Layer client   call deposit(user, provider, amount) when balance low
+```
+
+### Why TEE-hosted?
+
+The Broker signs Payment Layer requests with its TEE key. This lets the Payment Layer
+verify that top-up instructions came from a legitimate, unmodified Broker — not a spoofed
+caller. Trust is rooted in the TEE hardware, not in operator configuration.
+
+### Provider Marketplace
+
+The Broker indexes registered providers from chain events (via `cmd/broker` → `internal/indexer`)
+and exposes them at `GET /api/providers`. The dashboard UI uses this to let users pick a
+provider without knowing any provider URLs directly.
+
+### Balance Monitoring & Automatic Top-up
+
+When a sandbox starts or restarts, the billing proxy registers the session with the Broker
+(`POST /api/session`). The Broker tracks each session's CPU/memory and computes the user's
+total burn rate. When on-chain balance drops below the threshold, it calls the Payment
+Layer to top up automatically.
+
+#### Parameter tuning
+
+Derived from **T_react** — time from alert to funds landing on-chain:
+
+| Parameter | Formula | Automatic (T_react ≈ 60s) | Manual (T_react = 10 min) |
+|-----------|---------|--------------------------|--------------------------|
+| `BROKER_MONITOR_INTERVAL_SEC` | `VOUCHER_INTERVAL_SEC / 2` | **30s** | 30s |
+| `BROKER_THRESHOLD_INTERVALS` | `T_react / T_monitor` | **3** | 20 |
+| `BROKER_TOPUP_INTERVALS` | `THRESHOLD_INTERVALS × 2` | **6** | 40 |
+
+- **Threshold** = burn_rate × interval × `THRESHOLD_INTERVALS` — triggers top-up request
+- **Topup amount** = burn_rate × interval × `TOPUP_INTERVALS` — target balance after refill
+- On-chain latency for automatic top-up ≈ 30–60s (Payment Layer queue + ~2 block confirmations at 6s/block)
+
+> **Log buffer note**: tapp-cli has a fixed log buffer (~50 lines). At 6s intervals, the
+> buffer fills in ~2 min during alert state and `get-app-logs` returns stale data. Keep
+> `BROKER_MONITOR_INTERVAL_SEC ≥ 30` to avoid this.
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SETTLEMENT_CONTRACT` | (required) | BeaconProxy address (same as billing proxy) |
+| `RPC_URL` | `https://evmrpc-testnet.0g.ai` | EVM RPC endpoint |
+| `CHAIN_ID` | `16602` | Chain ID |
+| `BROKER_PORT` | `8082` | HTTP port |
+| `BROKER_MONITOR_INTERVAL_SEC` | `300` | Balance poll interval (seconds) |
+| `BROKER_THRESHOLD_INTERVALS` | `2` | Alert when balance < burn × interval × N |
+| `BROKER_TOPUP_INTERVALS` | `3` | Top-up to burn × interval × N neuron |
+| `PAYMENT_LAYER_URL` | — | Payment Layer HTTP endpoint; empty = log-only (noop) |
+| `BROKER_DEBUG` | `false` | Expose `GET /api/monitor` to inspect live sessions |
+
+### Tapp Deployment
+
+The Broker runs as a separate tapp app (`0g-broker`) alongside `0g-sandbox`:
+
+```bash
+# Build (broker stage of the multi-stage Dockerfile)
+docker build --target broker -t 0g-broker:latest .
+docker push <registry>/0g-broker:latest
+
+# Deploy
+tapp-cli -s http://<tapp-server>:50051 stop-app  --app-id 0g-broker
+tapp-cli -s http://<tapp-server>:50051 start-app --app-id 0g-broker \
+  -f docker/broker/docker-compose.yml
+
+# Check logs
+tapp-cli -s http://<tapp-server>:50051 get-app-logs --app-id 0g-broker --service broker -n 50
+```
+
+The billing proxy connects to the Broker via `BROKER_URL=http://<broker-host>:8082`.
+
+---
+
 ## Development
 
 ```bash

@@ -780,11 +780,23 @@ function updateToast(el,msg,type,hash,autoRemove) {
   else { el.textContent=msg; }
   if (autoRemove) setTimeout(()=>el.remove(),type==='error'?8000:6000);
 }
+async function waitMined(tx, timeout=120000, poll=3000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    try { return await tx.wait(); } catch(e) {
+      if ((e?.message||'').includes('no matching receipts')) {
+        await new Promise(r=>setTimeout(r,poll)); continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error('Transaction not confirmed within timeout');
+}
 async function sendTx(label,txFn,{onSuccess,onError,errEl}={}) {
   const t=pushToast(label+'…','pending');
   try {
     const tx=await txFn(); updateToast(t,label+' submitted','pending',tx.hash);
-    const receipt=await tx.wait(); updateToast(t,label+' confirmed','success',tx.hash,true);
+    const receipt=await waitMined(tx); updateToast(t,label+' confirmed','success',tx.hash,true);
     if(onSuccess) await onSuccess(receipt);
   } catch(e) {
     const msg=cleanErr(e); updateToast(t,label+' failed: '+msg,'error',null,true);

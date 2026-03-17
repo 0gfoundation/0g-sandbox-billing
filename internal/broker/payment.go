@@ -45,6 +45,8 @@ func (n *NoopPaymentLayer) RequestDeposit(_ context.Context, user, provider comm
 
 // HTTPPaymentLayer calls the real Payment Layer HTTP endpoint, signing each
 // request with the Broker's TEE key so the Payment Layer can verify origin.
+// The signature is sent as an Authorization: Bearer header.
+// Timestamp (milliseconds) serves as replay protection.
 type HTTPPaymentLayer struct {
 	url    string
 	signer *ecdsa.PrivateKey
@@ -65,35 +67,31 @@ type depositRequest struct {
 	User      string `json:"user"`
 	Provider  string `json:"provider"`
 	Amount    string `json:"amount"`
-	Timestamp int64  `json:"timestamp"`
-	Signature string `json:"signature"`
+	Timestamp int64  `json:"timestamp"` // milliseconds
 }
 
 func (h *HTTPPaymentLayer) RequestDeposit(ctx context.Context, user, provider common.Address, amount *big.Int) error {
-	ts := time.Now().Unix()
+	ts := time.Now().UnixMilli()
 
-	// Sign: keccak256(user | provider | amount | timestamp)
+	// Sign: keccak256(user | provider | amount | timestamp_ms)
 	msg := crypto.Keccak256(
 		user.Bytes(),
 		provider.Bytes(),
 		common.LeftPadBytes(amount.Bytes(), 32),
 		common.LeftPadBytes(new(big.Int).SetInt64(ts).Bytes(), 8),
 	)
-	// EIP-191 personal sign prefix
-	prefixed := crypto.Keccak256([]byte(fmt.Sprintf("\x19Ethereum Signed Message:\n32")), msg)
+	prefixed := crypto.Keccak256([]byte("\x19Ethereum Signed Message:\n32"), msg)
 	sig, err := crypto.Sign(prefixed, h.signer)
 	if err != nil {
 		return fmt.Errorf("sign deposit request: %w", err)
 	}
-	// Adjust v byte (27/28 convention)
-	sig[64] += 27
+	sig[64] += 27 // normalize V to Ethereum convention (27/28)
 
 	body, _ := json.Marshal(depositRequest{
 		User:      user.Hex(),
 		Provider:  provider.Hex(),
 		Amount:    amount.String(),
 		Timestamp: ts,
-		Signature: fmt.Sprintf("0x%x", sig),
 	})
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.url+"/deposit", bytes.NewReader(body))
@@ -101,6 +99,7 @@ func (h *HTTPPaymentLayer) RequestDeposit(ctx context.Context, user, provider co
 		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer 0x%x", sig))
 
 	resp, err := h.client.Do(req)
 	if err != nil {

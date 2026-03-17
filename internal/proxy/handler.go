@@ -288,33 +288,25 @@ func (h *Handler) handleStart(c *gin.Context) {
 		}
 	}
 
+	// Always register the session with the broker on restart so it is included
+	// in ongoing balance monitoring (every restart contributes to burn rate).
+	if h.broker != nil {
+		cpu, memGB := 0, 0
+		if sb, err := h.dtona.GetSandbox(c.Request.Context(), id); err == nil {
+			cpu, memGB = sb.CPU, sb.Memory
+		}
+		if berr := h.broker.registerSession(c.Request.Context(), id, wallet, int64(cpu), int64(memGB)); berr != nil {
+			h.log.Warn("broker pre-start register", zap.String("id", id), zap.Error(berr))
+		}
+	}
+
 	// Pre-check: reject if on-chain balance is below the minimum required.
-	// For restarts the sandbox ID is already known, so we can register a full
-	// monitoring session with the broker (funding + monitoring in one call).
 	if h.balCheck != nil && h.minBalance != nil {
 		balance, err := h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
 		if err != nil {
 			h.log.Error("balance check (start)", zap.String("wallet", wallet), zap.Error(err))
 			c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
 			return
-		}
-		if balance.Cmp(h.minBalance) < 0 && h.broker != nil {
-			// Fetch the sandbox's resource spec so the broker can compute the
-			// correct top-up amount.
-			cpu, memGB := 0, 0
-			if sb, err := h.dtona.GetSandbox(c.Request.Context(), id); err == nil {
-				cpu, memGB = sb.CPU, sb.Memory
-			}
-			if berr := h.broker.registerSession(c.Request.Context(), id, wallet, int64(cpu), int64(memGB)); berr != nil {
-				h.log.Warn("broker pre-start fund", zap.String("id", id), zap.Error(berr))
-			} else {
-				balance, err = h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
-				if err != nil {
-					h.log.Error("balance re-check (start)", zap.String("wallet", wallet), zap.Error(err))
-					c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
-					return
-				}
-			}
 		}
 		if balance.Cmp(h.minBalance) < 0 {
 			c.JSON(http.StatusPaymentRequired, gin.H{

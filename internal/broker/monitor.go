@@ -95,6 +95,8 @@ func (m *Monitor) check(ctx context.Context) {
 		m.log.Warn("monitor: load sessions failed", zap.Error(err))
 		return
 	}
+	m.log.Info("monitor: tick",
+		zap.Int("sessions", len(sessions)))
 	if len(sessions) == 0 {
 		return
 	}

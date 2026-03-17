@@ -253,6 +253,91 @@ tapp-cli -s http://<tapp-server>:50051 get-app-key --app-id 0g-sandbox
 
 ---
 
+## Broker：用户接入门户
+
+**Broker** 是运行在 TEE 中的用户接入门户。用户不直接连接 Provider，而是通过 Broker 完成
+Provider 发现、请求路由和余额自动充值。
+
+```
+用户 ──► Broker（TEE）
+              │
+              ├── Provider 市场      从链上事件索引 Provider URL
+              ├── 反向代理           /proxy/:addr/* → Provider 后端（消除 CORS 问题）
+              ├── 余额监控           每隔 T_monitor 秒轮询链上余额
+              └── Payment Layer 客户端  余额不足时调用 deposit(user, provider, amount)
+```
+
+### 为什么要在 TEE 中运行？
+
+Broker 用 TEE 密钥对 Payment Layer 请求签名，让 Payment Layer 能够验证充值指令来自合法的、
+未经篡改的 Broker，而非伪造的调用方。信任根植于 TEE 硬件，而非运营者的手动配置。
+
+### Provider 市场
+
+Broker 通过链上事件索引已注册的 Provider（`cmd/broker` → `internal/indexer`），
+并在 `GET /api/providers` 暴露列表。Dashboard 前端通过此接口让用户选择 Provider，
+无需用户知道任何 Provider 的直接 URL。
+
+### 余额监控与自动充值
+
+沙盒启动或重启时，billing proxy 向 Broker 注册 session（`POST /api/session`）。
+Broker 追踪每个 session 的 CPU/内存，计算用户的总消耗速率。当链上余额低于阈值时，
+自动调用 Payment Layer 完成充值。
+
+#### 参数调优
+
+所有参数从一个核心变量推导：**T_react**（从触发告警到资金到账的时间）：
+
+| 参数 | 公式 | 自动充值（T_react ≈ 60s）| 手动充值（T_react = 10 min）|
+|------|------|--------------------------|--------------------------|
+| `BROKER_MONITOR_INTERVAL_SEC` | `VOUCHER_INTERVAL_SEC / 2` | **30s** | 30s |
+| `BROKER_THRESHOLD_INTERVALS` | `T_react / T_monitor` | **3** | 20 |
+| `BROKER_TOPUP_INTERVALS` | `THRESHOLD_INTERVALS × 2` | **6** | 40 |
+
+- **Threshold** = burn_rate × interval × `THRESHOLD_INTERVALS` — 触发充值请求的余额阈值
+- **Topup 金额** = burn_rate × interval × `TOPUP_INTERVALS` — 充值后目标余额
+- 自动充值链上延迟 ≈ 30–60s（Payment Layer 排队 + 约 2 个区块确认，0G 出块约 6s）
+
+> **日志缓冲区说明**：tapp-cli 日志缓冲区固定大小（约 50 行）。`BROKER_MONITOR_INTERVAL_SEC=6`
+> 时，告警期间约 2 分钟缓冲区就会填满，`get-app-logs` 返回的全是旧日志。
+> 建议保持 `BROKER_MONITOR_INTERVAL_SEC ≥ 30`。
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+|----------|---------|-------------|
+| `SETTLEMENT_CONTRACT` | （必填）| BeaconProxy 合约地址（与 billing proxy 相同）|
+| `RPC_URL` | `https://evmrpc-testnet.0g.ai` | EVM RPC 地址 |
+| `CHAIN_ID` | `16602` | 链 ID |
+| `BROKER_PORT` | `8082` | HTTP 端口 |
+| `BROKER_MONITOR_INTERVAL_SEC` | `300` | 余额轮询间隔（秒）|
+| `BROKER_THRESHOLD_INTERVALS` | `2` | 余额 < burn × interval × N 时触发告警 |
+| `BROKER_TOPUP_INTERVALS` | `3` | 充值目标为 burn × interval × N neuron |
+| `PAYMENT_LAYER_URL` | — | Payment Layer HTTP 地址；为空则仅记录日志（noop）|
+| `BROKER_DEBUG` | `false` | 开启 `GET /api/monitor` 查看实时 session 列表 |
+
+### Tapp 部署
+
+Broker 作为独立 tapp 应用（`0g-broker`）与 `0g-sandbox` 并行运行：
+
+```bash
+# 构建（多阶段 Dockerfile 的 broker 阶段）
+docker build --target broker -t 0g-broker:latest .
+docker push <registry>/0g-broker:latest
+
+# 部署
+tapp-cli -s http://<tapp-server>:50051 stop-app  --app-id 0g-broker
+tapp-cli -s http://<tapp-server>:50051 start-app --app-id 0g-broker \
+  -f docker/broker/docker-compose.yml
+
+# 查看日志
+tapp-cli -s http://<tapp-server>:50051 get-app-logs --app-id 0g-broker --service broker -n 50
+```
+
+Billing proxy 通过 `BROKER_URL=http://<broker-host>:8082` 与 Broker 通信。
+
+---
+
 ## 开发
 
 ```bash
