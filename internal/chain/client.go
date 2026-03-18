@@ -57,6 +57,10 @@ type Client struct {
 	chainID      *big.Int
 	teeKey       *ecdsa.PrivateKey // signs vouchers (EIP-712, off-chain) and settlement txs
 	providerAddr common.Address    // registered provider address (from PROVIDER_ADDRESS or TEE key)
+
+	blockTimeMu  sync.Mutex
+	blockTimeSec float64    // cached avg block time in seconds
+	blockTimeAt  time.Time  // when the cache was populated
 }
 
 func NewClient(cfg *config.Config) (*Client, error) {
@@ -235,6 +239,35 @@ type VoucherEvent struct {
 	Timestamp uint64 // unix seconds (0 if unavailable)
 }
 
+const (
+	blockTimeCacheTTL = 5 * time.Minute
+	blockTimeSample   = 100
+	blockTimeFallback = 1.0 // seconds, used if RPC fails
+)
+
+// getAvgBlockTime returns the cached avg block time, refreshing if stale.
+func (c *Client) getAvgBlockTime(ctx context.Context, latest uint64) float64 {
+	c.blockTimeMu.Lock()
+	defer c.blockTimeMu.Unlock()
+
+	if c.blockTimeSec > 0 && time.Since(c.blockTimeAt) < blockTimeCacheTTL {
+		return c.blockTimeSec
+	}
+
+	avg := blockTimeFallback
+	if latest > blockTimeSample {
+		hNew, err1 := c.eth.HeaderByNumber(ctx, new(big.Int).SetUint64(latest))
+		hOld, err2 := c.eth.HeaderByNumber(ctx, new(big.Int).SetUint64(latest-blockTimeSample))
+		if err1 == nil && err2 == nil && hNew.Time > hOld.Time {
+			avg = float64(hNew.Time-hOld.Time) / float64(blockTimeSample)
+		}
+	}
+
+	c.blockTimeSec = avg
+	c.blockTimeAt = time.Now()
+	return avg
+}
+
 // GetVoucherEvents queries VoucherSettled logs from the contract.
 // sinceTimestamp is a Unix timestamp (seconds); only events with block.timestamp >= sinceTimestamp
 // are returned. sinceTimestamp=0 means all history (from block 1).
@@ -253,17 +286,7 @@ func (c *Client) GetVoucherEvents(ctx context.Context, sinceTimestamp uint64, pa
 		if sinceTimestamp < now {
 			duration := now - sinceTimestamp
 
-			// Estimate avg block time from head and tail of a 100-block sample (2 RPC calls).
-			avgBlockTimeSec := 1.0 // fallback
-			const sample = 100
-			if latest > sample {
-				hNew, err1 := c.eth.HeaderByNumber(ctx, new(big.Int).SetUint64(latest))
-				hOld, err2 := c.eth.HeaderByNumber(ctx, new(big.Int).SetUint64(latest-sample))
-				if err1 == nil && err2 == nil && hNew.Time > hOld.Time {
-					avgBlockTimeSec = float64(hNew.Time-hOld.Time) / float64(sample)
-				}
-			}
-
+			avgBlockTimeSec := c.getAvgBlockTime(ctx, latest)
 			lookback := uint64(float64(duration) / avgBlockTimeSec)
 			if lookback < latest {
 				fromBlock = latest - lookback
