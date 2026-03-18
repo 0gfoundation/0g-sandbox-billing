@@ -169,6 +169,13 @@ func (m *Monitor) check(ctx context.Context) {
 				deficit = topup
 			}
 
+			if IsInflightOrBackoff(ctx, m.rdb, user, provider) {
+				m.log.Info("monitor: top-up skipped (inflight or backoff)",
+					zap.String("user", user.Hex()),
+					zap.String("provider", provider.Hex()))
+				continue
+			}
+
 			m.log.Info("monitor: balance below threshold, requesting top-up",
 				zap.String("user", user.Hex()),
 				zap.String("provider", provider.Hex()),

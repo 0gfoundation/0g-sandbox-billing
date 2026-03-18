@@ -8,12 +8,34 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
+
+func inflightKey(user, provider common.Address) string {
+	return fmt.Sprintf("broker:topup:inflight:%s:%s", strings.ToLower(user.Hex()), strings.ToLower(provider.Hex()))
+}
+
+func backoffKey(user, provider common.Address) string {
+	return fmt.Sprintf("broker:topup:backoff:%s:%s", strings.ToLower(user.Hex()), strings.ToLower(provider.Hex()))
+}
+
+// IsInflightOrBackoff returns true if a deposit is already in-flight or in backoff for (user, provider).
+func IsInflightOrBackoff(ctx context.Context, rdb *redis.Client, user, provider common.Address) bool {
+	keys := []string{inflightKey(user, provider), backoffKey(user, provider)}
+	for _, k := range keys {
+		n, err := rdb.Exists(ctx, k).Result()
+		if err == nil && n > 0 {
+			return true
+		}
+	}
+	return false
+}
 
 
 // PaymentLayer abstracts the external funding service that calls
@@ -49,22 +71,26 @@ func (n *NoopPaymentLayer) RequestDeposit(_ context.Context, user, provider comm
 // The signature is sent as an Authorization: Bearer header.
 // Timestamp (milliseconds) serves as replay protection.
 type HTTPPaymentLayer struct {
-	url         string
-	signer      *ecdsa.PrivateKey
-	client      *http.Client
-	log         *zap.Logger
-	pollInterval time.Duration
-	pollTimeout  time.Duration
+	url             string
+	signer          *ecdsa.PrivateKey
+	client          *http.Client
+	log             *zap.Logger
+	rdb             *redis.Client
+	pollInterval    time.Duration
+	pollTimeout     time.Duration
+	monitorInterval time.Duration
 }
 
-func NewHTTPPaymentLayer(url string, signer *ecdsa.PrivateKey, log *zap.Logger, pollIntervalSec, pollTimeoutSec int64) *HTTPPaymentLayer {
+func NewHTTPPaymentLayer(url string, signer *ecdsa.PrivateKey, log *zap.Logger, rdb *redis.Client, pollIntervalSec, pollTimeoutSec, monitorIntervalSec int64) *HTTPPaymentLayer {
 	return &HTTPPaymentLayer{
-		url:          url,
-		signer:       signer,
-		client:       &http.Client{Timeout: 10 * time.Second},
-		log:          log,
-		pollInterval: time.Duration(pollIntervalSec) * time.Second,
-		pollTimeout:  time.Duration(pollTimeoutSec) * time.Second,
+		url:             url,
+		signer:          signer,
+		client:          &http.Client{Timeout: 10 * time.Second},
+		log:             log,
+		rdb:             rdb,
+		pollInterval:    time.Duration(pollIntervalSec) * time.Second,
+		pollTimeout:     time.Duration(pollTimeoutSec) * time.Second,
+		monitorInterval: time.Duration(monitorIntervalSec) * time.Second,
 	}
 }
 
@@ -133,6 +159,9 @@ func (h *HTTPPaymentLayer) RequestDeposit(ctx context.Context, user, provider co
 		return fmt.Errorf("payment layer returned empty request_id")
 	}
 
+	// Mark in-flight so the monitor won't re-trigger until this request resolves.
+	h.rdb.Set(ctx, inflightKey(user, provider), dr.RequestID, h.pollTimeout+30*time.Second) //nolint:errcheck
+
 	h.log.Info("payment layer: deposit requested, polling status",
 		zap.String("user", user.Hex()),
 		zap.String("provider", provider.Hex()),
@@ -154,7 +183,9 @@ func (h *HTTPPaymentLayer) pollDepositStatus(requestID string, user, provider co
 	for {
 		select {
 		case <-ctx.Done():
-			h.log.Warn("payment layer: deposit status poll timed out",
+			h.rdb.Del(context.Background(), inflightKey(user, provider))                                              //nolint:errcheck
+			h.rdb.Set(context.Background(), backoffKey(user, provider), "1", 5*h.monitorInterval) //nolint:errcheck
+			h.log.Warn("payment layer: deposit status poll timed out, backoff applied",
 				zap.String("request_id", requestID),
 				zap.String("user", user.Hex()),
 				zap.String("provider", provider.Hex()))
@@ -176,13 +207,16 @@ func (h *HTTPPaymentLayer) pollDepositStatus(requestID string, user, provider co
 
 			switch sr.Status {
 			case "success":
+				h.rdb.Del(ctx, inflightKey(user, provider)) //nolint:errcheck
 				h.log.Info("payment layer: deposit confirmed",
 					zap.String("request_id", requestID),
 					zap.String("user", user.Hex()),
 					zap.String("provider", provider.Hex()))
 				return
 			case "failed":
-				h.log.Warn("payment layer: deposit failed",
+				h.rdb.Del(ctx, inflightKey(user, provider))                                      //nolint:errcheck
+				h.rdb.Set(ctx, backoffKey(user, provider), "1", 2*h.monitorInterval) //nolint:errcheck
+				h.log.Warn("payment layer: deposit failed, backoff applied",
 					zap.String("request_id", requestID),
 					zap.String("user", user.Hex()),
 					zap.String("provider", provider.Hex()),
