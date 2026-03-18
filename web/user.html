@@ -301,12 +301,23 @@ tbody tr:hover td{background:var(--surf2)}
   </div>
 </div>
 
+<div class="modal-bg" id="confirmModal">
+  <div class="modal" style="width:340px">
+    <p id="confirmMsg" style="color:var(--text2);font-size:13.5px;margin-bottom:20px;line-height:1.6"></p>
+    <div class="modal-btns">
+      <button class="btn btn-ghost" id="confirmCancel">Cancel</button>
+      <button class="btn btn-danger" id="confirmOk">Confirm</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
 let walletAddr = null, signer = null, contract = null, info = null;
-let selectedProvider = null;
+let selectedProvider = null, _providerMap = {};
+const _subscribePending = new Set();
 let _chainCache = {}; // key: `${walletAddr}:${providerAddr}` → {acked, balance}
 const eip6963Providers = new Map();
 let _refreshTimer = null, _activeProvider = null;
@@ -355,7 +366,11 @@ document.addEventListener('click', e => {
   if (p.classList.contains('open') && !p.contains(e.target)) p.classList.remove('open');
 });
 function copyWalletAddr() {
-  navigator.clipboard.writeText(walletAddr).then(()=>toast('Address copied','success'));
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(walletAddr).then(()=>toast('Address copied','success')).catch(()=>copyFallback(walletAddr));
+  } else {
+    copyFallback(walletAddr);
+  }
 }
 
 // ── Wallet ────────────────────────────────────────────────────────────────────
@@ -408,7 +423,7 @@ async function initWallet(addr, prov) {
   if (_activeProvider && _activeProvider !== prov) try { _activeProvider.removeListener('accountsChanged',_onAccountsChanged); } catch(_){}
   if (_activeProvider !== prov) { prov.on('accountsChanged',_onAccountsChanged); _activeProvider=prov; }
   if (_refreshTimer) clearInterval(_refreshTimer);
-  _refreshTimer = setInterval(()=>{ if(walletAddr){ loadUserData(); } }, 30000);
+  _refreshTimer = setInterval(()=>{ if(walletAddr){ refreshBalances(); } }, 30000);
 }
 
 async function ensureChain(prov) {
@@ -445,6 +460,27 @@ async function loadUserData() {
     document.getElementById('popBalance').textContent = fmtNeuron(nativeBal.toString());
   } catch(e) { console.error(e); }
   await loadProviders();
+}
+
+async function refreshBalances() {
+  if (!contract || !walletAddr) return;
+  try {
+    const provider = new ethers.BrowserProvider(_activeProvider);
+    const nativeBal = await provider.getBalance(walletAddr);
+    document.getElementById('popBalance').textContent = fmtNeuron(nativeBal.toString());
+  } catch(e) {}
+  const addrs = Object.keys(_providerMap);
+  if (!addrs.length) return;
+  await Promise.all(addrs.map(async key => {
+    const balEl = document.getElementById('pv-bal-' + key);
+    const refundEl = document.getElementById('pv-refund-' + key);
+    if (!balEl) return;
+    try {
+      const [bal, pendingRefund] = await contract.getBalance(walletAddr, _providerMap[key].address);
+      balEl.textContent = fmtNeuron(bal.toString());
+      if (refundEl) refundEl.textContent = BigInt(pendingRefund.toString()) > 0n ? `Pending refund: ${fmtNeuron(pendingRefund.toString())}` : '';
+    } catch(_) {}
+  }));
 }
 
 // ── Providers + Sandboxes ─────────────────────────────────────────────────────
@@ -500,10 +536,10 @@ async function loadProviders(forceChain=false) {
     section.innerHTML = '';
     sortedIdx.forEach(i => {
       const p = providers[i];
+      _providerMap[p.address.toLowerCase()] = p;
       const isAcked = ackedArr[i];
       const mySbx   = sbxByProvider[p.address.toLowerCase()] || [];
       const [bal, pendingRefund] = balancesArr[i];
-      const pJson = JSON.stringify(p).replace(/"/g, '&quot;');
 
       const isUp = healthByProvider[p.address.toLowerCase()];
       const card = document.createElement('div');
@@ -519,9 +555,11 @@ async function loadProviders(forceChain=false) {
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
             <button class="btn btn-sm btn-ghost" onclick="loadProviders(true)">↻</button>
-            ${isAcked
-              ? `<button class="btn btn-sm btn-danger" onclick="doUnsubscribe('${p.address}',this)">Unsubscribe</button>`
-              : `<button class="btn btn-sm btn-prim" onclick="doSubscribe('${p.address}',this)">Subscribe</button>`
+            ${_subscribePending.has(p.address)
+              ? `<button class="btn btn-sm btn-ghost" disabled>…</button>`
+              : isAcked
+                ? `<button class="btn btn-sm btn-danger" onclick="doUnsubscribe('${p.address}',this)">Unsubscribe</button>`
+                : `<button class="btn btn-sm btn-prim" onclick="doSubscribe('${p.address}',this)">Subscribe</button>`
             }
           </div>
         </div>
@@ -549,9 +587,9 @@ async function loadProviders(forceChain=false) {
           <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
               <span style="font-size:12px;font-weight:600;color:var(--text2)">Your Balance</span>
-              <span style="font-size:15px;font-weight:700;font-family:var(--mono);color:var(--text)">${fmtNeuron(bal.toString())}</span>
+              <span id="pv-bal-${p.address.toLowerCase()}" style="font-size:15px;font-weight:700;font-family:var(--mono);color:var(--text)">${fmtNeuron(bal.toString())}</span>
             </div>
-            ${BigInt(pendingRefund.toString())>0n ? `<div style="font-size:11.5px;color:var(--muted);margin-bottom:8px">Pending refund: ${fmtNeuron(pendingRefund.toString())}</div>` : ''}
+            <div id="pv-refund-${p.address.toLowerCase()}" style="font-size:11.5px;color:var(--muted);margin-bottom:8px">${BigInt(pendingRefund.toString())>0n ? `Pending refund: ${fmtNeuron(pendingRefund.toString())}` : ''}</div>
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
               <input type="number" step="0.001" min="0.001" value="0.1" id="dep-amt-${p.address}" class="ia-input" style="width:80px">
               <span class="ia-unit">0G</span>
@@ -564,10 +602,10 @@ async function loadProviders(forceChain=false) {
           <div class="pv-sandbox-section">
             <div class="pv-sandbox-header">
               <span style="font-size:12.5px;font-weight:600">Sandboxes</span>
-              ${isAcked ? `<button class="btn btn-sm btn-prim" data-p="${pJson}" onclick="setSelectedProvider(JSON.parse(this.dataset.p));openModal('createModal')">+ Create</button>` : ''}
+              ${isAcked ? `<button class="btn btn-sm btn-prim" onclick="setSelectedProvider(_providerMap['${p.address.toLowerCase()}']);openModal('createModal')">+ Create</button>` : ''}
             </div>
             <div class="pv-sandbox-list">
-              ${renderSandboxRows(mySbx, p)}
+              ${renderSandboxRows(mySbx, p.address)}
             </div>
           </div>
         </div>`;
@@ -593,35 +631,41 @@ function sandboxLabel(s) {
     : `<span class="pv-sandbox-id">${s.id?.slice(0,14)||'—'}…</span>`;
 }
 
-function renderSandboxRows(sandboxes, p) {
+function renderSandboxRows(sandboxes, providerAddr) {
   if (!sandboxes?.length) return '<div class="pv-sandbox-empty"><div style="font-size:22px;margin-bottom:6px">📭</div>No sandboxes yet. Create one to get started.</div>';
-  const pJson = JSON.stringify(p).replace(/"/g, '&quot;');
-  return sandboxes.map(s => `
-    <div class="pv-sandbox-row">
+  const pa = providerAddr;
+  return sandboxes.map(s => {
+    const shortLabel = (s.name&&s.name!==s.id?s.name:s.id?.slice(0,8))||s.id;
+    const st = (s.state||'').toLowerCase();
+    return `
+    <div class="pv-sandbox-row" data-id="${s.id}">
       <span style="flex:1;min-width:0">${sandboxLabel(s)}</span>
       ${stateTag(s.state)}
       <div class="pv-sandbox-actions">
-        ${(s.state||'').toLowerCase()==='started' ? `<button class="btn btn-sm btn-ghost" onclick="setSelectedProvider(JSON.parse(this.dataset.p));doSSH('${s.id}')" data-p="${pJson}">SSH</button>` : ''}
-        ${['started','starting'].includes((s.state||'').toLowerCase()) ? `<button class="btn btn-sm btn-danger" onclick="setSelectedProvider(JSON.parse(this.dataset.p));doStop('${s.id}','${(s.name&&s.name!==s.id?s.name:s.id?.slice(0,8))||s.id}')" data-p="${pJson}">Stop</button>` : ''}
-        ${['archived','stopped'].includes((s.state||'').toLowerCase()) ? `<button class="btn btn-sm btn-prim" onclick="setSelectedProvider(JSON.parse(this.dataset.p));doStart('${s.id}')" data-p="${pJson}">Start</button>` : ''}
-        ${['archived','stopped','error'].includes((s.state||'').toLowerCase()) ? `<button class="btn btn-sm btn-ghost" onclick="setSelectedProvider(JSON.parse(this.dataset.p));doDelete('${s.id}','${(s.name&&s.name!==s.id?s.name:s.id?.slice(0,8))||s.id}')" data-p="${pJson}">Delete</button>` : ''}
+        ${st==='started' ? `<button class="btn btn-sm btn-ghost" onclick="doSSH('${s.id}','${pa}')">SSH</button>` : ''}
+        ${['started','starting'].includes(st) ? `<button class="btn btn-sm btn-danger" onclick="doStop('${s.id}','${shortLabel}','${pa}')">Stop</button>` : ''}
+        ${['archived','stopped'].includes(st) ? `<button class="btn btn-sm btn-prim" onclick="doStart('${s.id}','${pa}')">Start</button>` : ''}
+        ${['archived','stopped','error'].includes(st) ? `<button class="btn btn-sm btn-ghost" onclick="doDelete('${s.id}','${shortLabel}','${pa}')">Delete</button>` : ''}
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 async function doSubscribe(addr, btn) {
-  btn.disabled = true;
+  if (_subscribePending.has(addr)) return;
+  _subscribePending.add(addr); btn.disabled = true; btn.textContent = '…';
   await sendTx('Subscribe', () => contract.acknowledgeTEESigner(addr, true), {
-    onSuccess: () => loadProviders(true),
-    onError:   () => { btn.disabled=false; },
+    onSuccess: () => { _subscribePending.delete(addr); loadProviders(true); },
+    onError:   () => { _subscribePending.delete(addr); btn.disabled=false; btn.textContent='Subscribe'; },
   });
 }
 
 async function doUnsubscribe(addr, btn) {
-  btn.disabled = true;
+  if (_subscribePending.has(addr)) return;
+  _subscribePending.add(addr); btn.disabled = true; btn.textContent = '…';
   await sendTx('Unsubscribe', () => contract.acknowledgeTEESigner(addr, false), {
-    onSuccess: () => loadProviders(true),
-    onError:   () => { btn.disabled=false; },
+    onSuccess: () => { _subscribePending.delete(addr); loadProviders(true); },
+    onError:   () => { _subscribePending.delete(addr); btn.disabled=false; btn.textContent='Unsubscribe'; },
   });
 }
 
@@ -638,6 +682,36 @@ function _startPoll() {
   }, 5000);
 }
 function _stopPoll() { if (_pollTimer) { clearInterval(_pollTimer); _pollTimer=null; } }
+
+function showConfirm(msg, okLabel='Confirm') {
+  return new Promise(resolve => {
+    document.getElementById('confirmMsg').textContent = msg;
+    document.getElementById('confirmOk').textContent = okLabel;
+    const bg = document.getElementById('confirmModal');
+    const ok = document.getElementById('confirmOk');
+    const cancel = document.getElementById('confirmCancel');
+    const cleanup = () => { bg.classList.remove('open'); ok.onclick = null; cancel.onclick = null; bg.onclick = null; };
+    ok.onclick = () => { cleanup(); resolve(true); };
+    cancel.onclick = () => { cleanup(); resolve(false); };
+    bg.onclick = e => { if (e.target === bg) { cleanup(); resolve(false); } };
+    bg.classList.add('open');
+  });
+}
+
+async function reloadProviderSandboxes(providerAddr) {
+  const key = providerAddr.toLowerCase();
+  const card = document.getElementById('pv-' + key);
+  if (!card) return;
+  const listEl = card.querySelector('.pv-sandbox-list');
+  if (!listEl) return;
+  try {
+    const r = await fetch(`/proxy/${providerAddr}/api/sandbox_list?wallet=${encodeURIComponent(walletAddr)}`);
+    const sandboxes = r.ok ? (await r.json().catch(() => [])) : [];
+    listEl.innerHTML = renderSandboxRows(sandboxes, providerAddr);
+    const transient = sandboxes.some(s => ['starting','archiving','stopping'].includes((s.state||'').toLowerCase()));
+    transient ? _startPoll() : _stopPoll();
+  } catch(_) {}
+}
 
 // ── User Actions ──────────────────────────────────────────────────────────────
 async function doDeposit(providerAddr, btn) {
@@ -688,15 +762,15 @@ async function doCreate() {
       setLoading('createErr','Checking if sandbox was created…');
       await new Promise(r=>setTimeout(r,3000));
       const created=[...(await fetchSandboxIds())].find(id=>!prevIds.has(id));
-      if (created) { try{await signedFetch('POST',`/api/sandbox/${created}/ensure-billing`);}catch(_){} toast('Sandbox created!','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; await loadProviders(); return; }
+      if (created) { try{await signedFetch('POST',`/api/sandbox/${created}/ensure-billing`);}catch(_){} toast('Sandbox created!','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; await reloadProviderSandboxes(selectedProvider?.address); return; }
       setErr('createErr',data.error||`HTTP ${resp.status} — please try again.`); return;
     }
-    toast('Sandbox created!','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; await loadProviders();
+    toast('Sandbox created!','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; await reloadProviderSandboxes(selectedProvider?.address);
   } catch(e) {
     if (e.name==='AbortError') {
       setLoading('createErr','Checking if sandbox was created…'); await new Promise(r=>setTimeout(r,3000));
       const created=[...(await fetchSandboxIds())].find(id=>!prevIds.has(id));
-      if (created) { try{await signedFetch('POST',`/api/sandbox/${created}/ensure-billing`);}catch(_){} toast('Sandbox created!','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; await loadProviders(); return; }
+      if (created) { try{await signedFetch('POST',`/api/sandbox/${created}/ensure-billing`);}catch(_){} toast('Sandbox created!','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; await reloadProviderSandboxes(selectedProvider?.address); return; }
       setErr('createErr','Request timed out — please try again.');
     } else { setErr('createErr',e.message); }
   } finally {
@@ -704,30 +778,43 @@ async function doCreate() {
   }
 }
 
-async function doStop(id, label) {
-  if (!confirm(`Stop sandbox "${label||id}"?`)) return;
+async function doStop(id, label, providerAddr) {
+  if (!await showConfirm(`Stop sandbox "${label||id}"?`, 'Stop')) return;
+  selectedProvider = _providerMap[providerAddr.toLowerCase()];
+  const card = document.getElementById('pv-' + providerAddr.toLowerCase());
+  const row = card?.querySelector(`.pv-sandbox-row[data-id="${id}"]`);
+  if (row) { row.querySelector('.tag').outerHTML = stateTag('stopping'); row.querySelectorAll('button').forEach(b=>b.disabled=true); }
   const r=await signedFetch('POST',`/api/sandbox/${id}/stop`).catch(e=>{toast(e.message,'error');return null});
   if (!r) return;
-  if (!r.ok) { const d=await r.json().catch(()=>{}); toast(d?.error||'Failed','error'); return; }
-  toast('Sandbox stopped','success'); await loadProviders();
+  if (!r.ok) { const d=await r.json().catch(()=>{}); toast(d?.error||'Failed','error'); await reloadProviderSandboxes(providerAddr); return; }
+  toast('Sandbox stopped','success'); await reloadProviderSandboxes(providerAddr);
 }
 
-async function doStart(id) {
+async function doStart(id, providerAddr) {
+  selectedProvider = _providerMap[providerAddr.toLowerCase()];
+  const card = document.getElementById('pv-' + providerAddr.toLowerCase());
+  const row = card?.querySelector(`.pv-sandbox-row[data-id="${id}"]`);
+  if (row) { row.querySelector('.tag').outerHTML = stateTag('starting'); row.querySelectorAll('button').forEach(b=>b.disabled=true); }
   const r=await signedFetch('POST',`/api/sandbox/${id}/start`).catch(e=>{toast(e.message,'error');return null});
   if (!r) return;
-  if (!r.ok) { let d={}; try{d=await r.json();}catch(_){} toast(d.error||'Failed to start','error'); return; }
-  toast('Sandbox starting…','success'); await loadProviders();
+  if (!r.ok) { let d={}; try{d=await r.json();}catch(_){} toast(d.error||'Failed to start','error'); await reloadProviderSandboxes(providerAddr); return; }
+  toast('Sandbox starting…','success'); await reloadProviderSandboxes(providerAddr);
 }
 
-async function doDelete(id, label) {
-  if (!confirm(`Delete sandbox "${label||id}"? This cannot be undone.`)) return;
+async function doDelete(id, label, providerAddr) {
+  if (!await showConfirm(`Delete sandbox "${label||id}"? This cannot be undone.`, 'Delete')) return;
+  selectedProvider = _providerMap[providerAddr.toLowerCase()];
+  const card = document.getElementById('pv-' + providerAddr.toLowerCase());
+  const row = card?.querySelector(`.pv-sandbox-row[data-id="${id}"]`);
+  if (row) { row.style.opacity='0.4'; row.querySelectorAll('button').forEach(b=>b.disabled=true); }
   const r=await signedFetch('DELETE',`/api/sandbox/${id}`).catch(e=>{toast(e.message,'error');return null});
   if (!r) return;
-  if (!r.ok) { let d={}; try{d=await r.json();}catch(_){} toast(d.error||'Failed to delete','error'); return; }
-  toast('Sandbox deleted','success'); await loadProviders();
+  if (!r.ok) { let d={}; try{d=await r.json();}catch(_){} toast(d.error||'Failed to delete','error'); await reloadProviderSandboxes(providerAddr); return; }
+  toast('Sandbox deleted','success'); await reloadProviderSandboxes(providerAddr);
 }
 
-async function doSSH(id) {
+async function doSSH(id, providerAddr) {
+  selectedProvider = _providerMap[providerAddr.toLowerCase()];
   document.getElementById('sshCommand').textContent='Loading…'; openModal('sshModal');
   try {
     const resp=await signedFetch('POST',`/api/sandbox/${id}/ssh-access`);
@@ -739,8 +826,22 @@ async function doSSH(id) {
 }
 
 function copySSH() {
-  navigator.clipboard.writeText(document.getElementById('sshCommand').textContent)
-    .then(()=>toast('Copied!','success')).catch(()=>toast('Copy failed','error'));
+  const text = document.getElementById('sshCommand').textContent;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(()=>toast('Copied!','success')).catch(()=>copyFallback(text));
+  } else {
+    copyFallback(text);
+  }
+}
+function copyFallback(text) {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    toast('Copied!','success');
+  } catch(_) { toast('Copy failed — select manually','error'); }
 }
 
 async function loadSnapshots() {
