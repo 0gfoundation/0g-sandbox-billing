@@ -46,34 +46,37 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--text);ba
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 
 /* ─ Topbar ─ */
-.topbar{background:var(--surf);border-bottom:1px solid var(--border);box-shadow:0 1px 0 var(--border),0 2px 12px oklch(0% 0 0 / 0.04);height:60px;display:flex;align-items:center;padding:0 clamp(16px,4vw,40px);position:sticky;top:0;z-index:100}
+.topbar{background:oklch(11% 0.04 270);border-bottom:1px solid oklch(18% 0.04 270);height:60px;display:flex;align-items:center;padding:0 clamp(16px,4vw,40px);position:sticky;top:0;z-index:100}
+.logo{color:oklch(92% 0.01 270)}
+.logo-sub{color:oklch(36% 0.04 270)}
+.chain-tag{background:oklch(16% 0.05 270);color:var(--p);border-color:oklch(22% 0.06 270)}
 .logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px;letter-spacing:-.02em;color:var(--text)}
 .logo-sub{font-size:12px;color:var(--muted);font-weight:400;margin-left:2px}
 .topbar-right{margin-left:auto;display:flex;align-items:center;gap:8px}
 .chain-tag{display:flex;align-items:center;gap:6px;background:var(--pbg);color:var(--pd);border:1px solid var(--pbd);border-radius:9999px;padding:4px 12px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
 .dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0}
-.btn-connect{background:var(--text);color:#fff;border:none;border-radius:var(--r);padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);letter-spacing:-.01em;transition:background var(--t-fast) ease,transform var(--t-fast) ease}
-.btn-connect:hover{background:oklch(50% 0.28 303)}
-.btn-connect:active{background:oklch(42% 0.28 303);transform:translateY(1px)}
-.addr-chip{background:var(--surf2);color:var(--text);border:1px solid var(--border);border-radius:var(--r);padding:5px 12px;font-size:12px;font-family:var(--mono);cursor:pointer;user-select:none;transition:background var(--t-fast) ease,border-color var(--t-fast) ease;font-weight:500}
-.addr-chip:hover{background:oklch(94% 0 0);border-color:oklch(78% 0 0)}
+.btn-connect{background:var(--p);color:#fff;border:none;border-radius:var(--r);padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);letter-spacing:-.01em;transition:background var(--t-fast) ease,box-shadow var(--t-fast) ease,transform var(--t-fast) ease}
+.btn-connect:hover{background:var(--pd);box-shadow:0 0 20px oklch(72% 0.22 310 / 0.4)}
+.btn-connect:active{transform:translateY(1px)}
+.addr-chip{background:oklch(16% 0.04 270);color:oklch(75% 0.02 270);border:1px solid oklch(22% 0.04 270);border-radius:var(--r);padding:5px 12px;font-size:12px;font-family:var(--mono);cursor:pointer;user-select:none;transition:background var(--t-fast) ease,border-color var(--t-fast) ease;font-weight:500}
+.addr-chip:hover{background:oklch(20% 0.04 270);border-color:oklch(28% 0.05 270)}
 
 /* ─ Wallet Popover ─ */
-.wallet-popover{position:fixed;top:64px;right:clamp(12px,3vw,24px);width:264px;background:var(--surf);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-lg);z-index:200;overflow:hidden;display:none}
+.wallet-popover{position:fixed;top:64px;right:clamp(12px,3vw,24px);width:264px;background:oklch(14% 0.04 270);border:1px solid oklch(22% 0.05 270);border-radius:var(--r-lg);box-shadow:0 8px 32px oklch(0% 0 0 / 0.5);z-index:200;overflow:hidden;display:none}
 .wallet-popover.open{display:block;animation:fadeDown var(--t-base) var(--ease-out)}
 @keyframes fadeDown{from{transform:translateY(-6px);opacity:0}to{transform:translateY(0);opacity:1}}
-.wp-head{padding:14px 16px;border-bottom:1px solid var(--border);background:var(--surf2)}
-.wp-label{font-size:10px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.07em;font-weight:600}
-.wp-addr{font-family:var(--mono);font-size:11.5px;color:var(--text);word-break:break-all;line-height:1.6}
+.wp-head{padding:14px 16px;border-bottom:1px solid oklch(20% 0.04 270);background:oklch(12% 0.04 270)}
+.wp-label{font-size:10px;color:oklch(36% 0.04 270);margin-bottom:4px;text-transform:uppercase;letter-spacing:.07em;font-weight:600}
+.wp-addr{font-family:var(--mono);font-size:11.5px;color:oklch(75% 0.02 270);word-break:break-all;line-height:1.6}
 .wp-body{padding:12px 16px}
 .wp-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
-.wp-k{font-size:12px;color:var(--muted)}
-.wp-v{font-size:13px;font-weight:600;font-family:var(--mono);color:var(--text);font-variant-numeric:tabular-nums}
+.wp-k{font-size:12px;color:oklch(42% 0.04 270)}
+.wp-v{font-size:13px;font-weight:600;font-family:var(--mono);color:oklch(88% 0.02 270);font-variant-numeric:tabular-nums}
 .wp-actions{display:flex;gap:6px;margin-top:12px}
-.wp-btn{flex:1;padding:7px 0;border-radius:var(--r-sm);font-size:12px;font-weight:500;cursor:pointer;font-family:var(--sans);border:1px solid var(--border);background:var(--surf);color:var(--text);transition:background var(--t-fast)}
-.wp-btn:hover{background:var(--bg)}
-.wp-btn.danger{border-color:var(--rbd);color:var(--red)}
-.wp-btn.danger:hover{background:var(--rbg)}
+.wp-btn{flex:1;padding:7px 0;border-radius:var(--r-sm);font-size:12px;font-weight:500;cursor:pointer;font-family:var(--sans);border:1px solid oklch(22% 0.04 270);background:oklch(17% 0.04 270);color:oklch(75% 0.02 270);transition:background var(--t-fast)}
+.wp-btn:hover{background:oklch(20% 0.04 270)}
+.wp-btn.danger{border-color:oklch(28% 0.08 25);color:var(--red)}
+.wp-btn.danger:hover{background:oklch(16% 0.06 25)}
 
 /* ─ Page ─ */
 .page{max-width:1100px;margin:0 auto;padding:clamp(24px,4vw,40px) clamp(16px,4vw,40px) 80px;animation:pageIn var(--t-slow) var(--ease-out)}
@@ -196,22 +199,30 @@ tbody tr:hover td{background:var(--surf2)}
 .loading{color:var(--muted);font-size:12px;margin-top:6px}
 .code-block{background:var(--surf2);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;font-family:var(--mono);font-size:12px;word-break:break-all;user-select:all;cursor:text;line-height:1.7;font-variant-ligatures:none}
 /* ─ Landing / No Wallet ─ */
-.landing{padding:clamp(48px,8vw,96px) 0 80px;max-width:860px}
-.landing-eyebrow{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--pd);background:var(--pbg);border:1px solid var(--pbd);border-radius:9999px;padding:4px 12px;margin-bottom:28px}
-.landing-eyebrow-dot{width:5px;height:5px;border-radius:50%;background:var(--p);flex-shrink:0}
-.landing-title{font-size:clamp(32px,4vw,52px);font-weight:800;line-height:1.1;letter-spacing:-.025em;color:var(--text);margin-bottom:20px}
-.landing-title em{font-style:normal;color:var(--pd)}
-.lt-intro{display:block;font-size:0.52em;font-weight:500;color:var(--muted);letter-spacing:-.01em;margin-bottom:0.25em}
-.landing-sub{font-size:15px;color:var(--text2);line-height:1.75;margin-bottom:40px;max-width:560px;font-weight:400}
-.landing-sub strong{color:var(--text);font-weight:600}
-.lf-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;margin-bottom:40px;border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;background:var(--surf);box-shadow:var(--sh)}
-.lf-col{padding:20px 18px;border-right:1px solid var(--border)}
+.landing{
+  background:oklch(11% 0.04 270);
+  margin-left:calc(-1 * clamp(16px,4vw,40px));
+  margin-right:calc(-1 * clamp(16px,4vw,40px));
+  margin-top:calc(-1 * clamp(24px,4vw,40px));
+  padding:clamp(64px,9vw,104px) clamp(32px,5vw,80px) clamp(64px,8vw,96px);
+  max-width:none;
+}
+.landing-title{font-size:clamp(32px,4vw,54px);font-weight:800;line-height:1.08;letter-spacing:-.025em;color:oklch(95% 0.01 270);margin-bottom:20px}
+.landing-title em{font-style:normal;color:var(--p)}
+.lt-intro{display:block;font-size:0.5em;font-weight:500;color:oklch(38% 0.04 270);letter-spacing:0;margin-bottom:0.3em}
+.landing-sub{font-size:15px;color:oklch(55% 0.04 270);line-height:1.75;margin-bottom:44px;max-width:520px;font-weight:400}
+.landing-sub strong{color:oklch(78% 0.04 270);font-weight:600}
+.lf-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;margin-bottom:44px;border:1px solid oklch(20% 0.05 270);border-radius:var(--r-lg);overflow:hidden;background:oklch(14% 0.04 270)}
+.lf-col{padding:22px 20px;border-right:1px solid oklch(20% 0.05 270)}
 .lf-col:last-child{border-right:none}
-.lf-num{font-size:11px;font-weight:700;color:var(--pd);font-family:var(--mono);letter-spacing:.04em;display:block;margin-bottom:10px}
-.lf-text-title{font-size:13px;font-weight:700;color:var(--text);margin-bottom:5px;letter-spacing:-.01em}
-.lf-text-desc{font-size:12px;color:var(--text2);line-height:1.6}
-.landing-cta{display:flex;align-items:center;gap:12px}
-.landing-hint{font-size:12px;color:var(--muted)}
+.lf-num{font-size:11px;font-weight:700;color:var(--p);font-family:var(--mono);letter-spacing:.06em;display:block;margin-bottom:12px}
+.lf-text-title{font-size:13px;font-weight:700;color:oklch(86% 0.02 270);margin-bottom:6px;letter-spacing:-.01em}
+.lf-text-desc{font-size:12px;color:oklch(46% 0.04 270);line-height:1.65}
+.landing-cta{display:flex;align-items:center;gap:14px}
+.landing-hint{font-size:12px;color:oklch(36% 0.04 270)}
+.btn-landing{background:var(--p);color:#fff;border:none;border-radius:var(--r);padding:11px 28px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sans);letter-spacing:-.01em;transition:background var(--t-fast) ease,box-shadow var(--t-fast) ease,transform var(--t-fast) ease}
+.btn-landing:hover{background:var(--pd);box-shadow:0 0 32px oklch(72% 0.22 310 / 0.45)}
+.btn-landing:active{transform:translateY(1px)}
 
 /* ─ Tooltip ─ */
 .tip{position:relative;display:inline-flex;align-items:center}
@@ -286,7 +297,7 @@ tbody tr:hover td{background:var(--surf2)}
       </div>
     </div>
     <div class="landing-cta">
-      <button class="btn btn-prim" style="padding:10px 22px;font-size:14px" onclick="connectWallet()">Connect Wallet to Start</button>
+      <button class="btn-landing" onclick="connectWallet()">Connect Wallet to Start</button>
       <span class="landing-hint">No account needed — just a Web3 wallet</span>
     </div>
   </div>
