@@ -11,160 +11,179 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  color-scheme: light;
-  /* ── Brand accent: 0G purple-pink (#c084fc) ── */
+  color-scheme: dark;
+  /* Brand */
   --p:   oklch(72% 0.22 310);
   --pd:  oklch(62% 0.24 310);
-  --pbg: oklch(96% 0.05 310);
-  --pbd: oklch(84% 0.12 310);
-  /* ── Neutrals — clean, no hue tint ── */
-  --text:   oklch(14% 0 0);
-  --text2:  oklch(40% 0 0);
-  --muted:  oklch(52% 0 0);
-  --border: oklch(91% 0 0);
-  --bg:     oklch(96.8% 0.008 270);
-  --surf:   oklch(99.6% 0.003 270);
-  --surf2:  oklch(97.2% 0.006 270);
-  /* ── Semantic ── */
-  --green: oklch(44% 0.15 145); --gbg: oklch(97% 0.03 145); --gbd: oklch(82% 0.08 145);
-  --red:   oklch(42% 0.18 25);  --rbg: oklch(97.5% 0.03 25);  --rbd: oklch(82% 0.09 25);
-  --orange:oklch(57% 0.16 55);  --obg: oklch(97.5% 0.03 55);  --obd: oklch(82% 0.09 55);
-  /* ── Typography ── */
+  --pbg: oklch(18% 0.08 310);
+  --pbd: oklch(32% 0.14 310);
+  /* Dark neutrals */
+  --text:   oklch(93% 0.015 270);
+  --text2:  oklch(65% 0.03 270);
+  --muted:  oklch(42% 0.04 270);
+  --border: oklch(22% 0.05 270);
+  --bg:     oklch(9%  0.03 270);
+  --surf:   oklch(13% 0.04 270);
+  --surf2:  oklch(17% 0.05 270);
+  --surf3:  oklch(21% 0.05 270);
+  /* Semantic */
+  --green: oklch(62% 0.18 145); --gbg: oklch(14% 0.07 145); --gbd: oklch(26% 0.12 145);
+  --red:   oklch(60% 0.18 25);  --rbg: oklch(14% 0.07 25);  --rbd: oklch(26% 0.12 25);
+  --orange:oklch(68% 0.16 55);  --obg: oklch(14% 0.07 55);  --obd: oklch(26% 0.12 55);
+  /* Typography */
   --sans: 'Syne', -apple-system, sans-serif;
   --mono: 'Roboto Mono', 'Courier New', monospace;
-  /* ── Motion ── */
+  /* Motion */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --t-fast: 120ms; --t-base: 220ms; --t-slow: 350ms;
-  /* ── Radii ── */
+  /* Radii */
   --r-sm: 6px; --r: 10px; --r-lg: 14px;
-  /* ── Shadows — clean ── */
-  --sh-sm: 0 1px 2px oklch(0% 0 0 / 0.04);
-  --sh:    0 2px 8px oklch(0% 0 0 / 0.07), 0 1px 3px oklch(0% 0 0 / 0.04);
-  --sh-lg: 0 8px 28px oklch(0% 0 0 / 0.10), 0 3px 8px oklch(0% 0 0 / 0.05);
+  /* Shadows */
+  --sh-sm: 0 1px 4px oklch(0% 0 0 / 0.4);
+  --sh:    0 4px 20px oklch(0% 0 0 / 0.5);
+  --sh-lg: 0 16px 48px oklch(0% 0 0 / 0.6), 0 4px 12px oklch(0% 0 0 / 0.3);
 }
 body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--text);background:var(--bg);min-height:100vh;-webkit-font-smoothing:antialiased;font-kerning:normal}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 
 /* ─ Topbar ─ */
-.topbar{background:oklch(11% 0.04 270);border-bottom:1px solid oklch(18% 0.04 270);height:60px;display:flex;align-items:center;padding:0 clamp(16px,4vw,40px);position:sticky;top:0;z-index:100}
-.logo{color:oklch(92% 0.01 270)}
-.logo-sub{color:oklch(36% 0.04 270)}
-.chain-tag{background:oklch(16% 0.05 270);color:var(--p);border-color:oklch(22% 0.06 270)}
-.logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px;letter-spacing:-.02em;color:var(--text)}
+.topbar{background:oklch(11% 0.04 270);border-bottom:1px solid var(--border);height:60px;display:flex;align-items:center;padding:0 clamp(16px,4vw,40px);position:sticky;top:0;z-index:100}
+.logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px;letter-spacing:-.02em;color:oklch(90% 0.01 270)}
 .logo-sub{font-size:12px;color:var(--muted);font-weight:400;margin-left:2px}
 .topbar-right{margin-left:auto;display:flex;align-items:center;gap:8px}
-.chain-tag{display:flex;align-items:center;gap:6px;background:var(--pbg);color:var(--pd);border:1px solid var(--pbd);border-radius:9999px;padding:4px 12px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.chain-tag{display:flex;align-items:center;gap:6px;background:var(--pbg);color:var(--p);border:1px solid var(--pbd);border-radius:9999px;padding:4px 12px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
 .dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0}
 .btn-connect{background:var(--p);color:#fff;border:none;border-radius:var(--r);padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);letter-spacing:-.01em;transition:background var(--t-fast) ease,box-shadow var(--t-fast) ease,transform var(--t-fast) ease}
-.btn-connect:hover{background:var(--pd);box-shadow:0 0 20px oklch(72% 0.22 310 / 0.4)}
+.btn-connect:hover{background:var(--pd);box-shadow:0 0 24px oklch(72% 0.22 310 / 0.5)}
 .btn-connect:active{transform:translateY(1px)}
-.addr-chip{background:oklch(16% 0.04 270);color:oklch(75% 0.02 270);border:1px solid oklch(22% 0.04 270);border-radius:var(--r);padding:5px 12px;font-size:12px;font-family:var(--mono);cursor:pointer;user-select:none;transition:background var(--t-fast) ease,border-color var(--t-fast) ease;font-weight:500}
-.addr-chip:hover{background:oklch(20% 0.04 270);border-color:oklch(28% 0.05 270)}
+.addr-chip{background:var(--surf);color:var(--text2);border:1px solid var(--border);border-radius:var(--r);padding:5px 12px;font-size:12px;font-family:var(--mono);cursor:pointer;user-select:none;transition:background var(--t-fast),border-color var(--t-fast);font-weight:500}
+.addr-chip:hover{background:var(--surf2);border-color:oklch(30% 0.05 270)}
 
 /* ─ Wallet Popover ─ */
-.wallet-popover{position:fixed;top:64px;right:clamp(12px,3vw,24px);width:264px;background:oklch(14% 0.04 270);border:1px solid oklch(22% 0.05 270);border-radius:var(--r-lg);box-shadow:0 8px 32px oklch(0% 0 0 / 0.5);z-index:200;overflow:hidden;display:none}
+.wallet-popover{position:fixed;top:64px;right:clamp(12px,3vw,24px);width:264px;background:var(--surf);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-lg);z-index:200;overflow:hidden;display:none}
 .wallet-popover.open{display:block;animation:fadeDown var(--t-base) var(--ease-out)}
 @keyframes fadeDown{from{transform:translateY(-6px);opacity:0}to{transform:translateY(0);opacity:1}}
-.wp-head{padding:14px 16px;border-bottom:1px solid oklch(20% 0.04 270);background:oklch(12% 0.04 270)}
-.wp-label{font-size:10px;color:oklch(36% 0.04 270);margin-bottom:4px;text-transform:uppercase;letter-spacing:.07em;font-weight:600}
-.wp-addr{font-family:var(--mono);font-size:11.5px;color:oklch(75% 0.02 270);word-break:break-all;line-height:1.6}
+.wp-head{padding:14px 16px;border-bottom:1px solid var(--border);background:oklch(11% 0.04 270)}
+.wp-label{font-size:10px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.07em;font-weight:600}
+.wp-addr{font-family:var(--mono);font-size:11.5px;color:var(--text2);word-break:break-all;line-height:1.6}
 .wp-body{padding:12px 16px}
 .wp-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
-.wp-k{font-size:12px;color:oklch(42% 0.04 270)}
-.wp-v{font-size:13px;font-weight:600;font-family:var(--mono);color:oklch(88% 0.02 270);font-variant-numeric:tabular-nums}
+.wp-k{font-size:12px;color:var(--muted)}
+.wp-v{font-size:13px;font-weight:600;font-family:var(--mono);color:var(--text);font-variant-numeric:tabular-nums}
 .wp-actions{display:flex;gap:6px;margin-top:12px}
-.wp-btn{flex:1;padding:7px 0;border-radius:var(--r-sm);font-size:12px;font-weight:500;cursor:pointer;font-family:var(--sans);border:1px solid oklch(22% 0.04 270);background:oklch(17% 0.04 270);color:oklch(75% 0.02 270);transition:background var(--t-fast)}
-.wp-btn:hover{background:oklch(20% 0.04 270)}
-.wp-btn.danger{border-color:oklch(28% 0.08 25);color:var(--red)}
-.wp-btn.danger:hover{background:oklch(16% 0.06 25)}
+.wp-btn{flex:1;padding:7px 0;border-radius:var(--r-sm);font-size:12px;font-weight:500;cursor:pointer;font-family:var(--sans);border:1px solid var(--border);background:var(--surf2);color:var(--text2);transition:background var(--t-fast)}
+.wp-btn:hover{background:var(--surf3)}
+.wp-btn.danger{border-color:var(--rbd);color:var(--red)}
+.wp-btn.danger:hover{background:var(--rbg)}
 
 /* ─ Page ─ */
 .page{max-width:1100px;margin:0 auto;padding:clamp(24px,4vw,40px) clamp(16px,4vw,40px) 80px;animation:pageIn var(--t-slow) var(--ease-out)}
-@keyframes pageIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
-.two-col{display:grid;grid-template-columns:1fr 260px;gap:16px;align-items:start}
-@media(max-width:800px){.two-col{grid-template-columns:1fr}}
+@keyframes pageIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+/* ─ Landing ─ */
+.landing{padding:clamp(72px,10vw,120px) 0 clamp(80px,10vw,120px);max-width:780px}
+.lt-kicker{display:block;font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.14em;text-transform:uppercase;margin-bottom:24px}
+.landing-title{font-size:clamp(38px,5vw,66px);font-weight:800;line-height:1.04;letter-spacing:-.03em;color:var(--text);margin-bottom:28px}
+.landing-title em{font-style:normal;color:var(--p)}
+.landing-sub{font-size:16px;color:var(--text2);line-height:1.75;margin-bottom:52px;max-width:480px}
+.landing-sub strong{color:var(--text);font-weight:600}
+.lf-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-bottom:52px;background:var(--border);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden}
+.lf-col{padding:24px 22px;background:var(--surf);transition:background var(--t-base)}
+.lf-col:hover{background:var(--surf2)}
+.lf-num{font-size:32px;font-weight:800;font-family:var(--mono);color:oklch(22% 0.05 310);letter-spacing:-.03em;display:block;margin-bottom:16px;line-height:1}
+.lf-text-title{font-size:13px;font-weight:700;color:var(--text);margin-bottom:6px}
+.lf-text-desc{font-size:12px;color:var(--muted);line-height:1.65}
+.landing-cta{display:flex;align-items:center;gap:16px}
+.landing-hint{font-size:12px;color:var(--muted)}
+.btn-landing{background:var(--p);color:#fff;border:none;border-radius:var(--r);padding:13px 36px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sans);letter-spacing:-.01em;transition:background var(--t-fast) ease,box-shadow var(--t-fast) ease,transform var(--t-fast) ease}
+.btn-landing:hover{background:var(--pd);box-shadow:0 0 40px oklch(72% 0.22 310 / 0.5)}
+.btn-landing:active{transform:translateY(1px)}
 
 /* ─ Card ─ */
-.card{background:var(--surf);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:16px;box-shadow:var(--sh-sm);transition:border-color var(--t-base) var(--ease-out),box-shadow var(--t-base) var(--ease-out)}
-.card:hover{border-color:oklch(82% 0.005 270);box-shadow:var(--sh)}
-.card-head{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--surf2)}
-.pv-subscribed .card-head{background:oklch(97.5% 0.035 145)}
+.card{background:var(--surf);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;margin-bottom:16px;transition:border-color var(--t-base)}
+.card:hover{border-color:oklch(30% 0.06 270)}
+.pv-subscribed{border-color:oklch(28% 0.12 145)!important;box-shadow:inset 3px 0 0 var(--green)}
+.card-head{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:oklch(11% 0.04 270)}
 .card-title{font-size:12px;font-weight:700;color:var(--text);letter-spacing:.05em;text-transform:uppercase}
 .card-meta{font-size:12px;color:var(--muted)}
-.card-body{padding:20px 20px 16px}
+.card-body{padding:20px}
 
 /* ─ Info rows ─ */
 .info-row{display:flex;justify-content:space-between;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--border);gap:12px}
 .info-row:last-child{border-bottom:none}
 .ik{font-size:12px;color:var(--muted);font-weight:500;flex-shrink:0}
 .iv{font-family:var(--mono);font-size:12px;text-align:right;word-break:break-all;color:var(--text);font-variant-numeric:tabular-nums}
-.iv.purple{color:var(--pd);font-weight:600}
+.iv.purple{color:var(--p);font-weight:600}
 .iv.green{color:var(--green);font-weight:500}
-.iv.big{font-size:22px;font-weight:700;font-family:var(--sans);color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.iv.big{font-size:22px;font-weight:700;font-family:var(--sans);letter-spacing:-.02em}
 
 /* ─ Badges ─ */
-.badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:9999px;border:1px solid transparent;letter-spacing:.06em;text-transform:uppercase;font-family:var(--sans)}
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:9999px;border:1px solid transparent;letter-spacing:.06em;text-transform:uppercase}
 .badge.green{background:var(--gbg);color:var(--green);border-color:var(--gbd)}
 .badge.red{background:var(--rbg);color:var(--red);border-color:var(--rbd)}
 .badge.purple{background:var(--pbg);color:var(--p);border-color:var(--pbd)}
 .badge.orange{background:var(--obg);color:var(--orange);border-color:var(--obd)}
-.badge.blue{background:oklch(96% 0.04 250);color:oklch(44% 0.18 250);border-color:oklch(82% 0.10 250)}
+.badge.blue{background:oklch(16% 0.06 250);color:oklch(70% 0.18 250);border-color:oklch(28% 0.10 250)}
 .badge.gray{background:var(--surf2);color:var(--text2);border-color:var(--border)}
 
 /* ─ Buttons ─ */
-.btn{display:inline-flex;align-items:center;gap:5px;border:none;border-radius:var(--r-sm);padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);transition:background var(--t-fast) ease,border-color var(--t-fast) ease,color var(--t-fast) ease,transform var(--t-fast) ease;letter-spacing:-.01em;white-space:nowrap}
-.btn:focus-visible{outline:2px solid var(--text);outline-offset:2px}
-/* Primary — black default; hover reveals brand purple */
-.btn-prim{background:var(--text);color:#fff}
-.btn-prim:not(:disabled):hover{background:oklch(50% 0.28 303)}
-.btn-prim:active{background:oklch(42% 0.28 303);transform:translateY(1px)}
-/* Ghost — white+border default; hover: light purple fill + purple border */
-.btn-ghost{background:var(--surf);color:var(--text);border:1px solid var(--border)}
-.btn-ghost:not(:disabled):hover{background:var(--pbg);border-color:var(--pbd);color:var(--pd)}
-.btn-ghost:active{background:var(--pbd);transform:translateY(1px)}
-/* Warn / Danger */
+.btn{display:inline-flex;align-items:center;gap:5px;border:none;border-radius:var(--r-sm);padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);transition:background var(--t-fast),border-color var(--t-fast),box-shadow var(--t-fast),transform var(--t-fast);letter-spacing:-.01em;white-space:nowrap}
+.btn:focus-visible{outline:2px solid var(--p);outline-offset:2px}
+.btn-prim{background:var(--p);color:#fff;border:1px solid transparent}
+.btn-prim:not(:disabled):hover{background:var(--pd);box-shadow:0 0 16px oklch(72% 0.22 310 / 0.4)}
+.btn-prim:active{transform:translateY(1px)}
+.btn-ghost{background:transparent;color:var(--text2);border:1px solid var(--border)}
+.btn-ghost:not(:disabled):hover{background:var(--surf2);border-color:oklch(32% 0.06 270);color:var(--text)}
+.btn-ghost:active{transform:translateY(1px)}
 .btn-warn{background:var(--obg);color:var(--orange);border:1px solid var(--obd)}
 .btn-warn:not(:disabled):hover{background:var(--obd)}
-.btn-sm{padding:4px 10px;font-size:11px;letter-spacing:.02em}
+.btn-sm{padding:4px 10px;font-size:11px}
 .btn-danger{background:var(--rbg);color:var(--red);border:1px solid var(--rbd)}
 .btn-danger:not(:disabled):hover{background:var(--rbd)}
-.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn:disabled{opacity:.35;cursor:not-allowed}
 
 /* ─ Inline action rows ─ */
 .ia-row{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
 .ia-row:last-child{margin-bottom:0}
 .ia-label{font-size:11.5px;color:var(--muted);font-weight:500}
 .ia-input-row{display:flex;gap:6px;align-items:center}
-.ia-input{flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px;font-family:var(--mono);outline:none;transition:border-color var(--t-fast),box-shadow var(--t-fast);min-width:0;background:var(--surf);color:var(--text);font-variant-numeric:tabular-nums}
+.ia-input{flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px;font-family:var(--mono);outline:none;transition:border-color var(--t-fast),box-shadow var(--t-fast);min-width:0;background:oklch(11% 0.04 270);color:var(--text);font-variant-numeric:tabular-nums}
 .ia-input:focus{border-color:var(--p);box-shadow:0 0 0 3px var(--pbg)}
 .ia-unit{font-size:12px;color:var(--muted);white-space:nowrap;flex-shrink:0}
 .ia-hint{font-size:11px;color:var(--muted)}
 
-/* ─ Provider cards ─ */
-.pv-subscribed{border-left:3px solid var(--green)!important}
-.pv-addr{font-size:12.5px;font-weight:600;font-family:var(--mono);color:var(--text);letter-spacing:0}
-.pv-pricing-row{display:flex;flex-wrap:wrap;gap:6px 20px;margin-bottom:16px;align-items:center;padding:12px 0;border-bottom:1px solid var(--border)}
-.pv-price-box{display:flex;flex-direction:column;gap:2px}
-.pv-price-val{font-size:16px;font-weight:700;font-family:var(--mono);color:var(--text);font-variant-numeric:tabular-nums}
-.pv-price-label{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
-.pv-balance{background:var(--surf2);border-radius:var(--r-sm);padding:12px 14px;margin-bottom:14px}
-.pv-balance-label{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px}
-.pv-balance-amount{font-size:22px;font-weight:800;font-family:var(--mono);color:var(--text);letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
-.pv-balance-row{display:flex;justify-content:space-between;align-items:flex-end}
-.pv-hint{font-size:12px;color:var(--muted);padding:16px 0 4px;line-height:1.6}
-.pv-sandbox-section{padding-top:14px}
-.pv-sandbox-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+/* ─ Provider addr ─ */
+.pv-addr{font-size:13px;font-weight:600;font-family:var(--mono);color:var(--text)}
+
+/* ─ Provider stats strip ─ */
+.pv-stats{display:flex;border-bottom:1px solid var(--border);background:oklch(10% 0.035 270)}
+.pv-stat{display:flex;flex-direction:column;gap:4px;padding:14px 20px;border-right:1px solid var(--border);flex:1}
+.pv-stat:last-child{border-right:none}
+.pv-stat-val{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums}
+.pv-stat-key{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+
+/* ─ Balance section ─ */
+.pv-balance-section{padding:20px;border-bottom:1px solid var(--border)}
+.pv-balance-label{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px}
+.pv-balance-main{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+.pv-balance-amount{font-size:30px;font-weight:800;font-family:var(--mono);color:var(--text);letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:1}
+.pv-deposit-row{display:flex;gap:6px;align-items:center}
+.pv-refund-line{font-size:11.5px;color:var(--muted);margin-top:8px}
+
+/* ─ Sandbox section ─ */
+.pv-sandbox-section{padding:0 20px 20px}
+.pv-sandbox-header{display:flex;align-items:center;justify-content:space-between;padding:16px 0 12px;border-top:1px solid var(--border)}
 .pv-sandbox-label{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em}
 .pv-sandbox-list{display:flex;flex-direction:column}
-.pv-sandbox-row{display:flex;align-items:center;gap:10px;padding:9px 8px;border-radius:var(--r-sm);margin:0 -8px;transition:background var(--t-fast)}
+.pv-sandbox-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--r-sm);margin:0 -12px;transition:background var(--t-fast)}
 .pv-sandbox-row:hover{background:var(--surf2)}
 .pv-sandbox-id{font-family:var(--mono);font-size:12px;flex:1;color:var(--text2)}
 .pv-sandbox-actions{display:flex;gap:5px}
-.pv-sandbox-empty{color:var(--muted);font-size:12.5px;padding:20px 0;text-align:center;line-height:1.7}
+.pv-sandbox-empty{color:var(--muted);font-size:12.5px;padding:24px 0;text-align:center;line-height:1.7;border:1px dashed var(--border);border-radius:var(--r-sm);margin-top:4px}
 
 /* ─ Table ─ */
 table{width:100%;border-collapse:collapse}
-thead th{padding:9px 14px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;background:var(--surf2);border-bottom:1px solid var(--border)}
+thead th{padding:9px 14px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;background:oklch(11% 0.04 270);border-bottom:1px solid var(--border)}
 tbody td{padding:10px 14px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:middle}
 tbody tr:last-child td{border-bottom:none}
 tbody tr:hover td{background:var(--surf2)}
@@ -175,19 +194,19 @@ tbody tr:hover td{background:var(--surf2)}
 .tag.running{background:var(--gbg);color:var(--green);border-color:var(--gbd)}
 .tag.stopped{background:var(--surf2);color:var(--muted);border-color:var(--border)}
 .tag.starting{background:var(--obg);color:var(--orange);border-color:var(--obd)}
-.tag.archived{background:oklch(96% 0.04 250);color:oklch(44% 0.18 250);border-color:oklch(82% 0.10 250)}
+.tag.archived{background:oklch(16% 0.06 250);color:oklch(70% 0.18 250);border-color:oklch(28% 0.10 250)}
 .tag.error{background:var(--rbg);color:var(--red);border-color:var(--rbd)}
 .tag-dot{width:5px;height:5px;border-radius:50%;background:currentColor;flex-shrink:0}
 
 /* ─ Modal ─ */
-.modal-bg{position:fixed;inset:0;background:oklch(0% 0 0 / 0.35);backdrop-filter:blur(2px);display:none;align-items:center;justify-content:center;z-index:300}
+.modal-bg{position:fixed;inset:0;background:oklch(0% 0 0 / 0.65);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;z-index:300}
 .modal-bg.open{display:flex}
 .modal{background:var(--surf);border-radius:var(--r-lg);padding:28px;width:400px;max-width:95vw;box-shadow:var(--sh-lg);animation:modalin var(--t-base) var(--ease-out);border:1px solid var(--border)}
 @keyframes modalin{from{transform:translateY(-10px) scale(.98);opacity:0}to{transform:translateY(0) scale(1);opacity:1}}
 .modal-title{font-size:16px;font-weight:700;margin-bottom:20px;letter-spacing:-.01em;color:var(--text)}
 .field{margin-bottom:14px}
 .field label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.06em}
-.field input,.field select{width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px;font-family:var(--sans);outline:none;transition:border-color var(--t-fast) ease,box-shadow var(--t-fast) ease;background:var(--surf);color:var(--text)}
+.field input,.field select{width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px;font-family:var(--sans);outline:none;transition:border-color var(--t-fast),box-shadow var(--t-fast);background:oklch(11% 0.04 270);color:var(--text)}
 .field input:focus,.field select:focus{border-color:var(--p);box-shadow:0 0 0 3px var(--pbg)}
 .field .hint{font-size:11.5px;color:var(--muted);margin-top:4px}
 .modal-btns{display:flex;gap:8px;margin-top:20px;justify-content:flex-end}
@@ -197,48 +216,25 @@ tbody tr:hover td{background:var(--surf2)}
 .empty-icon{font-size:24px;margin-bottom:8px}
 .err{color:var(--red);font-size:12px;margin-top:4px}
 .loading{color:var(--muted);font-size:12px;margin-top:6px}
-.code-block{background:var(--surf2);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;font-family:var(--mono);font-size:12px;word-break:break-all;user-select:all;cursor:text;line-height:1.7;font-variant-ligatures:none}
-/* ─ Landing / No Wallet ─ */
-.landing{
-  background:oklch(11% 0.04 270);
-  margin-left:calc(-1 * clamp(16px,4vw,40px));
-  margin-right:calc(-1 * clamp(16px,4vw,40px));
-  margin-top:calc(-1 * clamp(24px,4vw,40px));
-  padding:clamp(64px,9vw,104px) clamp(32px,5vw,80px) clamp(64px,8vw,96px);
-  max-width:none;
-}
-.landing-title{font-size:clamp(32px,4vw,54px);font-weight:800;line-height:1.08;letter-spacing:-.025em;color:oklch(95% 0.01 270);margin-bottom:20px}
-.landing-title em{font-style:normal;color:var(--p)}
-.lt-intro{display:block;font-size:0.5em;font-weight:500;color:oklch(38% 0.04 270);letter-spacing:0;margin-bottom:0.3em}
-.landing-sub{font-size:15px;color:oklch(55% 0.04 270);line-height:1.75;margin-bottom:44px;max-width:520px;font-weight:400}
-.landing-sub strong{color:oklch(78% 0.04 270);font-weight:600}
-.lf-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;margin-bottom:44px;border:1px solid oklch(20% 0.05 270);border-radius:var(--r-lg);overflow:hidden;background:oklch(14% 0.04 270)}
-.lf-col{padding:22px 20px;border-right:1px solid oklch(20% 0.05 270)}
-.lf-col:last-child{border-right:none}
-.lf-num{font-size:11px;font-weight:700;color:var(--p);font-family:var(--mono);letter-spacing:.06em;display:block;margin-bottom:12px}
-.lf-text-title{font-size:13px;font-weight:700;color:oklch(86% 0.02 270);margin-bottom:6px;letter-spacing:-.01em}
-.lf-text-desc{font-size:12px;color:oklch(46% 0.04 270);line-height:1.65}
-.landing-cta{display:flex;align-items:center;gap:14px}
-.landing-hint{font-size:12px;color:oklch(36% 0.04 270)}
-.btn-landing{background:var(--p);color:#fff;border:none;border-radius:var(--r);padding:11px 28px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sans);letter-spacing:-.01em;transition:background var(--t-fast) ease,box-shadow var(--t-fast) ease,transform var(--t-fast) ease}
-.btn-landing:hover{background:var(--pd);box-shadow:0 0 32px oklch(72% 0.22 310 / 0.45)}
-.btn-landing:active{transform:translateY(1px)}
+.code-block{background:oklch(11% 0.04 270);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;font-family:var(--mono);font-size:12px;word-break:break-all;user-select:all;cursor:text;line-height:1.7;color:var(--text)}
 
 /* ─ Tooltip ─ */
 .tip{position:relative;display:inline-flex;align-items:center}
-.tip-icon{width:13px;height:13px;border-radius:50%;background:var(--border);color:var(--text2);font-size:9px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;cursor:default;flex-shrink:0;margin-left:4px;font-family:var(--sans);line-height:1}
-.tip-box{position:absolute;bottom:calc(100% + 7px);left:50%;transform:translateX(-50%);background:oklch(18% 0.02 270);color:oklch(94% 0.01 270);font-size:11.5px;line-height:1.55;padding:9px 12px;border-radius:var(--r-sm);width:220px;pointer-events:none;opacity:0;transition:opacity var(--t-fast) ease;z-index:500;font-family:var(--sans);font-weight:400;white-space:normal;box-shadow:var(--sh-lg)}
-.tip-box::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:oklch(18% 0.02 270)}
+.tip-icon{width:13px;height:13px;border-radius:50%;background:var(--surf3);color:var(--text2);font-size:9px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;cursor:default;flex-shrink:0;margin-left:4px;line-height:1}
+.tip-box{position:absolute;bottom:calc(100% + 7px);left:50%;transform:translateX(-50%);background:oklch(20% 0.04 270);border:1px solid var(--border);color:var(--text);font-size:11.5px;line-height:1.55;padding:9px 12px;border-radius:var(--r-sm);width:220px;pointer-events:none;opacity:0;transition:opacity var(--t-fast);z-index:500;white-space:normal;box-shadow:var(--sh-lg);font-family:var(--sans);font-weight:400}
+.tip-box::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:oklch(20% 0.04 270)}
 .tip:hover .tip-box{opacity:1}
 
 /* ─ Toast ─ */
 #toast{position:fixed;bottom:24px;right:24px;z-index:999;display:flex;flex-direction:column;gap:8px;pointer-events:none}
-.toast{background:var(--text);color:#fff;border-radius:var(--r);padding:10px 16px;font-size:13px;min-width:220px;max-width:360px;box-shadow:var(--sh-lg);animation:slidein var(--t-base) var(--ease-out);pointer-events:auto;line-height:1.5;font-weight:500}
-.toast.success{background:oklch(32% 0.12 145)}.toast.error{background:oklch(32% 0.14 25)}.toast.pending{background:oklch(36% 0.12 55)}
-.toast a{color:oklch(90% 0.03 264);text-decoration:underline;margin-left:6px}
+.toast{background:var(--surf2);color:var(--text);border:1px solid var(--border);border-radius:var(--r);padding:10px 16px;font-size:13px;min-width:220px;max-width:360px;box-shadow:var(--sh-lg);animation:slidein var(--t-base) var(--ease-out);pointer-events:auto;line-height:1.5;font-weight:500}
+.toast.success{background:var(--gbg);color:var(--green);border-color:var(--gbd)}
+.toast.error{background:var(--rbg);color:var(--red);border-color:var(--rbd)}
+.toast.pending{background:var(--pbg);color:var(--p);border-color:var(--pbd)}
+.toast a{color:var(--p);text-decoration:underline;margin-left:6px}
 @keyframes slidein{from{transform:translateX(12px);opacity:0}to{transform:translateX(0);opacity:1}}
-@keyframes skel-pulse{0%,100%{opacity:.35}50%{opacity:.65}}
-.skel{background:var(--border);border-radius:var(--r-sm);display:inline-block;min-width:60px;min-height:14px;animation:skel-pulse 1.5s var(--ease-out) infinite;vertical-align:middle}
+@keyframes skel-pulse{0%,100%{opacity:.15}50%{opacity:.35}}
+.skel{background:var(--surf2);border-radius:var(--r-sm);display:inline-block;min-width:60px;min-height:14px;animation:skel-pulse 1.5s var(--ease-out) infinite;vertical-align:middle}
 </style>
 </head>
 <body>
@@ -277,40 +273,38 @@ tbody tr:hover td{background:var(--surf2)}
 <div class="page">
 
   <div id="userNoWallet" class="landing">
-    <h1 class="landing-title"><span class="lt-intro">Your sandbox.</span><em>Sealed from everyone — including us.</em></h1>
-    <p class="landing-sub">Powered by <strong>hardware TEE</strong>. Your code and outputs are invisible to any operator — even 0G.</p>
+    <p class="lt-kicker">0G Sandbox</p>
+    <h1 class="landing-title">Vibe code in<br><em>hardware-sealed</em><br>isolation.</h1>
+    <p class="landing-sub">Your code runs in a <strong>TDX hardware enclave</strong>. The server operator cannot read your files, outputs, or secrets — including 0G.</p>
     <div class="lf-grid">
       <div class="lf-col">
         <span class="lf-num">01</span>
         <div class="lf-text-title">Zero local pollution</div>
-        <div class="lf-text-desc">Isolated containers. Nothing touches your local environment.</div>
+        <div class="lf-text-desc">Fully isolated containers. Nothing touches your machine.</div>
       </div>
       <div class="lf-col">
         <span class="lf-num">02</span>
         <div class="lf-text-title">Provider-blind</div>
-        <div class="lf-text-desc">TDX hardware keeps your code invisible — even to the server operator.</div>
+        <div class="lf-text-desc">TDX hardware seals your workload. The operator is physically locked out.</div>
       </div>
       <div class="lf-col">
         <span class="lf-num">03</span>
         <div class="lf-text-title">Pay per second</div>
-        <div class="lf-text-desc">Stop a sandbox, billing stops. No subscriptions, no idle waste.</div>
+        <div class="lf-text-desc">Stop a sandbox, billing stops immediately. No idle waste.</div>
       </div>
     </div>
     <div class="landing-cta">
-      <button class="btn-landing" onclick="connectWallet()">Connect Wallet to Start</button>
+      <button class="btn-landing" onclick="connectWallet()">Connect Wallet</button>
       <span class="landing-hint">No account needed — just a Web3 wallet</span>
     </div>
   </div>
 
   <div id="userContent" style="display:none">
-
-      <!-- Providers + Sandboxes -->
       <div id="providerSection">
         <div class="empty" style="padding:40px 0">
           <span class="skel" style="width:100%;height:120px;display:block;border-radius:10px"></span>
         </div>
       </div>
-
   </div>
 
 </div>
@@ -441,9 +435,9 @@ function connectWallet() {
   if (!wallets.length) { list.innerHTML='<p style="color:var(--muted);font-size:13px">No wallets detected.</p>'; openModal('walletModal'); return; }
   wallets.forEach(({ info:wi, provider:prov }) => {
     const btn = document.createElement('button');
-    btn.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surf);cursor:pointer;font-family:inherit;font-size:13.5px;font-weight:500;width:100%;transition:background .15s';
-    btn.onmouseover = () => btn.style.background='var(--pbg)';
-    btn.onmouseout  = () => btn.style.background='var(--surf)';
+    btn.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surf2);cursor:pointer;font-family:inherit;font-size:13.5px;font-weight:500;width:100%;color:var(--text);transition:background .15s';
+    btn.onmouseover = () => btn.style.background='var(--surf3)';
+    btn.onmouseout  = () => btn.style.background='var(--surf2)';
     if (wi.icon) { const img=document.createElement('img'); img.src=wi.icon; img.width=img.height=28; img.style.borderRadius='6px'; btn.appendChild(img); }
     btn.appendChild(document.createTextNode(wi.name));
     btn.onclick = () => { closeModal('walletModal'); selectWallet(wi.uuid, prov); };
@@ -569,7 +563,6 @@ async function loadProviders(forceChain=false) {
     }));
 
     // On-chain data: use cache when possible to avoid slow RPC round-trips.
-    // Pass forceChain=true after deposit/subscribe to get fresh values.
     const cacheKeys = providers.map(p => `${walletAddr}:${p.address}`);
     const allCached = !forceChain && cacheKeys.every(k => _chainCache[k]);
     let ackedArr, balancesArr;
@@ -596,20 +589,20 @@ async function loadProviders(forceChain=false) {
     section.innerHTML = '';
     sortedIdx.forEach(i => {
       const p = providers[i];
-      _providerMap[p.address.toLowerCase()] = p;
+      const key = p.address.toLowerCase();
+      _providerMap[key] = p;
       const isAcked = ackedArr[i];
-      const mySbx   = sbxByProvider[p.address.toLowerCase()] || [];
+      const mySbx   = sbxByProvider[key] || [];
       const [bal, pendingRefund] = balancesArr[i];
+      const isUp = healthByProvider[key];
 
-      const isUp = healthByProvider[p.address.toLowerCase()];
       const card = document.createElement('div');
       card.className = 'card' + (isAcked ? ' pv-subscribed' : '');
-      card.id = 'pv-' + p.address.toLowerCase();
+      card.id = 'pv-' + key;
       card.innerHTML = `
         <div class="card-head">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <span class="pv-addr" title="${p.address}">${shortAddr(p.address)}</span>
-            <span class="badge purple">v${p.signer_version}</span>
             <span class="tag ${isUp ? 'running' : 'error'}"><span class="tag-dot"></span>${isUp ? 'Online' : 'Offline'}</span>
             ${isAcked ? '<span class="badge green">Subscribed</span>' : ''}
           </div>
@@ -623,57 +616,57 @@ async function loadProviders(forceChain=false) {
             }
           </div>
         </div>
-        <div class="card-body">
-          <div class="pv-pricing-row">
-            <div class="pv-price-box">
-              <span class="pv-price-label">CPU / min</span>
-              <span class="pv-price-val">${fmtNeuron(p.price_per_cpu_per_min)}</span>
-            </div>
-            <div class="pv-price-box">
-              <span class="pv-price-label">Memory / min</span>
-              <span class="pv-price-val">${fmtNeuron(p.price_per_mem_gb_per_min)}</span>
-            </div>
-            <div class="pv-price-box">
-              <span class="pv-price-label">Create fee</span>
-              <span class="pv-price-val">${fmtNeuron(p.create_fee)}</span>
-            </div>
-            <div class="pv-price-box">
-              <span class="pv-price-label">TEE Signer</span>
-              <span class="pv-price-val" style="font-size:12px;display:inline-flex;align-items:center;gap:2px">
-                <span title="${p.tee_signer}">${shortAddr(p.tee_signer)}</span>
-                <span class="tip">
-                  <span class="tip-icon">?</span>
-                  <span class="tip-box">This provider's billing runs inside a TDX hardware enclave. The signing key is physically isolated — the server operator cannot forge charges or access your sandbox.</span>
-                </span>
+        <div class="pv-stats">
+          <div class="pv-stat">
+            <span class="pv-stat-val">${fmtNeuron(p.price_per_cpu_per_min)}</span>
+            <span class="pv-stat-key">CPU / min</span>
+          </div>
+          <div class="pv-stat">
+            <span class="pv-stat-val">${fmtNeuron(p.price_per_mem_gb_per_min)}</span>
+            <span class="pv-stat-key">Mem GB / min</span>
+          </div>
+          <div class="pv-stat">
+            <span class="pv-stat-val">${fmtNeuron(p.create_fee)}</span>
+            <span class="pv-stat-key">Create fee</span>
+          </div>
+          <div class="pv-stat">
+            <span class="pv-stat-val" style="font-size:12px;display:inline-flex;align-items:center;gap:2px">
+              <span title="${p.tee_signer}">${shortAddr(p.tee_signer)}</span>
+              <span class="tip">
+                <span class="tip-icon">?</span>
+                <span class="tip-box">This provider's billing runs inside a TDX hardware enclave. The signing key is physically isolated — the server operator cannot forge charges or access your sandbox.</span>
               </span>
-            </div>
+            </span>
+            <span class="pv-stat-key">TEE Signer</span>
           </div>
+        </div>
 
-          ${isAcked ? `
-          <div class="pv-balance">
-            <div class="pv-balance-label">Your Balance</div>
-            <div class="pv-balance-row">
-              <span id="pv-bal-${p.address.toLowerCase()}" class="pv-balance-amount">${fmtNeuron(bal.toString())}</span>
-              <div style="display:flex;gap:6px;align-items:center">
-                <input type="number" step="0.001" min="0.001" value="0.1" id="dep-amt-${p.address}" class="ia-input" style="width:72px">
-                <span class="ia-unit">0G</span>
-                <button class="btn btn-prim btn-sm" onclick="doDeposit('${p.address}',this)">Deposit</button>
-                <button class="btn btn-ghost btn-sm" onclick="doRefund('${p.address}',this)">Refund</button>
-              </div>
+        ${isAcked ? `
+        <div class="pv-balance-section">
+          <div class="pv-balance-label">Your Balance</div>
+          <div class="pv-balance-main">
+            <div>
+              <span id="pv-bal-${key}" class="pv-balance-amount">${fmtNeuron(bal.toString())}</span>
+              <div id="pv-refund-${key}" class="pv-refund-line">${BigInt(pendingRefund.toString())>0n ? `Pending refund: ${fmtNeuron(pendingRefund.toString())}` : ''}</div>
             </div>
-            <div id="pv-refund-${p.address.toLowerCase()}" style="font-size:11.5px;color:var(--muted);margin-top:6px">${BigInt(pendingRefund.toString())>0n ? `Pending refund: ${fmtNeuron(pendingRefund.toString())}` : ''}</div>
-            <div class="err" id="dep-err-${p.address}" style="margin-top:4px"></div>
+            <div class="pv-deposit-row">
+              <input type="number" step="0.001" min="0.001" value="0.1" id="dep-amt-${p.address}" class="ia-input" style="width:72px">
+              <span class="ia-unit">0G</span>
+              <button class="btn btn-prim btn-sm" onclick="doDeposit('${p.address}',this)">Deposit</button>
+              <button class="btn btn-ghost btn-sm" onclick="doRefund('${p.address}',this)">Refund</button>
+            </div>
           </div>
-          <div class="pv-sandbox-section">
-            <div class="pv-sandbox-header">
-              <span class="pv-sandbox-label">Sandboxes</span>
-              <button class="btn btn-sm btn-prim" onclick="setSelectedProvider(_providerMap['${p.address.toLowerCase()}']);openModal('createModal')">+ New Sandbox</button>
-            </div>
-            <div class="pv-sandbox-list">
-              ${renderSandboxRows(mySbx, p.address)}
-            </div>
-          </div>` : ''}
-        </div>`;
+          <div class="err" id="dep-err-${p.address}" style="margin-top:6px"></div>
+        </div>
+        <div class="pv-sandbox-section">
+          <div class="pv-sandbox-header">
+            <span class="pv-sandbox-label">Sandboxes</span>
+            <button class="btn btn-sm btn-prim" onclick="setSelectedProvider(_providerMap['${key}']);openModal('createModal')">+ New Sandbox</button>
+          </div>
+          <div class="pv-sandbox-list">
+            ${renderSandboxRows(mySbx, p.address)}
+          </div>
+        </div>` : ''}`;
       section.appendChild(card);
     });
 
@@ -692,7 +685,7 @@ function setSelectedProvider(p) {
 function sandboxLabel(s) {
   const name = s.name && s.name !== s.id ? s.name : null;
   return name
-    ? `<span style="font-weight:500">${name}</span> <span class="pv-sandbox-id" style="font-size:11px">${s.id?.slice(0,8)}…</span>`
+    ? `<span style="font-weight:500;color:var(--text)">${name}</span> <span class="pv-sandbox-id" style="font-size:11px">${s.id?.slice(0,8)}…</span>`
     : `<span class="pv-sandbox-id">${s.id?.slice(0,14)||'—'}…</span>`;
 }
 
@@ -787,7 +780,7 @@ async function doDeposit(providerAddr, btn) {
   await sendTx(`Deposit ${amt} 0G`, ()=>contract.deposit(walletAddr, providerAddr, {value:ethers.parseEther(amt)}), {
     onSuccess: ()=>{ loadUserData(); loadProviders(true); }, errEl:`dep-err-${providerAddr}`,
   });
-  if (btn) { btn.disabled=false; btn.textContent='⬆ Deposit'; }
+  if (btn) { btn.disabled=false; btn.textContent='Deposit'; }
 }
 
 async function doRefund(providerAddr, btn) {
@@ -798,7 +791,7 @@ async function doRefund(providerAddr, btn) {
   await sendTx('Refund request', ()=>contract.requestRefund(providerAddr, ethers.parseEther(amt)), {
     onSuccess: ()=>{ loadUserData(); loadProviders(true); }, errEl:`dep-err-${providerAddr}`,
   });
-  if (btn) { btn.disabled=false; btn.textContent='↩ Refund'; }
+  if (btn) { btn.disabled=false; btn.textContent='Refund'; }
 }
 
 async function fetchSandboxIds() {
