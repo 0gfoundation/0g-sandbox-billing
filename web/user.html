@@ -22,9 +22,9 @@
   --text2:  oklch(40% 0 0);
   --muted:  oklch(52% 0 0);
   --border: oklch(91% 0 0);
-  --bg:     oklch(100% 0 0);
-  --surf:   oklch(100% 0 0);
-  --surf2:  oklch(97.5% 0 0);
+  --bg:     oklch(96.8% 0.008 270);
+  --surf:   oklch(99.6% 0.003 270);
+  --surf2:  oklch(97.2% 0.006 270);
   /* ── Semantic ── */
   --green: oklch(44% 0.15 145); --gbg: oklch(97% 0.03 145); --gbd: oklch(82% 0.08 145);
   --red:   oklch(42% 0.18 25);  --rbg: oklch(97.5% 0.03 25);  --rbd: oklch(82% 0.09 25);
@@ -46,7 +46,7 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--text);ba
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 
 /* ─ Topbar ─ */
-.topbar{background:var(--surf);border-bottom:1px solid var(--border);height:60px;display:flex;align-items:center;padding:0 clamp(16px,4vw,40px);position:sticky;top:0;z-index:100}
+.topbar{background:var(--surf);border-bottom:1px solid var(--border);box-shadow:0 1px 0 var(--border),0 2px 12px oklch(0% 0 0 / 0.04);height:60px;display:flex;align-items:center;padding:0 clamp(16px,4vw,40px);position:sticky;top:0;z-index:100}
 .logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px;letter-spacing:-.02em;color:var(--text)}
 .logo-sub{font-size:12px;color:var(--muted);font-weight:400;margin-left:2px}
 .topbar-right{margin-left:auto;display:flex;align-items:center;gap:8px}
@@ -82,12 +82,13 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--text);ba
 @media(max-width:800px){.two-col{grid-template-columns:1fr}}
 
 /* ─ Card ─ */
-.card{background:var(--surf);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:16px;transition:border-color var(--t-base) var(--ease-out)}
-.card:hover{border-color:oklch(82% 0 0)}
-.card-head{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--surf)}
+.card{background:var(--surf);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:16px;box-shadow:var(--sh-sm);transition:border-color var(--t-base) var(--ease-out),box-shadow var(--t-base) var(--ease-out)}
+.card:hover{border-color:oklch(82% 0.005 270);box-shadow:var(--sh)}
+.card-head{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--surf2)}
+.pv-subscribed .card-head{background:oklch(97.5% 0.035 145)}
 .card-title{font-size:12px;font-weight:700;color:var(--text);letter-spacing:.05em;text-transform:uppercase}
 .card-meta{font-size:12px;color:var(--muted)}
-.card-body{padding:20px}
+.card-body{padding:20px 20px 16px}
 
 /* ─ Info rows ─ */
 .info-row{display:flex;justify-content:space-between;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--border);gap:12px}
@@ -137,19 +138,26 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--text);ba
 .ia-hint{font-size:11px;color:var(--muted)}
 
 /* ─ Provider cards ─ */
-.pv-subscribed{border-color:var(--gbd)!important}
-.pv-pricing-row{display:flex;flex-wrap:wrap;gap:6px 16px;margin-bottom:12px;align-items:center}
-.pv-price-box{display:flex;align-items:baseline;gap:5px}
-.pv-price-val{font-size:13px;font-weight:700;font-family:var(--mono);color:var(--text);font-variant-numeric:tabular-nums}
-.pv-price-label{font-size:11px;color:var(--muted);font-weight:500}
-.pv-sandbox-section{border-top:1px solid var(--border);padding-top:14px;margin-top:4px}
+.pv-subscribed{border-left:3px solid var(--green)!important}
+.pv-addr{font-size:12.5px;font-weight:600;font-family:var(--mono);color:var(--text);letter-spacing:0}
+.pv-pricing-row{display:flex;flex-wrap:wrap;gap:6px 20px;margin-bottom:16px;align-items:center;padding:12px 0;border-bottom:1px solid var(--border)}
+.pv-price-box{display:flex;flex-direction:column;gap:2px}
+.pv-price-val{font-size:16px;font-weight:700;font-family:var(--mono);color:var(--text);font-variant-numeric:tabular-nums}
+.pv-price-label{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.pv-balance{background:var(--surf2);border-radius:var(--r-sm);padding:12px 14px;margin-bottom:14px}
+.pv-balance-label{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px}
+.pv-balance-amount{font-size:22px;font-weight:800;font-family:var(--mono);color:var(--text);letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
+.pv-balance-row{display:flex;justify-content:space-between;align-items:flex-end}
+.pv-hint{font-size:12px;color:var(--muted);padding:16px 0 4px;line-height:1.6}
+.pv-sandbox-section{padding-top:14px}
 .pv-sandbox-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.pv-sandbox-label{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em}
 .pv-sandbox-list{display:flex;flex-direction:column}
-.pv-sandbox-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)}
-.pv-sandbox-row:last-child{border-bottom:none}
+.pv-sandbox-row{display:flex;align-items:center;gap:10px;padding:9px 8px;border-radius:var(--r-sm);margin:0 -8px;transition:background var(--t-fast)}
+.pv-sandbox-row:hover{background:var(--surf2)}
 .pv-sandbox-id{font-family:var(--mono);font-size:12px;flex:1;color:var(--text2)}
 .pv-sandbox-actions{display:flex;gap:5px}
-.pv-sandbox-empty{color:var(--muted);font-size:12.5px;padding:20px 0;text-align:center}
+.pv-sandbox-empty{color:var(--muted);font-size:12.5px;padding:20px 0;text-align:center;line-height:1.7}
 
 /* ─ Table ─ */
 table{width:100%;border-collapse:collapse}
@@ -187,9 +195,30 @@ tbody tr:hover td{background:var(--surf2)}
 .err{color:var(--red);font-size:12px;margin-top:4px}
 .loading{color:var(--muted);font-size:12px;margin-top:6px}
 .code-block{background:var(--surf2);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;font-family:var(--mono);font-size:12px;word-break:break-all;user-select:all;cursor:text;line-height:1.7;font-variant-ligatures:none}
-.wallet-required{text-align:center;padding:60px 20px;color:var(--muted)}
-.wallet-required .icon{font-size:36px;margin-bottom:12px}
-.wallet-required p{font-size:13.5px;margin-bottom:20px;max-width:280px;margin-left:auto;margin-right:auto;line-height:1.7}
+/* ─ Landing / No Wallet ─ */
+.landing{padding:clamp(48px,8vw,96px) 0 80px;max-width:860px}
+.landing-eyebrow{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--pd);background:var(--pbg);border:1px solid var(--pbd);border-radius:9999px;padding:4px 12px;margin-bottom:28px}
+.landing-eyebrow-dot{width:5px;height:5px;border-radius:50%;background:var(--p);flex-shrink:0}
+.landing-title{font-size:clamp(32px,4vw,52px);font-weight:800;line-height:1.1;letter-spacing:-.025em;color:var(--text);margin-bottom:20px}
+.landing-title em{font-style:normal;color:var(--pd)}
+.lt-intro{display:block;font-size:0.52em;font-weight:500;color:var(--muted);letter-spacing:-.01em;margin-bottom:0.25em}
+.landing-sub{font-size:15px;color:var(--text2);line-height:1.75;margin-bottom:40px;max-width:560px;font-weight:400}
+.landing-sub strong{color:var(--text);font-weight:600}
+.lf-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;margin-bottom:40px;border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;background:var(--surf);box-shadow:var(--sh)}
+.lf-col{padding:20px 18px;border-right:1px solid var(--border)}
+.lf-col:last-child{border-right:none}
+.lf-num{font-size:11px;font-weight:700;color:var(--pd);font-family:var(--mono);letter-spacing:.04em;display:block;margin-bottom:10px}
+.lf-text-title{font-size:13px;font-weight:700;color:var(--text);margin-bottom:5px;letter-spacing:-.01em}
+.lf-text-desc{font-size:12px;color:var(--text2);line-height:1.6}
+.landing-cta{display:flex;align-items:center;gap:12px}
+.landing-hint{font-size:12px;color:var(--muted)}
+
+/* ─ Tooltip ─ */
+.tip{position:relative;display:inline-flex;align-items:center}
+.tip-icon{width:13px;height:13px;border-radius:50%;background:var(--border);color:var(--text2);font-size:9px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;cursor:default;flex-shrink:0;margin-left:4px;font-family:var(--sans);line-height:1}
+.tip-box{position:absolute;bottom:calc(100% + 7px);left:50%;transform:translateX(-50%);background:oklch(18% 0.02 270);color:oklch(94% 0.01 270);font-size:11.5px;line-height:1.55;padding:9px 12px;border-radius:var(--r-sm);width:220px;pointer-events:none;opacity:0;transition:opacity var(--t-fast) ease;z-index:500;font-family:var(--sans);font-weight:400;white-space:normal;box-shadow:var(--sh-lg)}
+.tip-box::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:oklch(18% 0.02 270)}
+.tip:hover .tip-box{opacity:1}
 
 /* ─ Toast ─ */
 #toast{position:fixed;bottom:24px;right:24px;z-index:999;display:flex;flex-direction:column;gap:8px;pointer-events:none}
@@ -236,10 +265,30 @@ tbody tr:hover td{background:var(--surf2)}
 <!-- User Content -->
 <div class="page">
 
-  <div id="userNoWallet" class="wallet-required">
-    <div class="icon">👛</div>
-    <p>Connect your wallet to manage your billing account and sandboxes.</p>
-    <button class="btn btn-prim" onclick="connectWallet()">Connect Wallet</button>
+  <div id="userNoWallet" class="landing">
+    <h1 class="landing-title"><span class="lt-intro">Your sandbox.</span><em>Sealed from everyone — including us.</em></h1>
+    <p class="landing-sub">Powered by <strong>hardware TEE</strong>. Your code and outputs are invisible to any operator — even 0G.</p>
+    <div class="lf-grid">
+      <div class="lf-col">
+        <span class="lf-num">01</span>
+        <div class="lf-text-title">Zero local pollution</div>
+        <div class="lf-text-desc">Isolated containers. Nothing touches your local environment.</div>
+      </div>
+      <div class="lf-col">
+        <span class="lf-num">02</span>
+        <div class="lf-text-title">Provider-blind</div>
+        <div class="lf-text-desc">TDX hardware keeps your code invisible — even to the server operator.</div>
+      </div>
+      <div class="lf-col">
+        <span class="lf-num">03</span>
+        <div class="lf-text-title">Pay per second</div>
+        <div class="lf-text-desc">Stop a sandbox, billing stops. No subscriptions, no idle waste.</div>
+      </div>
+    </div>
+    <div class="landing-cta">
+      <button class="btn btn-prim" style="padding:10px 22px;font-size:14px" onclick="connectWallet()">Connect Wallet to Start</button>
+      <span class="landing-hint">No account needed — just a Web3 wallet</span>
+    </div>
   </div>
 
   <div id="userContent" style="display:none">
@@ -548,13 +597,13 @@ async function loadProviders(forceChain=false) {
       card.innerHTML = `
         <div class="card-head">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <span class="card-title" title="${p.address}">${shortAddr(p.address)}</span>
+            <span class="pv-addr" title="${p.address}">${shortAddr(p.address)}</span>
             <span class="badge purple">v${p.signer_version}</span>
-            <span class="tag ${isUp ? 'running' : 'error'}" title="${isUp ? 'Provider reachable' : 'Provider unreachable'}"><span class="tag-dot"></span>${isUp ? 'Online' : 'Offline'}</span>
-            ${isAcked ? '<span class="badge green">✓ Subscribed</span>' : ''}
+            <span class="tag ${isUp ? 'running' : 'error'}"><span class="tag-dot"></span>${isUp ? 'Online' : 'Offline'}</span>
+            ${isAcked ? '<span class="badge green">Subscribed</span>' : ''}
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
-            <button class="btn btn-sm btn-ghost" onclick="loadProviders(true)">↻</button>
+            <button class="btn btn-sm btn-ghost" title="Refresh" onclick="loadProviders(true)">↻</button>
             ${_subscribePending.has(p.address)
               ? `<button class="btn btn-sm btn-ghost" disabled>…</button>`
               : isAcked
@@ -566,11 +615,11 @@ async function loadProviders(forceChain=false) {
         <div class="card-body">
           <div class="pv-pricing-row">
             <div class="pv-price-box">
-              <span class="pv-price-label">CPU/min</span>
+              <span class="pv-price-label">CPU / min</span>
               <span class="pv-price-val">${fmtNeuron(p.price_per_cpu_per_min)}</span>
             </div>
             <div class="pv-price-box">
-              <span class="pv-price-label">Mem/min</span>
+              <span class="pv-price-label">Memory / min</span>
               <span class="pv-price-val">${fmtNeuron(p.price_per_mem_gb_per_min)}</span>
             </div>
             <div class="pv-price-box">
@@ -578,36 +627,41 @@ async function loadProviders(forceChain=false) {
               <span class="pv-price-val">${fmtNeuron(p.create_fee)}</span>
             </div>
             <div class="pv-price-box">
-              <span class="pv-price-label">TEE</span>
-              <span class="pv-price-val" style="font-size:12px" title="${p.tee_signer}">${shortAddr(p.tee_signer)}</span>
+              <span class="pv-price-label">TEE Signer</span>
+              <span class="pv-price-val" style="font-size:12px;display:inline-flex;align-items:center;gap:2px">
+                <span title="${p.tee_signer}">${shortAddr(p.tee_signer)}</span>
+                <span class="tip">
+                  <span class="tip-icon">?</span>
+                  <span class="tip-box">This provider's billing runs inside a TDX hardware enclave. The signing key is physically isolated — the server operator cannot forge charges or access your sandbox.</span>
+                </span>
+              </span>
             </div>
           </div>
 
           ${isAcked ? `
-          <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-              <span style="font-size:12px;font-weight:600;color:var(--text2)">Your Balance</span>
-              <span id="pv-bal-${p.address.toLowerCase()}" style="font-size:15px;font-weight:700;font-family:var(--mono);color:var(--text)">${fmtNeuron(bal.toString())}</span>
+          <div class="pv-balance">
+            <div class="pv-balance-label">Your Balance</div>
+            <div class="pv-balance-row">
+              <span id="pv-bal-${p.address.toLowerCase()}" class="pv-balance-amount">${fmtNeuron(bal.toString())}</span>
+              <div style="display:flex;gap:6px;align-items:center">
+                <input type="number" step="0.001" min="0.001" value="0.1" id="dep-amt-${p.address}" class="ia-input" style="width:72px">
+                <span class="ia-unit">0G</span>
+                <button class="btn btn-prim btn-sm" onclick="doDeposit('${p.address}',this)">Deposit</button>
+                <button class="btn btn-ghost btn-sm" onclick="doRefund('${p.address}',this)">Refund</button>
+              </div>
             </div>
-            <div id="pv-refund-${p.address.toLowerCase()}" style="font-size:11.5px;color:var(--muted);margin-bottom:8px">${BigInt(pendingRefund.toString())>0n ? `Pending refund: ${fmtNeuron(pendingRefund.toString())}` : ''}</div>
-            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-              <input type="number" step="0.001" min="0.001" value="0.1" id="dep-amt-${p.address}" class="ia-input" style="width:80px">
-              <span class="ia-unit">0G</span>
-              <button class="btn btn-prim btn-sm" onclick="doDeposit('${p.address}',this)">⬆ Deposit</button>
-              <button class="btn btn-ghost btn-sm" onclick="doRefund('${p.address}',this)">↩ Refund</button>
-            </div>
+            <div id="pv-refund-${p.address.toLowerCase()}" style="font-size:11.5px;color:var(--muted);margin-top:6px">${BigInt(pendingRefund.toString())>0n ? `Pending refund: ${fmtNeuron(pendingRefund.toString())}` : ''}</div>
             <div class="err" id="dep-err-${p.address}" style="margin-top:4px"></div>
-          </div>` : ''}
-
+          </div>
           <div class="pv-sandbox-section">
             <div class="pv-sandbox-header">
-              <span style="font-size:12.5px;font-weight:600">Sandboxes</span>
-              ${isAcked ? `<button class="btn btn-sm btn-prim" onclick="setSelectedProvider(_providerMap['${p.address.toLowerCase()}']);openModal('createModal')">+ Create</button>` : ''}
+              <span class="pv-sandbox-label">Sandboxes</span>
+              <button class="btn btn-sm btn-prim" onclick="setSelectedProvider(_providerMap['${p.address.toLowerCase()}']);openModal('createModal')">+ New Sandbox</button>
             </div>
             <div class="pv-sandbox-list">
               ${renderSandboxRows(mySbx, p.address)}
             </div>
-          </div>
+          </div>` : ''}
         </div>`;
       section.appendChild(card);
     });
@@ -632,7 +686,7 @@ function sandboxLabel(s) {
 }
 
 function renderSandboxRows(sandboxes, providerAddr) {
-  if (!sandboxes?.length) return '<div class="pv-sandbox-empty"><div style="font-size:22px;margin-bottom:6px">📭</div>No sandboxes yet. Create one to get started.</div>';
+  if (!sandboxes?.length) return '<div class="pv-sandbox-empty">No sandboxes yet.<br><span style="font-size:11.5px">Click <strong>+ New Sandbox</strong> above to get started.</span></div>';
   const pa = providerAddr;
   return sandboxes.map(s => {
     const shortLabel = (s.name&&s.name!==s.id?s.name:s.id?.slice(0,8))||s.id;
