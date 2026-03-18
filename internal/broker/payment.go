@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 )
 
+
 // PaymentLayer abstracts the external funding service that calls
 // contract.deposit(user, provider, amount) on behalf of the Broker.
 type PaymentLayer interface {
@@ -48,18 +49,22 @@ func (n *NoopPaymentLayer) RequestDeposit(_ context.Context, user, provider comm
 // The signature is sent as an Authorization: Bearer header.
 // Timestamp (milliseconds) serves as replay protection.
 type HTTPPaymentLayer struct {
-	url    string
-	signer *ecdsa.PrivateKey
-	client *http.Client
-	log    *zap.Logger
+	url         string
+	signer      *ecdsa.PrivateKey
+	client      *http.Client
+	log         *zap.Logger
+	pollInterval time.Duration
+	pollTimeout  time.Duration
 }
 
-func NewHTTPPaymentLayer(url string, signer *ecdsa.PrivateKey, log *zap.Logger) *HTTPPaymentLayer {
+func NewHTTPPaymentLayer(url string, signer *ecdsa.PrivateKey, log *zap.Logger, pollIntervalSec, pollTimeoutSec int64) *HTTPPaymentLayer {
 	return &HTTPPaymentLayer{
-		url:    url,
-		signer: signer,
-		client: &http.Client{Timeout: 10 * time.Second},
-		log:    log,
+		url:          url,
+		signer:       signer,
+		client:       &http.Client{Timeout: 10 * time.Second},
+		log:          log,
+		pollInterval: time.Duration(pollIntervalSec) * time.Second,
+		pollTimeout:  time.Duration(pollTimeoutSec) * time.Second,
 	}
 }
 
@@ -68,6 +73,15 @@ type depositRequest struct {
 	Provider  string `json:"provider"`
 	Amount    string `json:"amount"`
 	Timestamp int64  `json:"timestamp"` // milliseconds
+}
+
+type depositResponse struct {
+	RequestID string `json:"request_id"`
+}
+
+type depositStatusResponse struct {
+	Status string `json:"status"` // "pending", "success", "failed"
+	Error  string `json:"error,omitempty"`
 }
 
 func (h *HTTPPaymentLayer) RequestDeposit(ctx context.Context, user, provider common.Address, amount *big.Int) error {
@@ -110,9 +124,73 @@ func (h *HTTPPaymentLayer) RequestDeposit(ctx context.Context, user, provider co
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("payment layer returned HTTP %d", resp.StatusCode)
 	}
-	h.log.Info("payment layer: deposit requested",
+
+	var dr depositResponse
+	if err := json.NewDecoder(resp.Body).Decode(&dr); err != nil {
+		return fmt.Errorf("decode deposit response: %w", err)
+	}
+	if dr.RequestID == "" {
+		return fmt.Errorf("payment layer returned empty request_id")
+	}
+
+	h.log.Info("payment layer: deposit requested, polling status",
 		zap.String("user", user.Hex()),
 		zap.String("provider", provider.Hex()),
-		zap.String("amount", amount.String()))
+		zap.String("amount", amount.String()),
+		zap.String("request_id", dr.RequestID))
+
+	go h.pollDepositStatus(dr.RequestID, user, provider)
 	return nil
+}
+
+func (h *HTTPPaymentLayer) pollDepositStatus(requestID string, user, provider common.Address) {
+	ctx, cancel := context.WithTimeout(context.Background(), h.pollTimeout)
+	defer cancel()
+
+	statusURL := fmt.Sprintf("%s/deposit/status?id=%s", h.url, requestID)
+	ticker := time.NewTicker(h.pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			h.log.Warn("payment layer: deposit status poll timed out",
+				zap.String("request_id", requestID),
+				zap.String("user", user.Hex()),
+				zap.String("provider", provider.Hex()))
+			return
+		case <-ticker.C:
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
+			if err != nil {
+				h.log.Warn("payment layer: build status request failed", zap.Error(err))
+				continue
+			}
+			resp, err := h.client.Do(req)
+			if err != nil {
+				h.log.Warn("payment layer: status poll failed", zap.String("request_id", requestID), zap.Error(err))
+				continue
+			}
+			var sr depositStatusResponse
+			json.NewDecoder(resp.Body).Decode(&sr) //nolint:errcheck
+			resp.Body.Close()                      //nolint:errcheck
+
+			switch sr.Status {
+			case "success":
+				h.log.Info("payment layer: deposit confirmed",
+					zap.String("request_id", requestID),
+					zap.String("user", user.Hex()),
+					zap.String("provider", provider.Hex()))
+				return
+			case "failed":
+				h.log.Warn("payment layer: deposit failed",
+					zap.String("request_id", requestID),
+					zap.String("user", user.Hex()),
+					zap.String("provider", provider.Hex()),
+					zap.String("error", sr.Error))
+				return
+			default:
+				// pending — keep polling
+			}
+		}
+	}
 }

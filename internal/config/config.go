@@ -17,10 +17,12 @@ type Config struct {
 }
 
 type BrokerConfig struct {
-	MonitorIntervalSec  int64  `mapstructure:"monitor_interval_sec"`
-	TopupIntervals      int64  `mapstructure:"topup_intervals"`
-	ThresholdIntervals  int64  `mapstructure:"threshold_intervals"`
-	PaymentLayerURL     string `mapstructure:"payment_layer_url"`
+	MonitorIntervalSec       int64  `mapstructure:"monitor_interval_sec"`
+	TopupIntervals           int64  `mapstructure:"topup_intervals"`
+	ThresholdIntervals       int64  `mapstructure:"threshold_intervals"`
+	PaymentLayerURL          string `mapstructure:"payment_layer_url"`
+	DepositPollIntervalSec   int64  `mapstructure:"deposit_poll_interval_sec"`
+	DepositPollTimeoutSec    int64  `mapstructure:"deposit_poll_timeout_sec"`
 }
 
 type DaytonaConfig struct {
@@ -133,6 +135,8 @@ func LoadBroker() (*Config, error) {
 	v.SetDefault("broker.monitor_interval_sec", 300)
 	v.SetDefault("broker.topup_intervals", 3)
 	v.SetDefault("broker.threshold_intervals", 2)
+	v.SetDefault("broker.deposit_poll_interval_sec", 5)
+	v.SetDefault("broker.deposit_poll_timeout_sec", 120)
 
 	bindings := map[string]string{
 		"redis.addr":                    "REDIS_ADDR",
@@ -145,7 +149,9 @@ func LoadBroker() (*Config, error) {
 		"broker.monitor_interval_sec":   "BROKER_MONITOR_INTERVAL_SEC",
 		"broker.topup_intervals":        "BROKER_TOPUP_INTERVALS",
 		"broker.threshold_intervals":    "BROKER_THRESHOLD_INTERVALS",
-		"broker.payment_layer_url":      "PAYMENT_LAYER_URL",
+		"broker.payment_layer_url":           "PAYMENT_LAYER_URL",
+		"broker.deposit_poll_interval_sec":   "BROKER_DEPOSIT_POLL_INTERVAL_SEC",
+		"broker.deposit_poll_timeout_sec":    "BROKER_DEPOSIT_POLL_TIMEOUT_SEC",
 	}
 	for key, env := range bindings {
 		if err := v.BindEnv(key, env); err != nil {
