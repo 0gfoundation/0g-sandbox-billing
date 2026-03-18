@@ -290,9 +290,9 @@ tbody tr:hover td{background:var(--surf2)}
         <span class="card-title">Voucher Settlement History</span>
         <div style="display:flex;gap:8px;align-items:center">
           <select id="evtRange" style="font-size:12px;padding:3px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surf);color:var(--text)">
-            <option value="1800">Last 1h</option>
-            <option value="43200" selected>Last 24h</option>
-            <option value="302400">Last 7d</option>
+            <option value="3600">~Last 1h</option>
+            <option value="86400" selected>~Last 24h</option>
+            <option value="604800">~Last 7d</option>
             <option value="0">All history</option>
           </select>
           <button class="btn btn-sm btn-ghost" onclick="loadEvents()">Load</button>
@@ -727,8 +727,9 @@ async function loadEvents(page) {
   el.innerHTML = '<div class="empty">Loading…</div>'; meta.textContent = '';
   pager.style.display = 'none';
   try {
-    const lookback = parseInt(document.getElementById('evtRange').value);
-    const url = `/api/events?lookback=${lookback}&page=${page}&page_size=${EVT_PAGE_SIZE}`;
+    const duration = parseInt(document.getElementById('evtRange').value);
+    const since = duration > 0 ? Math.floor(Date.now() / 1000) - duration : 0;
+    const url = `/api/events?since=${since}&page=${page}&page_size=${EVT_PAGE_SIZE}`;
     const resp = await signedFetch('GET', url);
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) { el.innerHTML = `<div class="empty">${esc(data.error || 'Failed')}</div>`; return; }

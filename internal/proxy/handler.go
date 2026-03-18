@@ -48,11 +48,11 @@ type AckChecker interface {
 }
 
 // EventFetcher retrieves on-chain VoucherSettled events.
-// lookback is blocks to look back; 0 = all history.
+// sinceTimestamp is a Unix timestamp (seconds); 0 = all history.
 // page/pageSize control pagination (0-indexed, newest-first); pageSize=0 returns all.
 // Returns events, total count, current block number, and any error.
 type EventFetcher interface {
-	GetVoucherEvents(ctx context.Context, lookback uint64, page, pageSize int) ([]chain.VoucherEvent, int, uint64, error)
+	GetVoucherEvents(ctx context.Context, sinceTimestamp uint64, page, pageSize int) ([]chain.VoucherEvent, int, uint64, error)
 }
 
 // Handler wires up all proxy routes onto a Gin engine.
@@ -476,15 +476,15 @@ func (h *Handler) handleEvents(c *gin.Context) {
 		c.JSON(http.StatusNotImplemented, gin.H{"error": "events not configured"})
 		return
 	}
-	// ?lookback=N: look back N blocks from latest. 0 or omitted = all history.
-	var lookback uint64 = 43200 // default: ~24h at 2s/block
-	if s := c.Query("lookback"); s != "" {
+	// ?since=<unix_ts>: return events with block.timestamp >= since. 0 or omitted = all history.
+	var sinceTimestamp uint64
+	if s := c.Query("since"); s != "" {
 		n, err := strconv.ParseUint(s, 10, 64)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid lookback"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid since"})
 			return
 		}
-		lookback = n
+		sinceTimestamp = n
 	}
 	page := 0
 	if s := c.Query("page"); s != "" {
@@ -504,7 +504,7 @@ func (h *Handler) handleEvents(c *gin.Context) {
 		}
 		pageSize = n
 	}
-	evts, total, currentBlock, err := h.eventFetcher.GetVoucherEvents(c.Request.Context(), lookback, page, pageSize)
+	evts, total, currentBlock, err := h.eventFetcher.GetVoucherEvents(c.Request.Context(), sinceTimestamp, page, pageSize)
 	if err != nil {
 		h.log.Error("GetVoucherEvents", zap.Error(err))
 		c.JSON(http.StatusBadGateway, gin.H{"error": "chain query failed"})
@@ -533,17 +533,13 @@ func (h *Handler) handleEvents(c *gin.Context) {
 			Timestamp: e.Timestamp,
 		}
 	}
-	fromBlock := uint64(1)
-	if lookback > 0 && currentBlock > lookback {
-		fromBlock = currentBlock - lookback
-	}
 	c.JSON(http.StatusOK, gin.H{
-		"current_block": currentBlock,
-		"from_block":    fromBlock,
-		"total":         total,
-		"page":          page,
-		"page_size":     pageSize,
-		"events":        result,
+		"current_block":  currentBlock,
+		"since":          sinceTimestamp,
+		"total":          total,
+		"page":           page,
+		"page_size":      pageSize,
+		"events":         result,
 	})
 }
 

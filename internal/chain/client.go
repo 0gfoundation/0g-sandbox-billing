@@ -236,19 +236,39 @@ type VoucherEvent struct {
 }
 
 // GetVoucherEvents queries VoucherSettled logs from the contract.
-// lookback is the number of blocks to look back from the current latest block.
-// lookback=0 means all history (from block 1).
+// sinceTimestamp is a Unix timestamp (seconds); only events with block.timestamp >= sinceTimestamp
+// are returned. sinceTimestamp=0 means all history (from block 1).
 // page/pageSize control which slice to return (page is 0-indexed, newest-first).
 // pageSize=0 returns all events without pagination.
 // Returns the page of events, the total count, the current (latest) block number, and any error.
-func (c *Client) GetVoucherEvents(ctx context.Context, lookback uint64, page, pageSize int) ([]VoucherEvent, int, uint64, error) {
+func (c *Client) GetVoucherEvents(ctx context.Context, sinceTimestamp uint64, page, pageSize int) ([]VoucherEvent, int, uint64, error) {
 	latest, err := c.eth.BlockNumber(ctx)
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("get block number: %w", err)
 	}
+
 	var fromBlock uint64 = 1
-	if lookback > 0 && latest > lookback {
-		fromBlock = latest - lookback
+	if sinceTimestamp > 0 {
+		now := uint64(time.Now().Unix())
+		if sinceTimestamp < now {
+			duration := now - sinceTimestamp
+
+			// Estimate avg block time from head and tail of a 100-block sample (2 RPC calls).
+			avgBlockTimeSec := 1.0 // fallback
+			const sample = 100
+			if latest > sample {
+				hNew, err1 := c.eth.HeaderByNumber(ctx, new(big.Int).SetUint64(latest))
+				hOld, err2 := c.eth.HeaderByNumber(ctx, new(big.Int).SetUint64(latest-sample))
+				if err1 == nil && err2 == nil && hNew.Time > hOld.Time {
+					avgBlockTimeSec = float64(hNew.Time-hOld.Time) / float64(sample)
+				}
+			}
+
+			lookback := uint64(float64(duration) / avgBlockTimeSec)
+			if lookback < latest {
+				fromBlock = latest - lookback
+			}
+		}
 	}
 
 	query := ethereum.FilterQuery{
@@ -259,6 +279,55 @@ func (c *Client) GetVoucherEvents(ctx context.Context, lookback uint64, page, pa
 	logs, err := c.eth.FilterLogs(ctx, query)
 	if err != nil {
 		return nil, 0, latest, fmt.Errorf("FilterLogs: %w", err)
+	}
+
+	type tsResult struct {
+		bn uint64
+		ts uint64
+	}
+	fetchTimestamps := func(blockSet map[uint64]uint64) {
+		fetchCtx, fetchCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer fetchCancel()
+		sem := make(chan struct{}, 5)
+		ch := make(chan tsResult, len(blockSet))
+		var wg sync.WaitGroup
+		for bn := range blockSet {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(bn uint64) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				hdr, err := c.eth.HeaderByNumber(fetchCtx, new(big.Int).SetUint64(bn))
+				if err == nil {
+					ch <- tsResult{bn, hdr.Time}
+				} else {
+					ch <- tsResult{bn, 0}
+				}
+			}(bn)
+		}
+		wg.Wait()
+		close(ch)
+		for r := range ch {
+			blockSet[r.bn] = r.ts
+		}
+	}
+
+	// When filtering by time, fetch timestamps for all logs so we can filter before paginating.
+	var blockNums map[uint64]uint64
+	if sinceTimestamp > 0 {
+		blockNums = make(map[uint64]uint64, len(logs))
+		for _, l := range logs {
+			blockNums[l.BlockNumber] = 0
+		}
+		fetchTimestamps(blockNums)
+
+		filtered := logs[:0]
+		for _, l := range logs {
+			if blockNums[l.BlockNumber] >= sinceTimestamp {
+				filtered = append(filtered, l)
+			}
+		}
+		logs = filtered
 	}
 
 	total := len(logs)
@@ -278,40 +347,13 @@ func (c *Client) GetVoucherEvents(ctx context.Context, lookback uint64, page, pa
 		pageLogs = logs[total-end : total-start]
 	}
 
-	// Collect unique block numbers for this page only, then fetch timestamps.
-	blockNums := make(map[uint64]uint64) // block → timestamp
-	for _, l := range pageLogs {
-		blockNums[l.BlockNumber] = 0
-	}
-	type tsResult struct {
-		bn uint64
-		ts uint64
-	}
-	// Use a detached context with timeout so header fetches are not cancelled
-	// if the HTTP client disconnects mid-request.
-	fetchCtx, fetchCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer fetchCancel()
-	sem := make(chan struct{}, 5) // cap at 5 concurrent RPC calls
-	ch := make(chan tsResult, len(blockNums))
-	var wg sync.WaitGroup
-	for bn := range blockNums {
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(bn uint64) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			hdr, err := c.eth.HeaderByNumber(fetchCtx, new(big.Int).SetUint64(bn))
-			if err == nil {
-				ch <- tsResult{bn, hdr.Time}
-			} else {
-				ch <- tsResult{bn, 0}
-			}
-		}(bn)
-	}
-	wg.Wait()
-	close(ch)
-	for r := range ch {
-		blockNums[r.bn] = r.ts
+	// Fetch timestamps for page blocks (reuse already-fetched map when available).
+	if blockNums == nil {
+		blockNums = make(map[uint64]uint64)
+		for _, l := range pageLogs {
+			blockNums[l.BlockNumber] = 0
+		}
+		fetchTimestamps(blockNums)
 	}
 
 	events := make([]VoucherEvent, 0, len(pageLogs))
