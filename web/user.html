@@ -472,10 +472,10 @@ async function initWallet(addr, prov) {
   document.getElementById('userNoWallet').style.display='none';
   document.getElementById('userContent').style.display='';
 
-  await loadUserData();
-
   if (_activeProvider && _activeProvider !== prov) try { _activeProvider.removeListener('accountsChanged',_onAccountsChanged); } catch(_){}
   if (_activeProvider !== prov) { prov.on('accountsChanged',_onAccountsChanged); _activeProvider=prov; }
+
+  await loadUserData();
   if (_refreshTimer) clearInterval(_refreshTimer);
   _refreshTimer = setInterval(()=>{ if(walletAddr){ refreshBalances(); } }, 30000);
 }
