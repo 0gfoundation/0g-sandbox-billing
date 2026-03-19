@@ -11,32 +11,32 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  color-scheme: dark;
-  --p:   oklch(70% 0.20 315);
-  --pd:  oklch(77% 0.17 315);
-  --pbg: oklch(16% 0.09 315);
-  --pbd: oklch(27% 0.13 315);
-  --text:   oklch(93% 0 0);
-  --text2:  oklch(66% 0 0);
-  --muted:  oklch(44% 0 0);
-  --border: oklch(20% 0.006 275);
-  --bg:     oklch(8.5% 0.005 275);
-  --surf:   oklch(12% 0.007 275);
-  --surf2:  oklch(16% 0.008 275);
-  --surf3:  oklch(21% 0.010 275);
-  --green:  oklch(66% 0.18 145); --gbg: oklch(12% 0.06 145); --gbd: oklch(24% 0.12 145);
-  --red:    oklch(64% 0.18 25);  --rbg: oklch(12% 0.06 25);  --rbd: oklch(24% 0.12 25);
-  --orange: oklch(68% 0.16 55);  --obg: oklch(12% 0.06 55);  --obd: oklch(24% 0.12 55);
-  --cyan:   oklch(72% 0.14 200);
+  color-scheme: light;
+  --p:   oklch(50% 0.22 315);
+  --pd:  oklch(44% 0.20 315);
+  --pbg: oklch(96% 0.06 315);
+  --pbd: oklch(84% 0.12 315);
+  --text:   oklch(11% 0 0);
+  --text2:  oklch(36% 0.005 275);
+  --muted:  oklch(56% 0.005 275);
+  --border: oklch(88% 0.005 275);
+  --bg:     oklch(97.5% 0.003 275);
+  --surf:   oklch(100% 0 0);
+  --surf2:  oklch(96% 0.004 275);
+  --surf3:  oklch(91% 0.005 275);
+  --green:  oklch(42% 0.18 145); --gbg: oklch(95% 0.05 145); --gbd: oklch(82% 0.10 145);
+  --red:    oklch(48% 0.20 25);  --rbg: oklch(96% 0.05 25);  --rbd: oklch(84% 0.10 25);
+  --orange: oklch(50% 0.18 55);  --obg: oklch(96% 0.05 55);  --obd: oklch(84% 0.10 55);
+  --cyan:   oklch(40% 0.16 200);
   --sans: 'Inter', -apple-system, sans-serif;
   --mono: 'JetBrains Mono', 'Courier New', monospace;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   --t-fast: 150ms; --t-base: 300ms; --t-slow: 500ms;
   --r-sm: 6px; --r: 10px; --r-lg: 14px;
-  --sh-sm: 0 1px 4px oklch(0% 0 0 / 0.4);
-  --sh:    0 4px 20px oklch(0% 0 0 / 0.5);
-  --sh-lg: 0 24px 56px oklch(0% 0 0 / 0.6);
+  --sh-sm: 0 1px 4px oklch(0% 0 0 / 0.06);
+  --sh:    0 4px 20px oklch(0% 0 0 / 0.08);
+  --sh-lg: 0 8px 32px oklch(0% 0 0 / 0.12);
 }
 body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--text);background:var(--bg);min-height:100vh;-webkit-font-smoothing:antialiased}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
@@ -48,7 +48,7 @@ body.v-market .view-landing{display:none}
 body.v-market .view-market{display:block}
 
 /* ─ Topbar ─ */
-.topbar{height:56px;display:flex;align-items:center;padding:0 clamp(16px,4vw,48px);position:sticky;top:0;z-index:100;border-bottom:1px solid var(--border);background:oklch(8.5% 0.005 275 / 0.92);backdrop-filter:blur(16px)}
+.topbar{height:56px;display:flex;align-items:center;padding:0 clamp(16px,4vw,48px);position:sticky;top:0;z-index:100;border-bottom:1px solid var(--border);background:oklch(97.5% 0.003 275 / 0.92);backdrop-filter:blur(16px)}
 .logo{display:flex;align-items:center;gap:10px;font-weight:600;font-size:14px;letter-spacing:-.02em;color:var(--text);cursor:pointer;text-decoration:none}
 .logo:hover{color:var(--text)}
 .logo-sep{color:var(--border);margin:0 2px;font-weight:300;font-size:16px}
@@ -60,7 +60,7 @@ body.v-market .view-market{display:block}
 .nav-link:hover{color:var(--text);background:var(--surf)}
 .nav-link.accent{color:var(--p)}
 .nav-link.accent:hover{background:var(--pbg)}
-.btn-connect{background:var(--p);color:oklch(8% 0 0);border:none;border-radius:var(--r-sm);padding:6px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);letter-spacing:-.01em;transition:background var(--t-fast),transform var(--t-fast) var(--ease-spring);white-space:nowrap}
+.btn-connect{background:var(--p);color:oklch(99% 0 0);border:none;border-radius:var(--r-sm);padding:6px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);letter-spacing:-.01em;transition:background var(--t-fast),transform var(--t-fast) var(--ease-spring);white-space:nowrap}
 .btn-connect:hover{background:var(--pd);transform:translateY(-1px)}
 .btn-connect:active{transform:translateY(0)}
 .addr-chip{background:var(--surf);color:var(--text2);border:1px solid var(--border);border-radius:var(--r-sm);padding:4px 11px;font-size:11px;font-family:var(--mono);cursor:pointer;user-select:none;transition:background var(--t-fast),border-color var(--t-fast);font-weight:500}
@@ -87,7 +87,7 @@ body.v-market .view-market{display:block}
 .s-wrap{max-width:1120px;margin:0 auto;padding:0 clamp(16px,4vw,48px)}
 
 /* ─ Hero ─ */
-.s-hero{padding:clamp(64px,9vw,110px) 0 clamp(64px,8vw,100px);border-bottom:1px solid var(--border)}
+.s-hero{padding:clamp(64px,9vw,110px) 0 clamp(64px,8vw,100px)}
 .hero-inner{display:grid;grid-template-columns:1fr 460px;gap:64px;align-items:center}
 @media(max-width:900px){.hero-inner{grid-template-columns:1fr;gap:48px}}
 .hero-eyebrow{display:flex;align-items:center;gap:10px;margin-bottom:28px}
@@ -97,8 +97,8 @@ body.v-market .view-market{display:block}
 .hero-sub{font-size:15px;color:var(--text2);line-height:1.75;margin-bottom:36px;max-width:440px}
 .hero-sub strong{color:var(--text);font-weight:600}
 .hero-cta{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-.btn-hero{background:var(--p);color:oklch(8% 0 0);border:none;border-radius:var(--r-sm);padding:11px 28px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);letter-spacing:-.01em;transition:background var(--t-fast),transform var(--t-fast) var(--ease-spring),box-shadow var(--t-base)}
-.btn-hero:hover{background:var(--pd);transform:translateY(-1px);box-shadow:0 8px 24px oklch(52% 0.22 315 / 0.35)}
+.btn-hero{background:var(--p);color:oklch(99% 0 0);border:none;border-radius:var(--r-sm);padding:11px 28px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);letter-spacing:-.01em;transition:background var(--t-fast),transform var(--t-fast) var(--ease-spring),box-shadow var(--t-base)}
+.btn-hero:hover{background:var(--pd);transform:translateY(-1px);box-shadow:0 8px 24px oklch(50% 0.22 315 / 0.25)}
 .btn-hero:active{transform:translateY(0)}
 .hero-hint{font-size:12px;color:var(--muted);font-family:var(--mono)}
 .btn-hero-ghost{background:transparent;color:var(--text2);border:1px solid var(--border);border-radius:var(--r-sm);padding:11px 20px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);letter-spacing:-.01em;transition:border-color var(--t-fast),color var(--t-fast),transform var(--t-fast) var(--ease-spring)}
@@ -127,13 +127,34 @@ body.v-market .view-market{display:block}
 
 /* ─ Features strip ─ */
 .s-features{border-bottom:1px solid var(--border)}
+.feat-intro{padding:0 0 clamp(28px,4vw,44px);border-bottom:1px solid var(--border)}
+.feat-intro-label{font-size:10px;font-weight:700;font-family:var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:14px}
+.feat-intro-title{font-size:clamp(24px,3vw,36px);font-weight:700;letter-spacing:-.03em;color:var(--text);line-height:1.1;max-width:560px}
 .feat-strip{display:grid;grid-template-columns:repeat(3,1fr);border-left:1px solid var(--border)}
 @media(max-width:640px){.feat-strip{grid-template-columns:1fr}}
-.feat-block{padding:32px 36px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);transition:background var(--t-base)}
+.feat-block{padding:40px 44px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);transition:background var(--t-base)}
 .feat-block:hover{background:var(--surf)}
-.feat-num{font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;font-family:var(--mono);margin-bottom:12px;display:block}
-.feat-heading{font-size:15px;font-weight:600;color:var(--text);margin-bottom:8px;letter-spacing:-.01em}
-.feat-desc{font-size:13px;color:var(--text2);line-height:1.7}
+.feat-num{font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;font-family:var(--mono);margin-bottom:14px;display:block}
+.feat-heading{font-size:17px;font-weight:700;color:var(--text);margin-bottom:10px;letter-spacing:-.02em}
+.feat-desc{font-size:13px;color:var(--text2);line-height:1.75}
+
+/* ─ Provider Market CTA (landing) ─ */
+.s-mkt-cta{background:var(--pbg);border-top:1px solid var(--pbd);border-bottom:1px solid var(--pbd);padding:clamp(64px,8vw,100px) 0}
+.mkt-cta-wrap{display:grid;grid-template-columns:1fr 1fr;gap:64px;align-items:center}
+@media(max-width:780px){.mkt-cta-wrap{grid-template-columns:1fr;gap:40px}}
+.mkt-cta-eyebrow{font-size:10px;font-weight:700;font-family:var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--p);display:block;margin-bottom:16px}
+.mkt-cta-title{font-size:clamp(28px,4vw,48px);font-weight:700;letter-spacing:-.04em;color:var(--text);line-height:1.08;margin-bottom:16px}
+.mkt-cta-sub{font-size:14px;color:var(--text2);line-height:1.75;max-width:420px;margin-bottom:32px}
+.btn-mkt{display:inline-flex;align-items:center;gap:8px;background:var(--p);color:oklch(99% 0 0);border:none;border-radius:var(--r-sm);padding:13px 32px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sans);letter-spacing:-.01em;transition:background var(--t-fast),transform var(--t-fast) var(--ease-spring),box-shadow var(--t-base);white-space:nowrap}
+.btn-mkt:hover{background:var(--pd);transform:translateY(-2px);box-shadow:0 10px 32px oklch(50% 0.22 315 / 0.30)}
+.btn-mkt:active{transform:translateY(0)}
+.mkt-cta-right{display:flex;flex-direction:column;gap:2px}
+.mkt-stat-row{display:flex;flex-direction:column;gap:24px}
+.mkt-stat{display:flex;align-items:baseline;gap:10px;padding:20px 24px;background:var(--surf);border:1px solid var(--pbd);border-radius:var(--r-lg)}
+.mkt-stat-n{font-size:32px;font-weight:700;font-family:var(--mono);color:var(--p);letter-spacing:-.04em;line-height:1}
+.mkt-stat-text{display:flex;flex-direction:column;gap:3px}
+.mkt-stat-label{font-size:13px;font-weight:600;color:var(--text);letter-spacing:-.01em}
+.mkt-stat-desc{font-size:11px;color:var(--muted);font-family:var(--mono)}
 
 /* ─ Footer ─ */
 .s-footer{border-top:1px solid var(--border);padding:32px 0}
@@ -171,12 +192,12 @@ body.v-market .view-market{display:block}
 .pv-item-actions{display:flex;gap:6px;align-items:center;flex-shrink:0}
 .pv-item-body{display:none;border-top:1px solid var(--border)}
 .pv-item.open .pv-item-body{display:block}
-.pv-detail-section{padding:14px 18px;border-bottom:1px solid var(--border);background:oklch(7% 0.004 275)}
+.pv-detail-section{padding:14px 18px;border-bottom:1px solid var(--border);background:var(--surf2)}
 .pv-detail-row{display:flex;gap:10px;margin-bottom:5px}
 .pv-detail-row:last-child{margin-bottom:0}
 .pv-detail-key{font-size:10px;font-family:var(--mono);color:var(--muted);width:80px;flex-shrink:0;padding-top:1px;letter-spacing:.04em}
 .pv-detail-val{font-size:11px;font-family:var(--mono);color:var(--text2);word-break:break-all;line-height:1.6}
-.pv-connect-prompt{padding:18px;text-align:center;font-size:11px;font-family:var(--mono);color:var(--muted);background:oklch(7% 0.004 275)}
+.pv-connect-prompt{padding:18px;text-align:center;font-size:11px;font-family:var(--mono);color:var(--muted);background:var(--surf2)}
 
 /* ─ Card ─ */
 .card{background:var(--surf);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;margin-bottom:12px;transition:border-color var(--t-base),box-shadow var(--t-base)}
@@ -196,13 +217,13 @@ body.v-market .view-market{display:block}
 .badge.red{background:var(--rbg);color:var(--red);border-color:var(--rbd)}
 .badge.purple{background:var(--pbg);color:var(--p);border-color:var(--pbd)}
 .badge.orange{background:var(--obg);color:var(--orange);border-color:var(--obd)}
-.badge.blue{background:oklch(12% 0.06 250);color:oklch(72% 0.18 250);border-color:oklch(24% 0.12 250)}
+.badge.blue{background:oklch(94% 0.05 250);color:oklch(36% 0.18 250);border-color:oklch(78% 0.12 250)}
 .badge.gray{background:var(--surf2);color:var(--text2);border-color:var(--border)}
 
 /* ─ Buttons ─ */
 .btn{display:inline-flex;align-items:center;gap:5px;border:none;border-radius:var(--r-sm);padding:6px 13px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--sans);transition:background var(--t-fast),border-color var(--t-fast),transform var(--t-fast) var(--ease-spring);letter-spacing:-.01em;white-space:nowrap}
 .btn:focus-visible{outline:2px solid var(--p);outline-offset:2px}
-.btn-prim{background:var(--p);color:oklch(8% 0 0);border:1px solid transparent}
+.btn-prim{background:var(--p);color:oklch(99% 0 0);border:1px solid transparent}
 .btn-prim:not(:disabled):hover{background:var(--pd);transform:translateY(-1px)}
 .btn-prim:active{transform:translateY(0)}
 .btn-ghost{background:transparent;color:var(--text2);border:1px solid var(--border)}
@@ -214,7 +235,7 @@ body.v-market .view-market{display:block}
 .btn:disabled{opacity:.3;cursor:not-allowed}
 
 /* ─ Inputs ─ */
-.ia-input{padding:6px 10px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:12px;font-family:var(--mono);outline:none;transition:border-color var(--t-fast),box-shadow var(--t-fast);min-width:0;background:oklch(6% 0.004 275);color:var(--text);font-variant-numeric:tabular-nums}
+.ia-input{padding:6px 10px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:12px;font-family:var(--mono);outline:none;transition:border-color var(--t-fast),box-shadow var(--t-fast);min-width:0;background:var(--surf);color:var(--text);font-variant-numeric:tabular-nums}
 .ia-input:focus{border-color:var(--p);box-shadow:0 0 0 3px var(--pbg)}
 .ia-unit{font-size:11px;color:var(--muted);white-space:nowrap;flex-shrink:0;font-family:var(--mono)}
 
@@ -245,7 +266,7 @@ body.v-market .view-market{display:block}
 .tag.running{background:var(--gbg);color:var(--green);border-color:var(--gbd)}
 .tag.stopped{background:var(--surf2);color:var(--muted);border-color:var(--border)}
 .tag.starting{background:var(--obg);color:var(--orange);border-color:var(--obd)}
-.tag.archived{background:oklch(12% 0.06 250);color:oklch(72% 0.18 250);border-color:oklch(24% 0.12 250)}
+.tag.archived{background:oklch(94% 0.05 250);color:oklch(36% 0.18 250);border-color:oklch(78% 0.12 250)}
 .tag.error{background:var(--rbg);color:var(--red);border-color:var(--rbd)}
 .tag-dot{width:5px;height:5px;border-radius:50%;background:currentColor;flex-shrink:0}
 
@@ -257,7 +278,7 @@ body.v-market .view-market{display:block}
 .modal-title{font-size:15px;font-weight:700;margin-bottom:20px;letter-spacing:-.02em;color:var(--text)}
 .field{margin-bottom:14px}
 .field label{display:block;font-size:10px;font-weight:700;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.08em;font-family:var(--mono)}
-.field input,.field select{width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px;font-family:var(--sans);outline:none;transition:border-color var(--t-fast),box-shadow var(--t-fast);background:oklch(6% 0.004 275);color:var(--text)}
+.field input,.field select{width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px;font-family:var(--sans);outline:none;transition:border-color var(--t-fast),box-shadow var(--t-fast);background:var(--surf);color:var(--text)}
 .field input:focus,.field select:focus{border-color:var(--p);box-shadow:0 0 0 3px var(--pbg)}
 .field .hint{font-size:11px;color:var(--muted);margin-top:4px;font-family:var(--mono)}
 .modal-btns{display:flex;gap:8px;margin-top:20px;justify-content:flex-end}
@@ -266,11 +287,11 @@ body.v-market .view-market{display:block}
 .empty{color:var(--muted);font-size:13px;padding:32px 20px;text-align:center;line-height:1.6;font-family:var(--mono)}
 .err{color:var(--red);font-size:11px;margin-top:4px;font-family:var(--mono)}
 .loading{color:var(--muted);font-size:11px;margin-top:6px;font-family:var(--mono)}
-.code-block{background:oklch(6% 0.004 275);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;font-family:var(--mono);font-size:12px;word-break:break-all;user-select:all;cursor:text;line-height:1.7;color:var(--text)}
+.code-block{background:var(--surf2);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;font-family:var(--mono);font-size:12px;word-break:break-all;user-select:all;cursor:text;line-height:1.7;color:var(--text)}
 .tip{position:relative;display:inline-flex;align-items:center}
 .tip-icon{width:13px;height:13px;border-radius:50%;background:var(--surf3);color:var(--text2);font-size:9px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;cursor:default;flex-shrink:0;margin-left:4px;line-height:1}
-.tip-box{position:absolute;bottom:calc(100% + 7px);left:50%;transform:translateX(-50%);background:oklch(16% 0.008 275);border:1px solid var(--border);color:var(--text2);font-size:11px;line-height:1.6;padding:9px 12px;border-radius:var(--r-sm);width:220px;pointer-events:none;opacity:0;transition:opacity var(--t-fast);z-index:500;white-space:normal;box-shadow:var(--sh-lg);font-family:var(--sans);font-weight:400}
-.tip-box::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:oklch(16% 0.008 275)}
+.tip-box{position:absolute;bottom:calc(100% + 7px);left:50%;transform:translateX(-50%);background:oklch(18% 0.005 275);border:1px solid oklch(30% 0.005 275);color:oklch(88% 0 0);font-size:11px;line-height:1.6;padding:9px 12px;border-radius:var(--r-sm);width:220px;pointer-events:none;opacity:0;transition:opacity var(--t-fast);z-index:500;white-space:normal;box-shadow:var(--sh-lg);font-family:var(--sans);font-weight:400}
+.tip-box::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:oklch(18% 0.005 275)}
 .tip:hover .tip-box{opacity:1}
 #toast{position:fixed;bottom:24px;right:24px;z-index:999;display:flex;flex-direction:column;gap:8px;pointer-events:none}
 .toast{background:var(--surf2);color:var(--text);border:1px solid var(--border);border-radius:var(--r);padding:10px 16px;font-size:12px;min-width:220px;max-width:360px;box-shadow:var(--sh-lg);animation:slidein var(--t-base) var(--ease-out);pointer-events:auto;line-height:1.5;font-weight:500;font-family:var(--mono)}
@@ -344,7 +365,7 @@ body.v-market .view-market{display:block}
 .pz-sub{font-size:13px;color:var(--text2);line-height:1.7;max-width:600px}
 .pz-card{background:var(--surf);border:1px solid var(--pbd);border-radius:var(--r-lg);padding:28px 32px}
 .pz-req-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:20px}
-.pz-req-item{background:oklch(14% 0.10 315 / 0.25);border:1px solid var(--pbd);border-radius:var(--r-sm);padding:12px 14px}
+.pz-req-item{background:var(--pbg);border:1px solid var(--pbd);border-radius:var(--r-sm);padding:12px 14px}
 .pz-req-label{font-size:9px;font-weight:700;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--p);margin-bottom:5px}
 .pz-req-val{font-size:12px;font-family:var(--mono);color:var(--text2);line-height:1.4}
 </style>
@@ -394,17 +415,10 @@ body.v-market .view-market{display:block}
         <div>
           <div class="hero-eyebrow">
             <span class="eyebrow-tag"><span class="dot" style="width:5px;height:5px;box-shadow:none"></span>Powered by TEE &amp; Tapp</span>
-            <span class="eyebrow-tag" style="background:oklch(12% 0.05 250);border-color:oklch(24% 0.10 250);color:oklch(70% 0.15 250)">Powered by Daytona</span>
+            <span class="eyebrow-tag" style="background:oklch(94% 0.05 250);border-color:oklch(78% 0.10 250);color:oklch(36% 0.18 250)">Powered by Daytona</span>
           </div>
           <h1 class="hero-title">Vibe code in<br><mark>hardware-sealed</mark><br>isolation.</h1>
           <p class="hero-sub">Your code runs inside a <strong>TDX hardware enclave</strong>. The server operator cannot read your files, outputs, or secrets — not even 0G can.</p>
-          <div class="hero-cta">
-            <button class="btn-hero" id="ctaBtn" onclick="connectWallet()">Connect Wallet</button>
-            <button class="btn-hero-ghost" onclick="showView('market')">Provider Market →</button>
-          </div>
-          <div style="margin-top:10px">
-            <span class="hero-hint" id="ctaHint">no account · just a web3 wallet</span>
-          </div>
         </div>
         <div class="terminal">
           <div class="terminal-bar">
@@ -421,6 +435,12 @@ body.v-market .view-market{display:block}
 
   <!-- Features -->
   <section class="s-features">
+    <div class="s-wrap">
+      <div class="feat-intro">
+        <span class="feat-intro-label">Why 0G Sandbox</span>
+        <div class="feat-intro-title">Code freely. Nothing leaks — not to the server, not to the operator.</div>
+      </div>
+    </div>
     <div class="feat-strip">
       <div class="feat-block">
         <span class="feat-num">01 — isolation</span>
@@ -436,6 +456,46 @@ body.v-market .view-market{display:block}
         <span class="feat-num">03 — billing</span>
         <div class="feat-heading">Per-second metering</div>
         <div class="feat-desc">Stop a sandbox, billing stops immediately. EIP-712 vouchers are settled on-chain. No idle waste, no hidden fees.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Provider Market CTA -->
+  <section class="s-mkt-cta">
+    <div class="s-wrap">
+      <div class="mkt-cta-wrap">
+        <div>
+          <span class="mkt-cta-eyebrow">Provider Market</span>
+          <h2 class="mkt-cta-title">Find a provider.<br>Start in seconds.</h2>
+          <p class="mkt-cta-sub">Browse on-chain registered providers, compare pricing, and create your first sandbox — directly from this page. No sign-up, just your web3 wallet.</p>
+          <button class="btn-mkt" onclick="showView('market')">
+            Open Provider Market
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+        <div class="mkt-stat-row">
+          <div class="mkt-stat">
+            <div class="mkt-stat-n">TEE</div>
+            <div class="mkt-stat-text">
+              <div class="mkt-stat-label">Hardware-attested providers</div>
+              <div class="mkt-stat-desc">vouchers signed inside TDX enclave</div>
+            </div>
+          </div>
+          <div class="mkt-stat">
+            <div class="mkt-stat-n">0G</div>
+            <div class="mkt-stat-text">
+              <div class="mkt-stat-label">Pay-as-you-go in 0G token</div>
+              <div class="mkt-stat-desc">stop anytime · billing stops instantly</div>
+            </div>
+          </div>
+          <div class="mkt-stat">
+            <div class="mkt-stat-n">AI</div>
+            <div class="mkt-stat-text">
+              <div class="mkt-stat-label">Claude Code skill included</div>
+              <div class="mkt-stat-desc">deposit · ack · create — all in one conversation</div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -459,38 +519,34 @@ body.v-market .view-market{display:block}
             </div>
             <div class="skill-step">
               <div class="skill-step-n">03</div>
-              <div class="skill-step-t">Provide your broker URL (or configure network manually) — Claude fetches chain config and discovers providers automatically</div>
+              <div class="skill-step-t">Provide your broker URL — Claude fetches chain config and discovers providers automatically</div>
             </div>
             <div class="skill-step">
               <div class="skill-step-n">04</div>
-              <div class="skill-step-t">Claude deposits, creates the sandbox, and hands you SSH access</div>
+              <div class="skill-step-t">Claude deposits, creates the sandbox, and hands you SSH credentials</div>
             </div>
           </div>
         </div>
         <div class="skill-conv">
           <div class="skill-conv-bar">
             <div class="skill-conv-dot"></div>
-            <div class="skill-conv-title">claude — 0g-sandbox</div>
+            <div class="skill-conv-title">sandbox — connected</div>
           </div>
-          <span class="sk-u">&gt; I want a private sandbox on 0G</span><br>
+          <span class="sk-d">  # Step 1 — get SSH credentials</span><br>
           <span class="sk-d">&nbsp;</span><br>
-          <span class="sk-d">  ✦ loading: </span><span class="sk-s">0g-private-sandbox</span><br>
-          <span class="sk-ok">  ✓</span><span class="sk-d"> skill loaded</span><br>
+          <span class="sk-d">  $ </span><span class="sk-c">go run ./cmd/user/ ssh-access \</span><br>
+          <span class="sk-c">&nbsp;&nbsp;&nbsp;&nbsp;--api $API --id $SANDBOX_ID</span><br>
           <span class="sk-d">&nbsp;</span><br>
-          <span class="sk-d">  Before we begin, a few details.</span><br>
-          <span class="sk-d">  Do you have a broker URL?</span><br>
+          <span class="sk-ok">  ✓</span><span class="sk-d"> ssh -p </span><span class="sk-v">2222</span><span class="sk-d"> &lt;token&gt;@private-sandbox.0g.ai</span><br>
+          <span class="sk-d">  Password: </span><span class="sk-v">e4f9…b3a1</span><br>
           <span class="sk-d">&nbsp;</span><br>
-          <span class="sk-u">&gt; yes&nbsp;&nbsp;https://47.236.111.154:8080</span><br>
+          <span class="sk-d">  # Step 2 — connect</span><br>
           <span class="sk-d">&nbsp;</span><br>
-          <span class="sk-d">  $ curl $API/api/info</span><br>
-          <span class="sk-ok">  ✓</span><span class="sk-d"> contract  0x2024eB0…4316</span><br>
-          <span class="sk-ok">  ✓</span><span class="sk-d"> network   0G Galileo (16602)</span><br>
+          <span class="sk-d">  $ </span><span class="sk-c">ssh -p 2222 e4f9…b3a1@private-sandbox.0g.ai</span><br>
           <span class="sk-d">&nbsp;</span><br>
-          <span class="sk-ok">  ✓</span><span class="sk-d"> 0xB831… · 0.06 0G create · 0.001 0G/CPU/sec</span><br>
-          <span class="sk-ok">  ✓</span><span class="sk-d"> sandbox ready  </span><span class="sk-d" style="opacity:.4">3.8s</span><br>
+          <span class="sk-ok">  ✓</span><span class="sk-d"> daytona@sandbox-a1b2c3:~$</span><span style="animation:blink 1.1s step-end infinite;color:var(--green)"> ▊</span><br>
           <span class="sk-d">&nbsp;</span><br>
-          <span class="sk-d">  ssh  </span><span class="sk-c">ssh -p 2222 &lt;token&gt;@private-sandbox.0g.ai</span><br>
-          <span class="sk-u">&gt; <span style="animation:blink 1.1s step-end infinite">▊</span></span>
+          <span class="sk-d">  # token expires in 60 min · re-run ssh-access to refresh</span>
         </div>
       </div>
     </div>
@@ -669,16 +725,23 @@ window.addEventListener('eip6963:announceProvider', e => eip6963Providers.set(e.
 window.dispatchEvent(new Event('eip6963:requestProvider'));
 
 // ── View routing ──────────────────────────────────────────────────────────────
-function showView(v) {
+function showView(v, pushHistory=true) {
   document.body.classList.toggle('v-market', v === 'market');
-  history.replaceState(null, '', v === 'market' ? '#market' : '#');
+  if (pushHistory) history.pushState({ view: v }, '', v === 'market' ? '#market' : '#');
   window.scrollTo({ top: 0, behavior: 'smooth' });
   if (v === 'market') loadProviders();
 }
 
+window.addEventListener('popstate', e => {
+  const v = (e.state && e.state.view) ? e.state.view : (window.location.hash === '#market' ? 'market' : 'landing');
+  showView(v, false);
+});
+
 window.onload = async () => {
   // Apply hash-based view on load
-  if (window.location.hash === '#market') document.body.classList.add('v-market');
+  const initView = window.location.hash === '#market' ? 'market' : 'landing';
+  if (initView === 'market') document.body.classList.add('v-market');
+  history.replaceState({ view: initView }, '', window.location.hash || '#');
 
   info = await fetch('/api/info').then(r => r.json()).catch(() => null);
   if (info) {
@@ -819,10 +882,6 @@ async function initWallet(addr, prov) {
   document.querySelector('.topbar-right').prepend(chip);
   document.getElementById('popAddr').textContent = addr;
 
-  const ctaBtn = document.getElementById('ctaBtn');
-  ctaBtn.textContent = 'Provider Market →';
-  ctaBtn.onclick = () => showView('market');
-  document.getElementById('ctaHint').textContent = `connected · ${shortAddr(addr)}`;
 
   if (_activeProvider && _activeProvider !== prov) try { _activeProvider.removeListener('accountsChanged',_onAccountsChanged); } catch(_){}
   if (_activeProvider !== prov) { prov.on('accountsChanged',_onAccountsChanged); _activeProvider=prov; }
@@ -854,10 +913,6 @@ async function logout() {
   document.getElementById('walletPopover').classList.remove('open');
   document.getElementById('popAddr').textContent='';
   document.getElementById('popBalance').textContent='—';
-  const ctaBtn = document.getElementById('ctaBtn');
-  ctaBtn.textContent = 'Connect Wallet';
-  ctaBtn.onclick = connectWallet;
-  document.getElementById('ctaHint').textContent = 'no account · just a web3 wallet';
   showView('landing');
   loadProviders();
 }
@@ -986,7 +1041,7 @@ async function loadProviders(forceChain=false) {
           <div class="pv-connect-prompt">acknowledge this provider's TEE signer to deposit balance and create sandboxes</div>`;
       } else {
         bodyHTML = `
-          <div class="pv-balance-section" style="background:oklch(7% 0.004 275)">
+          <div class="pv-balance-section">
             <div class="pv-balance-label">balance</div>
             <div class="pv-balance-main">
               <div>
