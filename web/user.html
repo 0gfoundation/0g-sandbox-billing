@@ -507,7 +507,7 @@ async function logout() {
 
 // ── User Data ─────────────────────────────────────────────────────────────────
 async function loadUserData() {
-  if (!walletAddr) return;
+  if (!walletAddr || !_activeProvider) return;
   try {
     const provider = new ethers.BrowserProvider(_activeProvider);
     const nativeBal = await provider.getBalance(walletAddr);
@@ -517,7 +517,7 @@ async function loadUserData() {
 }
 
 async function refreshBalances() {
-  if (!contract || !walletAddr) return;
+  if (!contract || !walletAddr || !_activeProvider) return;
   try {
     const provider = new ethers.BrowserProvider(_activeProvider);
     const nativeBal = await provider.getBalance(walletAddr);
