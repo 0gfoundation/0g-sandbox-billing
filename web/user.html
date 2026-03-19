@@ -12,11 +12,11 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
   color-scheme: light;
-  /* Accent — warm reddish-brown, complements 0G purple logo */
-  --p:   oklch(56% 0.21 350);
-  --pd:  oklch(48% 0.21 350);
-  --pbg: oklch(96% 0.03 350);
-  --pbd: oklch(87% 0.07 350);
+  /* Accent — orchid pink-purple, echoes 0G logo */
+  --p:   oklch(52% 0.22 315);
+  --pd:  oklch(44% 0.22 315);
+  --pbg: oklch(96% 0.04 315);
+  --pbd: oklch(87% 0.09 315);
   /* Light neutrals — paper/ink */
   --text:   oklch(10% 0 0);
   --text2:  oklch(36% 0 0);
@@ -105,7 +105,7 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--text);ba
 .btn-landing:active{transform:translateY(1px)}
 
 /* ─ Content header (authenticated) ─ */
-.content-header{padding:clamp(48px,6vw,72px) 0 36px;border-bottom:1px solid var(--border);margin-bottom:32px}
+.content-header{padding:clamp(48px,6vw,72px) 0 36px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);margin-bottom:32px}
 .content-title{font-family:var(--display);font-size:clamp(26px,3.5vw,44px);font-weight:400;line-height:1.1;letter-spacing:-.01em;color:var(--text);margin-bottom:10px}
 .content-title em{font-style:italic;color:var(--p)}
 .content-sub{font-size:15px;color:var(--text2);line-height:1.7;max-width:480px}
@@ -306,8 +306,8 @@ tbody tr:hover td{background:var(--surf)}
       </div>
     </div>
     <div class="landing-cta">
-      <button class="btn-landing" onclick="connectWallet()">Connect Wallet</button>
-      <span class="landing-hint">No account needed — just a Web3 wallet</span>
+      <button class="btn-landing" id="ctaBtn" onclick="connectWallet()">Connect Wallet</button>
+      <span class="landing-hint" id="ctaHint">No account needed — just a Web3 wallet</span>
     </div>
   </div>
 
@@ -485,8 +485,12 @@ async function initWallet(addr, prov) {
   document.querySelector('.topbar-right').prepend(chip);
   document.getElementById('popAddr').textContent = addr;
 
-  document.getElementById('userNoWallet').style.display='none';
-  document.getElementById('userContent').style.display='';
+  const ctaBtn = document.getElementById('ctaBtn');
+  ctaBtn.textContent = 'Get Started →';
+  ctaBtn.onclick = () => document.getElementById('userContent').scrollIntoView({ behavior:'smooth', block:'start' });
+  document.getElementById('ctaHint').textContent = 'Connected — scroll down to view providers';
+  document.getElementById('userContent').style.display = '';
+  setTimeout(() => document.getElementById('userContent')?.scrollIntoView({ behavior:'smooth', block:'start' }), 120);
 
   if (_activeProvider && _activeProvider !== prov) try { _activeProvider.removeListener('accountsChanged',_onAccountsChanged); } catch(_){}
   if (_activeProvider !== prov) { prov.on('accountsChanged',_onAccountsChanged); _activeProvider=prov; }
@@ -517,8 +521,12 @@ async function logout() {
   document.getElementById('walletPopover').classList.remove('open');
   document.getElementById('popAddr').textContent='';
   document.getElementById('popBalance').textContent='—';
-  document.getElementById('userNoWallet').style.display='';
+  const ctaBtn = document.getElementById('ctaBtn');
+  ctaBtn.textContent = 'Connect Wallet';
+  ctaBtn.onclick = connectWallet;
+  document.getElementById('ctaHint').textContent = 'No account needed — just a Web3 wallet';
   document.getElementById('userContent').style.display='none';
+  window.scrollTo({ top:0, behavior:'smooth' });
 }
 
 // ── User Data ─────────────────────────────────────────────────────────────────
