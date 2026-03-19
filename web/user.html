@@ -7,258 +7,361 @@
 <script src="/static/ethers.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  color-scheme: light;
-  /* Accent — orchid pink-purple, echoes 0G logo */
-  --p:   oklch(52% 0.22 315);
-  --pd:  oklch(44% 0.22 315);
-  --pbg: oklch(96% 0.04 315);
-  --pbd: oklch(87% 0.09 315);
-  /* Light neutrals — paper/ink */
-  --text:   oklch(10% 0 0);
-  --text2:  oklch(36% 0 0);
-  --muted:  oklch(56% 0 0);
-  --border: oklch(88% 0 0);
-  --bg:     oklch(98.5% 0 0);
-  --surf:   oklch(96% 0.005 350);
-  --surf2:  oklch(92% 0.006 350);
-  --surf3:  oklch(87% 0.007 350);
-  /* Semantic — darkened for legibility on light bg */
-  --green: oklch(40% 0.16 145); --gbg: oklch(95.5% 0.04 145); --gbd: oklch(83% 0.10 145);
-  --red:   oklch(43% 0.19 25);  --rbg: oklch(95.5% 0.04 25);  --rbd: oklch(83% 0.10 25);
-  --orange:oklch(49% 0.17 55);  --obg: oklch(95.5% 0.04 55);  --obd: oklch(83% 0.10 55);
-  /* Typography */
+  color-scheme: dark;
+  --p:   oklch(70% 0.20 315);
+  --pd:  oklch(77% 0.17 315);
+  --pbg: oklch(16% 0.09 315);
+  --pbd: oklch(27% 0.13 315);
+  --text:   oklch(93% 0 0);
+  --text2:  oklch(66% 0 0);
+  --muted:  oklch(44% 0 0);
+  --border: oklch(20% 0.006 275);
+  --bg:     oklch(8.5% 0.005 275);
+  --surf:   oklch(12% 0.007 275);
+  --surf2:  oklch(16% 0.008 275);
+  --surf3:  oklch(21% 0.010 275);
+  --green:  oklch(66% 0.18 145); --gbg: oklch(12% 0.06 145); --gbd: oklch(24% 0.12 145);
+  --red:    oklch(64% 0.18 25);  --rbg: oklch(12% 0.06 25);  --rbd: oklch(24% 0.12 25);
+  --orange: oklch(68% 0.16 55);  --obg: oklch(12% 0.06 55);  --obd: oklch(24% 0.12 55);
+  --cyan:   oklch(72% 0.14 200);
   --sans: 'Inter', -apple-system, sans-serif;
   --mono: 'JetBrains Mono', 'Courier New', monospace;
-  --display: 'Instrument Serif', Georgia, serif;
-  /* Motion */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --t-fast: 150ms; --t-base: 300ms; --t-slow: 550ms;
-  /* Radii */
+  --t-fast: 150ms; --t-base: 300ms; --t-slow: 500ms;
   --r-sm: 6px; --r: 10px; --r-lg: 14px;
-  /* Shadows — delicate for light bg */
-  --sh-sm: 0 1px 3px oklch(0% 0 0 / 0.07), 0 1px 2px oklch(0% 0 0 / 0.04);
-  --sh:    0 4px 16px oklch(0% 0 0 / 0.08), 0 1px 4px oklch(0% 0 0 / 0.04);
-  --sh-lg: 0 20px 48px oklch(0% 0 0 / 0.10), 0 4px 12px oklch(0% 0 0 / 0.05);
+  --sh-sm: 0 1px 4px oklch(0% 0 0 / 0.4);
+  --sh:    0 4px 20px oklch(0% 0 0 / 0.5);
+  --sh-lg: 0 24px 56px oklch(0% 0 0 / 0.6);
 }
-body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--text);background:var(--bg);min-height:100vh;-webkit-font-smoothing:antialiased;font-kerning:normal}
+body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--text);background:var(--bg);min-height:100vh;-webkit-font-smoothing:antialiased}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 
-/* ─ Grain overlay ─ */
-#grain{position:fixed;inset:0;pointer-events:none;z-index:9999;opacity:0.032;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)'/%3E%3C/svg%3E")}
+/* ─ View routing ─ */
+.view-landing{display:block}
+.view-market{display:none}
+body.v-market .view-landing{display:none}
+body.v-market .view-market{display:block}
 
 /* ─ Topbar ─ */
-.topbar{background:var(--bg);border-bottom:1px solid var(--border);height:60px;display:flex;align-items:center;padding:0 clamp(16px,4vw,40px);position:sticky;top:0;z-index:100;backdrop-filter:blur(12px);background:oklch(98.5% 0 0 / 0.92)}
-.logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px;letter-spacing:-.02em;color:var(--text)}
-.logo-sub{font-size:12px;color:var(--muted);font-weight:400;margin-left:2px}
-.topbar-right{margin-left:auto;display:flex;align-items:center;gap:8px}
-.chain-tag{display:flex;align-items:center;gap:6px;background:var(--surf);color:var(--text2);border:1px solid var(--border);border-radius:9999px;padding:4px 12px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
-.dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0}
-.btn-connect{background:var(--text);color:var(--bg);border:none;border-radius:var(--r);padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);letter-spacing:-.01em;transition:background var(--t-fast) ease,box-shadow var(--t-fast) ease,transform var(--t-fast) var(--ease-spring)}
-.btn-connect:hover{background:oklch(22% 0 0);box-shadow:0 4px 16px oklch(0% 0 0 / 0.18)}
-.btn-connect:active{transform:translateY(1px)}
-.addr-chip{background:var(--surf);color:var(--text2);border:1px solid var(--border);border-radius:var(--r);padding:5px 12px;font-size:12px;font-family:var(--mono);cursor:pointer;user-select:none;transition:background var(--t-fast),border-color var(--t-fast);font-weight:500}
+.topbar{height:56px;display:flex;align-items:center;padding:0 clamp(16px,4vw,48px);position:sticky;top:0;z-index:100;border-bottom:1px solid var(--border);background:oklch(8.5% 0.005 275 / 0.92);backdrop-filter:blur(16px)}
+.logo{display:flex;align-items:center;gap:10px;font-weight:600;font-size:14px;letter-spacing:-.02em;color:var(--text);cursor:pointer;text-decoration:none}
+.logo:hover{color:var(--text)}
+.logo-sep{color:var(--border);margin:0 2px;font-weight:300;font-size:16px}
+.logo-sub{font-size:11px;color:var(--muted);font-weight:400}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.chain-tag{display:flex;align-items:center;gap:5px;background:var(--surf);color:var(--text2);border:1px solid var(--border);border-radius:9999px;padding:3px 10px;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-family:var(--mono)}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0;box-shadow:0 0 6px var(--green)}
+.nav-link{font-size:12px;font-weight:500;color:var(--text2);cursor:pointer;padding:4px 8px;border-radius:var(--r-sm);transition:color var(--t-fast),background var(--t-fast);white-space:nowrap;border:none;background:none;font-family:var(--sans)}
+.nav-link:hover{color:var(--text);background:var(--surf)}
+.nav-link.accent{color:var(--p)}
+.nav-link.accent:hover{background:var(--pbg)}
+.btn-connect{background:var(--p);color:oklch(8% 0 0);border:none;border-radius:var(--r-sm);padding:6px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);letter-spacing:-.01em;transition:background var(--t-fast),transform var(--t-fast) var(--ease-spring);white-space:nowrap}
+.btn-connect:hover{background:var(--pd);transform:translateY(-1px)}
+.btn-connect:active{transform:translateY(0)}
+.addr-chip{background:var(--surf);color:var(--text2);border:1px solid var(--border);border-radius:var(--r-sm);padding:4px 11px;font-size:11px;font-family:var(--mono);cursor:pointer;user-select:none;transition:background var(--t-fast),border-color var(--t-fast);font-weight:500}
 .addr-chip:hover{background:var(--surf2);border-color:var(--surf3)}
 
 /* ─ Wallet Popover ─ */
-.wallet-popover{position:fixed;top:64px;right:clamp(12px,3vw,24px);width:264px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-lg);z-index:200;overflow:hidden;display:none}
+.wallet-popover{position:fixed;top:60px;right:clamp(12px,3vw,24px);width:264px;background:var(--surf);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-lg);z-index:200;overflow:hidden;display:none}
 .wallet-popover.open{display:block;animation:fadeDown var(--t-base) var(--ease-out)}
 @keyframes fadeDown{from{transform:translateY(-6px);opacity:0}to{transform:translateY(0);opacity:1}}
-.wp-head{padding:14px 16px;border-bottom:1px solid var(--border);background:var(--surf)}
-.wp-label{font-size:10px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.07em;font-weight:600}
-.wp-addr{font-family:var(--mono);font-size:11.5px;color:var(--text2);word-break:break-all;line-height:1.6}
+.wp-head{padding:14px 16px;border-bottom:1px solid var(--border);background:var(--surf2)}
+.wp-label{font-size:10px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;font-family:var(--mono)}
+.wp-addr{font-family:var(--mono);font-size:11px;color:var(--text2);word-break:break-all;line-height:1.7}
 .wp-body{padding:12px 16px}
 .wp-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
-.wp-k{font-size:12px;color:var(--muted)}
-.wp-v{font-size:13px;font-weight:600;font-family:var(--mono);color:var(--text);font-variant-numeric:tabular-nums}
+.wp-k{font-size:11px;color:var(--muted);font-family:var(--mono)}
+.wp-v{font-size:12px;font-weight:600;font-family:var(--mono);color:var(--text);font-variant-numeric:tabular-nums}
 .wp-actions{display:flex;gap:6px;margin-top:12px}
-.wp-btn{flex:1;padding:7px 0;border-radius:var(--r-sm);font-size:12px;font-weight:500;cursor:pointer;font-family:var(--sans);border:1px solid var(--border);background:var(--surf);color:var(--text2);transition:background var(--t-fast)}
-.wp-btn:hover{background:var(--surf2)}
+.wp-btn{flex:1;padding:6px 0;border-radius:var(--r-sm);font-size:11px;font-weight:500;cursor:pointer;font-family:var(--sans);border:1px solid var(--border);background:var(--surf2);color:var(--text2);transition:background var(--t-fast)}
+.wp-btn:hover{background:var(--surf3)}
 .wp-btn.danger{border-color:var(--rbd);color:var(--red)}
 .wp-btn.danger:hover{background:var(--rbg)}
 
-/* ─ Page ─ */
-.page{max-width:1100px;margin:0 auto;padding:clamp(24px,4vw,40px) clamp(16px,4vw,40px) 80px;animation:pageIn var(--t-slow) var(--ease-out)}
-@keyframes pageIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+/* ─ Section layout ─ */
+.s-wrap{max-width:1120px;margin:0 auto;padding:0 clamp(16px,4vw,48px)}
 
-/* ─ Landing ─ */
-.landing{padding:clamp(72px,10vw,120px) 0 clamp(80px,10vw,120px);max-width:780px}
-.lt-kicker{display:block;font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.12em;text-transform:uppercase;margin-bottom:24px}
-.landing-title{font-family:var(--display);font-size:clamp(40px,5.5vw,72px);font-weight:400;line-height:1.08;letter-spacing:-.01em;color:var(--text);margin-bottom:28px}
-.landing-title em{font-style:italic;color:var(--p)}
-.landing-sub{font-size:16px;color:var(--text2);line-height:1.75;margin-bottom:52px;max-width:480px}
-.landing-sub strong{color:var(--text);font-weight:600}
-.lf-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-bottom:52px;background:var(--border);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden}
-.lf-col{padding:24px 22px;background:var(--surf);transition:background var(--t-base)}
-.lf-col:hover{background:var(--surf2)}
-.lf-num{font-size:32px;font-weight:700;font-family:var(--mono);color:oklch(90% 0.025 350);letter-spacing:-.03em;display:block;margin-bottom:16px;line-height:1}
-.lf-text-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
-.lf-text-desc{font-size:12px;color:var(--muted);line-height:1.65}
-.landing-cta{display:flex;align-items:center;gap:16px}
-.landing-hint{font-size:12px;color:var(--muted)}
-.btn-landing{background:var(--text);color:var(--bg);border:none;border-radius:var(--r);padding:13px 36px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sans);letter-spacing:-.01em;transition:background var(--t-fast) ease,box-shadow var(--t-base) ease,transform var(--t-fast) var(--ease-spring)}
-.btn-landing:hover{background:oklch(22% 0 0);box-shadow:0 8px 28px oklch(0% 0 0 / 0.16)}
-.btn-landing:active{transform:translateY(1px)}
+/* ─ Hero ─ */
+.s-hero{padding:clamp(64px,9vw,110px) 0 clamp(64px,8vw,100px);border-bottom:1px solid var(--border)}
+.hero-inner{display:grid;grid-template-columns:1fr 460px;gap:64px;align-items:center}
+@media(max-width:900px){.hero-inner{grid-template-columns:1fr;gap:48px}}
+.hero-eyebrow{display:flex;align-items:center;gap:10px;margin-bottom:28px}
+.eyebrow-tag{display:inline-flex;align-items:center;gap:6px;background:var(--pbg);border:1px solid var(--pbd);border-radius:9999px;padding:3px 12px;font-size:11px;font-weight:600;color:var(--p);letter-spacing:.04em;font-family:var(--mono)}
+.hero-title{font-size:clamp(36px,5vw,62px);font-weight:700;line-height:1.08;letter-spacing:-.03em;color:var(--text);margin-bottom:20px}
+.hero-title mark{background:none;color:var(--p)}
+.hero-sub{font-size:15px;color:var(--text2);line-height:1.75;margin-bottom:36px;max-width:440px}
+.hero-sub strong{color:var(--text);font-weight:600}
+.hero-cta{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.btn-hero{background:var(--p);color:oklch(8% 0 0);border:none;border-radius:var(--r-sm);padding:11px 28px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);letter-spacing:-.01em;transition:background var(--t-fast),transform var(--t-fast) var(--ease-spring),box-shadow var(--t-base)}
+.btn-hero:hover{background:var(--pd);transform:translateY(-1px);box-shadow:0 8px 24px oklch(52% 0.22 315 / 0.35)}
+.btn-hero:active{transform:translateY(0)}
+.hero-hint{font-size:12px;color:var(--muted);font-family:var(--mono)}
+.btn-hero-ghost{background:transparent;color:var(--text2);border:1px solid var(--border);border-radius:var(--r-sm);padding:11px 20px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);letter-spacing:-.01em;transition:border-color var(--t-fast),color var(--t-fast),transform var(--t-fast) var(--ease-spring)}
+.btn-hero-ghost:hover{border-color:var(--surf3);color:var(--text);transform:translateY(-1px)}
 
-/* ─ Content header (authenticated) ─ */
-.content-header{padding:clamp(48px,6vw,72px) 0 36px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);margin-bottom:32px}
-.content-title{font-family:var(--display);font-size:clamp(26px,3.5vw,44px);font-weight:400;line-height:1.1;letter-spacing:-.01em;color:var(--text);margin-bottom:10px}
-.content-title em{font-style:italic;color:var(--p)}
-.content-sub{font-size:15px;color:var(--text2);line-height:1.7;max-width:480px}
+/* ─ Terminal ─ */
+.terminal{background:oklch(5.5% 0.004 275);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;font-family:var(--mono);font-size:12.5px;box-shadow:var(--sh-lg)}
+.terminal-bar{background:oklch(10% 0.006 275);border-bottom:1px solid var(--border);padding:9px 14px;display:flex;align-items:center;gap:6px}
+.tb-dot{width:11px;height:11px;border-radius:50%}
+.tb-red{background:#ff5f57}.tb-yellow{background:#ffbd2e}.tb-green{background:#28c840}
+.tb-title{font-size:11px;color:var(--muted);margin:0 auto;letter-spacing:.02em}
+.terminal-body{padding:16px 20px;line-height:1.85;color:var(--text2);min-height:240px;max-height:360px;overflow-y:auto;scroll-behavior:smooth}
+.tl{display:block}
+.tl-user{color:var(--text);margin-bottom:4px}
+.tc-prompt{color:var(--p);font-weight:600}
+.tc-user{color:var(--text)}
+.tc-skill{color:var(--p);font-weight:500}
+.tc-ok{color:var(--green);font-weight:500}
+.tc-dim{color:var(--muted)}
+.tc-val{color:var(--cyan)}
+.tc-key{color:var(--muted);display:inline-block;min-width:72px}
+.tc-cmd{color:var(--text)}
+@keyframes lineIn{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+.cursor{animation:blink 1.1s step-end infinite;color:var(--text)}
+
+/* ─ Features strip ─ */
+.s-features{border-bottom:1px solid var(--border)}
+.feat-strip{display:grid;grid-template-columns:repeat(3,1fr);border-left:1px solid var(--border)}
+@media(max-width:640px){.feat-strip{grid-template-columns:1fr}}
+.feat-block{padding:32px 36px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);transition:background var(--t-base)}
+.feat-block:hover{background:var(--surf)}
+.feat-num{font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;font-family:var(--mono);margin-bottom:12px;display:block}
+.feat-heading{font-size:15px;font-weight:600;color:var(--text);margin-bottom:8px;letter-spacing:-.01em}
+.feat-desc{font-size:13px;color:var(--text2);line-height:1.7}
+
+/* ─ Footer ─ */
+.s-footer{border-top:1px solid var(--border);padding:32px 0}
+.footer-inner{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.footer-left{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+.footer-copy{font-size:12px;color:var(--muted);font-family:var(--mono)}
+.footer-link{font-size:12px;color:var(--text2);font-family:var(--mono);text-decoration:none;transition:color var(--t-fast)}
+.footer-link:hover{color:var(--p)}
+.footer-right{display:flex;align-items:center;gap:8px}
+
+/* ─ Market view ─ */
+.market-header{padding:clamp(40px,5vw,64px) 0 32px;border-bottom:1px solid var(--border)}
+.market-title{font-size:clamp(22px,3vw,32px);font-weight:700;letter-spacing:-.03em;color:var(--text);margin-bottom:6px}
+.market-sub{font-size:13px;color:var(--muted);font-family:var(--mono)}
+.market-body{padding:clamp(32px,4vw,56px) 0}
+
+/* ─ Section layout (market) ─ */
+.section-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:24px;flex-wrap:wrap}
+.section-title{font-size:18px;font-weight:700;letter-spacing:-.02em;color:var(--text)}
+.section-sub{font-size:12px;color:var(--muted);font-family:var(--mono)}
+
+/* ─ Provider list item (collapsible) ─ */
+.pv-item{border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;margin-bottom:8px;transition:border-color var(--t-base)}
+.pv-item:hover{border-color:var(--surf3)}
+.pv-item.pv-acknowledged{border-color:var(--gbd)}
+.pv-item-head{padding:14px 18px;display:flex;align-items:center;gap:12px;cursor:pointer;background:var(--surf);transition:background var(--t-fast);user-select:none}
+.pv-item-head:hover{background:var(--surf2)}
+.pv-expand-icon{color:var(--muted);font-size:13px;transition:transform var(--t-base) var(--ease-out);flex-shrink:0;width:14px;text-align:center;line-height:1;font-family:var(--mono)}
+.pv-item.open .pv-expand-icon{transform:rotate(90deg)}
+.pv-item-meta{flex:1;min-width:0}
+.pv-item-top{display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap}
+.pv-pricing-chips{display:flex;gap:16px;flex-wrap:wrap}
+.pv-chip{font-size:11px;font-family:var(--mono);color:var(--muted)}
+.pv-chip span{color:var(--text2)}
+.pv-item-actions{display:flex;gap:6px;align-items:center;flex-shrink:0}
+.pv-item-body{display:none;border-top:1px solid var(--border)}
+.pv-item.open .pv-item-body{display:block}
+.pv-detail-section{padding:14px 18px;border-bottom:1px solid var(--border);background:oklch(7% 0.004 275)}
+.pv-detail-row{display:flex;gap:10px;margin-bottom:5px}
+.pv-detail-row:last-child{margin-bottom:0}
+.pv-detail-key{font-size:10px;font-family:var(--mono);color:var(--muted);width:80px;flex-shrink:0;padding-top:1px;letter-spacing:.04em}
+.pv-detail-val{font-size:11px;font-family:var(--mono);color:var(--text2);word-break:break-all;line-height:1.6}
+.pv-connect-prompt{padding:18px;text-align:center;font-size:11px;font-family:var(--mono);color:var(--muted);background:oklch(7% 0.004 275)}
 
 /* ─ Card ─ */
-.card{background:var(--bg);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;margin-bottom:16px;transition:border-color var(--t-base),box-shadow var(--t-base),transform var(--t-base) var(--ease-out)}
-.card:hover{border-color:var(--surf3);box-shadow:var(--sh);transform:translateY(-2px)}
-.pv-subscribed{border-color:var(--gbd)!important;box-shadow:inset 3px 0 0 var(--green)}
-.card-head{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--surf)}
-.card-title{font-size:12px;font-weight:700;color:var(--text);letter-spacing:.05em;text-transform:uppercase}
-.card-meta{font-size:12px;color:var(--muted)}
-.card-body{padding:20px}
+.card{background:var(--surf);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;margin-bottom:12px;transition:border-color var(--t-base),box-shadow var(--t-base)}
+.pv-subscribed{border-color:var(--gbd)!important;box-shadow:0 0 0 1px var(--gbd) inset}
+.card-head{padding:13px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--surf2)}
+.card-body{padding:18px}
 
 /* ─ Info rows ─ */
-.info-row{display:flex;justify-content:space-between;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--border);gap:12px}
+.info-row{display:flex;justify-content:space-between;align-items:baseline;padding:8px 0;border-bottom:1px solid var(--border);gap:12px}
 .info-row:last-child{border-bottom:none}
-.ik{font-size:12px;color:var(--muted);font-weight:500;flex-shrink:0}
+.ik{font-size:11px;color:var(--muted);font-weight:500;font-family:var(--mono);flex-shrink:0}
 .iv{font-family:var(--mono);font-size:12px;text-align:right;word-break:break-all;color:var(--text);font-variant-numeric:tabular-nums}
-.iv.purple{color:var(--p);font-weight:600}
-.iv.green{color:var(--green);font-weight:500}
-.iv.big{font-size:22px;font-weight:700;font-family:var(--sans);letter-spacing:-.02em}
 
 /* ─ Badges ─ */
-.badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:9999px;border:1px solid transparent;letter-spacing:.06em;text-transform:uppercase}
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:9999px;border:1px solid transparent;letter-spacing:.06em;text-transform:uppercase;font-family:var(--mono)}
 .badge.green{background:var(--gbg);color:var(--green);border-color:var(--gbd)}
 .badge.red{background:var(--rbg);color:var(--red);border-color:var(--rbd)}
 .badge.purple{background:var(--pbg);color:var(--p);border-color:var(--pbd)}
 .badge.orange{background:var(--obg);color:var(--orange);border-color:var(--obd)}
-.badge.blue{background:oklch(94% 0.04 250);color:oklch(36% 0.18 250);border-color:oklch(82% 0.09 250)}
+.badge.blue{background:oklch(12% 0.06 250);color:oklch(72% 0.18 250);border-color:oklch(24% 0.12 250)}
 .badge.gray{background:var(--surf2);color:var(--text2);border-color:var(--border)}
 
 /* ─ Buttons ─ */
-.btn{display:inline-flex;align-items:center;gap:5px;border:none;border-radius:var(--r-sm);padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);transition:background var(--t-fast),border-color var(--t-fast),box-shadow var(--t-fast),transform var(--t-fast) var(--ease-spring);letter-spacing:-.01em;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;gap:5px;border:none;border-radius:var(--r-sm);padding:6px 13px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--sans);transition:background var(--t-fast),border-color var(--t-fast),transform var(--t-fast) var(--ease-spring);letter-spacing:-.01em;white-space:nowrap}
 .btn:focus-visible{outline:2px solid var(--p);outline-offset:2px}
-.btn-prim{background:var(--text);color:var(--bg);border:1px solid transparent}
-.btn-prim:not(:disabled):hover{background:oklch(22% 0 0);box-shadow:0 4px 12px oklch(0% 0 0 / 0.16)}
-.btn-prim:active{transform:translateY(1px)}
+.btn-prim{background:var(--p);color:oklch(8% 0 0);border:1px solid transparent}
+.btn-prim:not(:disabled):hover{background:var(--pd);transform:translateY(-1px)}
+.btn-prim:active{transform:translateY(0)}
 .btn-ghost{background:transparent;color:var(--text2);border:1px solid var(--border)}
-.btn-ghost:not(:disabled):hover{background:var(--surf);border-color:var(--surf3);color:var(--text)}
+.btn-ghost:not(:disabled):hover{background:var(--surf2);border-color:var(--surf3);color:var(--text)}
 .btn-ghost:active{transform:translateY(1px)}
-.btn-warn{background:var(--obg);color:var(--orange);border:1px solid var(--obd)}
-.btn-warn:not(:disabled):hover{background:var(--obd)}
-.btn-sm{padding:4px 10px;font-size:11px}
+.btn-sm{padding:3px 10px;font-size:11px}
 .btn-danger{background:var(--rbg);color:var(--red);border:1px solid var(--rbd)}
-.btn-danger:not(:disabled):hover{background:var(--rbd)}
-.btn:disabled{opacity:.35;cursor:not-allowed}
+.btn-danger:not(:disabled):hover{background:var(--rbd);color:var(--text)}
+.btn:disabled{opacity:.3;cursor:not-allowed}
 
-/* ─ Inline action rows ─ */
-.ia-row{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
-.ia-row:last-child{margin-bottom:0}
-.ia-label{font-size:11.5px;color:var(--muted);font-weight:500}
-.ia-input-row{display:flex;gap:6px;align-items:center}
-.ia-input{flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px;font-family:var(--mono);outline:none;transition:border-color var(--t-fast),box-shadow var(--t-fast);min-width:0;background:var(--bg);color:var(--text);font-variant-numeric:tabular-nums}
+/* ─ Inputs ─ */
+.ia-input{padding:6px 10px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:12px;font-family:var(--mono);outline:none;transition:border-color var(--t-fast),box-shadow var(--t-fast);min-width:0;background:oklch(6% 0.004 275);color:var(--text);font-variant-numeric:tabular-nums}
 .ia-input:focus{border-color:var(--p);box-shadow:0 0 0 3px var(--pbg)}
-.ia-unit{font-size:12px;color:var(--muted);white-space:nowrap;flex-shrink:0}
-.ia-hint{font-size:11px;color:var(--muted)}
+.ia-unit{font-size:11px;color:var(--muted);white-space:nowrap;flex-shrink:0;font-family:var(--mono)}
 
 /* ─ Provider addr ─ */
-.pv-addr{font-size:13px;font-weight:600;font-family:var(--mono);color:var(--text)}
-
-/* ─ Provider stats strip ─ */
-.pv-stats{display:flex;border-bottom:1px solid var(--border);background:var(--surf)}
-.pv-stat{display:flex;flex-direction:column;gap:4px;padding:14px 20px;border-right:1px solid var(--border);flex:1}
-.pv-stat:last-child{border-right:none}
-.pv-stat-val{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums}
-.pv-stat-key{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.pv-addr{font-size:12px;font-weight:500;font-family:var(--mono);color:var(--text)}
 
 /* ─ Balance section ─ */
-.pv-balance-section{padding:20px;border-bottom:1px solid var(--border)}
-.pv-balance-label{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px}
+.pv-balance-section{padding:16px 18px;border-bottom:1px solid var(--border)}
+.pv-balance-label{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px;font-family:var(--mono)}
 .pv-balance-main{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
-.pv-balance-amount{font-size:30px;font-weight:800;font-family:var(--mono);color:var(--text);letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:1}
+.pv-balance-amount{font-size:26px;font-weight:700;font-family:var(--mono);color:var(--text);letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:1}
 .pv-deposit-row{display:flex;gap:6px;align-items:center}
-.pv-refund-line{font-size:11.5px;color:var(--muted);margin-top:8px}
+.pv-refund-line{font-size:11px;color:var(--muted);margin-top:6px;font-family:var(--mono)}
 
 /* ─ Sandbox section ─ */
-.pv-sandbox-section{padding:0 20px 20px}
-.pv-sandbox-header{display:flex;align-items:center;justify-content:space-between;padding:16px 0 12px;border-top:1px solid var(--border)}
-.pv-sandbox-label{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em}
+.pv-sandbox-section{padding:0 18px 16px}
+.pv-sandbox-header{display:flex;align-items:center;justify-content:space-between;padding:14px 0 10px;border-top:1px solid var(--border)}
+.pv-sandbox-label{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;font-family:var(--mono)}
 .pv-sandbox-list{display:flex;flex-direction:column}
-.pv-sandbox-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--r-sm);margin:0 -12px;transition:background var(--t-fast)}
-.pv-sandbox-row:hover{background:var(--surf)}
-.pv-sandbox-id{font-family:var(--mono);font-size:12px;flex:1;color:var(--text2)}
-.pv-sandbox-actions{display:flex;gap:5px}
-.pv-sandbox-empty{color:var(--muted);font-size:12.5px;padding:24px 0;text-align:center;line-height:1.7;border:1px dashed var(--border);border-radius:var(--r-sm);margin-top:4px}
-
-/* ─ Table ─ */
-table{width:100%;border-collapse:collapse}
-thead th{padding:9px 14px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;background:var(--surf);border-bottom:1px solid var(--border)}
-tbody td{padding:10px 14px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:middle}
-tbody tr:last-child td{border-bottom:none}
-tbody tr:hover td{background:var(--surf)}
-.mono{font-family:var(--mono);font-size:12px;color:var(--text2);font-variant-numeric:tabular-nums}
+.pv-sandbox-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--r-sm);margin:0 -10px;transition:background var(--t-fast)}
+.pv-sandbox-row:hover{background:var(--surf3)}
+.pv-sandbox-id{font-family:var(--mono);font-size:11px;flex:1;color:var(--text2)}
+.pv-sandbox-actions{display:flex;gap:4px}
+.pv-sandbox-empty{color:var(--muted);font-size:12px;padding:20px 0;text-align:center;line-height:1.7;border:1px dashed var(--border);border-radius:var(--r-sm);margin-top:4px;font-family:var(--mono)}
 
 /* ─ Tag ─ */
-.tag{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:9999px;font-size:10px;font-weight:700;border:1px solid transparent;letter-spacing:.06em;text-transform:uppercase}
+.tag{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:9999px;font-size:10px;font-weight:700;border:1px solid transparent;letter-spacing:.06em;text-transform:uppercase;font-family:var(--mono)}
 .tag.running{background:var(--gbg);color:var(--green);border-color:var(--gbd)}
 .tag.stopped{background:var(--surf2);color:var(--muted);border-color:var(--border)}
 .tag.starting{background:var(--obg);color:var(--orange);border-color:var(--obd)}
-.tag.archived{background:oklch(94% 0.04 250);color:oklch(36% 0.18 250);border-color:oklch(82% 0.09 250)}
+.tag.archived{background:oklch(12% 0.06 250);color:oklch(72% 0.18 250);border-color:oklch(24% 0.12 250)}
 .tag.error{background:var(--rbg);color:var(--red);border-color:var(--rbd)}
 .tag-dot{width:5px;height:5px;border-radius:50%;background:currentColor;flex-shrink:0}
 
 /* ─ Modal ─ */
-.modal-bg{position:fixed;inset:0;background:oklch(0% 0 0 / 0.4);backdrop-filter:blur(6px);display:none;align-items:center;justify-content:center;z-index:300}
+.modal-bg{position:fixed;inset:0;background:oklch(0% 0 0 / 0.65);backdrop-filter:blur(8px);display:none;align-items:center;justify-content:center;z-index:300}
 .modal-bg.open{display:flex}
-.modal{background:var(--bg);border-radius:var(--r-lg);padding:28px;width:400px;max-width:95vw;box-shadow:var(--sh-lg);animation:modalin var(--t-base) var(--ease-out);border:1px solid var(--border)}
+.modal{background:var(--surf);border-radius:var(--r-lg);padding:28px;width:400px;max-width:95vw;box-shadow:var(--sh-lg);animation:modalin var(--t-base) var(--ease-out);border:1px solid var(--border)}
 @keyframes modalin{from{transform:translateY(-10px) scale(.98);opacity:0}to{transform:translateY(0) scale(1);opacity:1}}
-.modal-title{font-size:16px;font-weight:700;margin-bottom:20px;letter-spacing:-.01em;color:var(--text)}
+.modal-title{font-size:15px;font-weight:700;margin-bottom:20px;letter-spacing:-.02em;color:var(--text)}
 .field{margin-bottom:14px}
-.field label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.06em}
-.field input,.field select{width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px;font-family:var(--sans);outline:none;transition:border-color var(--t-fast),box-shadow var(--t-fast);background:var(--bg);color:var(--text)}
+.field label{display:block;font-size:10px;font-weight:700;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.08em;font-family:var(--mono)}
+.field input,.field select{width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px;font-family:var(--sans);outline:none;transition:border-color var(--t-fast),box-shadow var(--t-fast);background:oklch(6% 0.004 275);color:var(--text)}
 .field input:focus,.field select:focus{border-color:var(--p);box-shadow:0 0 0 3px var(--pbg)}
-.field .hint{font-size:11.5px;color:var(--muted);margin-top:4px}
+.field .hint{font-size:11px;color:var(--muted);margin-top:4px;font-family:var(--mono)}
 .modal-btns{display:flex;gap:8px;margin-top:20px;justify-content:flex-end}
 
 /* ─ Misc ─ */
-.empty{color:var(--muted);font-size:13px;padding:32px 20px;text-align:center;line-height:1.6}
-.empty-icon{font-size:24px;margin-bottom:8px}
-.err{color:var(--red);font-size:12px;margin-top:4px}
-.loading{color:var(--muted);font-size:12px;margin-top:6px}
-.code-block{background:var(--surf2);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;font-family:var(--mono);font-size:12px;word-break:break-all;user-select:all;cursor:text;line-height:1.7;color:var(--text)}
-
-/* ─ Tooltip ─ */
+.empty{color:var(--muted);font-size:13px;padding:32px 20px;text-align:center;line-height:1.6;font-family:var(--mono)}
+.err{color:var(--red);font-size:11px;margin-top:4px;font-family:var(--mono)}
+.loading{color:var(--muted);font-size:11px;margin-top:6px;font-family:var(--mono)}
+.code-block{background:oklch(6% 0.004 275);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;font-family:var(--mono);font-size:12px;word-break:break-all;user-select:all;cursor:text;line-height:1.7;color:var(--text)}
 .tip{position:relative;display:inline-flex;align-items:center}
 .tip-icon{width:13px;height:13px;border-radius:50%;background:var(--surf3);color:var(--text2);font-size:9px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;cursor:default;flex-shrink:0;margin-left:4px;line-height:1}
-.tip-box{position:absolute;bottom:calc(100% + 7px);left:50%;transform:translateX(-50%);background:oklch(12% 0 0);border:1px solid oklch(22% 0 0);color:oklch(92% 0 0);font-size:11.5px;line-height:1.55;padding:9px 12px;border-radius:var(--r-sm);width:220px;pointer-events:none;opacity:0;transition:opacity var(--t-fast);z-index:500;white-space:normal;box-shadow:0 8px 24px oklch(0% 0 0 / 0.22);font-family:var(--sans);font-weight:400}
-.tip-box::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:oklch(12% 0 0)}
+.tip-box{position:absolute;bottom:calc(100% + 7px);left:50%;transform:translateX(-50%);background:oklch(16% 0.008 275);border:1px solid var(--border);color:var(--text2);font-size:11px;line-height:1.6;padding:9px 12px;border-radius:var(--r-sm);width:220px;pointer-events:none;opacity:0;transition:opacity var(--t-fast);z-index:500;white-space:normal;box-shadow:var(--sh-lg);font-family:var(--sans);font-weight:400}
+.tip-box::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:oklch(16% 0.008 275)}
 .tip:hover .tip-box{opacity:1}
-
-/* ─ Toast ─ */
 #toast{position:fixed;bottom:24px;right:24px;z-index:999;display:flex;flex-direction:column;gap:8px;pointer-events:none}
-.toast{background:var(--text);color:var(--bg);border:1px solid transparent;border-radius:var(--r);padding:10px 16px;font-size:13px;min-width:220px;max-width:360px;box-shadow:var(--sh-lg);animation:slidein var(--t-base) var(--ease-out);pointer-events:auto;line-height:1.5;font-weight:500}
-.toast.success{background:var(--green);color:#fff}
-.toast.error{background:var(--red);color:#fff}
-.toast.pending{background:var(--text);color:var(--bg)}
-.toast a{color:oklch(78% 0.04 350);text-decoration:underline;margin-left:6px}
+.toast{background:var(--surf2);color:var(--text);border:1px solid var(--border);border-radius:var(--r);padding:10px 16px;font-size:12px;min-width:220px;max-width:360px;box-shadow:var(--sh-lg);animation:slidein var(--t-base) var(--ease-out);pointer-events:auto;line-height:1.5;font-weight:500;font-family:var(--mono)}
+.toast.success{background:var(--gbg);color:var(--green);border-color:var(--gbd)}
+.toast.error{background:var(--rbg);color:var(--red);border-color:var(--rbd)}
+.toast a{color:var(--cyan);text-decoration:underline;margin-left:8px}
 @keyframes slidein{from{transform:translateX(12px);opacity:0}to{transform:translateX(0);opacity:1}}
-@keyframes skel-pulse{0%,100%{opacity:.35}50%{opacity:.6}}
-.skel{background:var(--surf2);border-radius:var(--r-sm);display:inline-block;min-width:60px;min-height:14px;animation:skel-pulse 1.5s var(--ease-out) infinite;vertical-align:middle}
+@keyframes skel-pulse{0%,100%{opacity:.2}50%{opacity:.4}}
+.skel{background:var(--surf2);border-radius:var(--r-sm);display:inline-block;min-width:60px;min-height:14px;animation:skel-pulse 1.6s var(--ease-out) infinite;vertical-align:middle}
+
+/* ─ Skill guide (landing) ─ */
+.s-skill{border-bottom:1px solid var(--border);padding:clamp(56px,7vw,88px) 0}
+.skill-inner{display:grid;grid-template-columns:1fr 1fr;gap:64px;align-items:start}
+@media(max-width:840px){.skill-inner{grid-template-columns:1fr;gap:40px}}
+.skill-eyebrow{font-size:10px;font-weight:700;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--p);margin-bottom:16px;display:block}
+.skill-title{font-size:clamp(26px,3.5vw,38px);font-weight:700;letter-spacing:-.03em;color:var(--text);margin-bottom:14px;line-height:1.12}
+.skill-desc{font-size:14px;color:var(--text2);line-height:1.75;margin-bottom:28px;max-width:400px}
+.skill-steps{display:flex;flex-direction:column;gap:14px}
+.skill-step{display:flex;align-items:flex-start;gap:14px}
+.skill-step-n{font-size:10px;font-weight:700;font-family:var(--mono);color:var(--muted);padding-top:2px;width:20px;flex-shrink:0}
+.skill-step-t{font-size:13px;color:var(--text2);line-height:1.6}
+.skill-step-t strong{color:var(--text);font-weight:600}
+.skill-conv{background:oklch(5.5% 0.004 275);border:1px solid var(--border);border-radius:var(--r-lg);padding:18px 20px;font-family:var(--mono);font-size:12px;line-height:1.9}
+.skill-conv-bar{display:flex;align-items:center;gap:6px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+.skill-conv-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 5px var(--green)}
+.skill-conv-title{font-size:10px;color:var(--muted);letter-spacing:.04em}
+.sk-u{color:var(--text)}.sk-s{color:var(--p)}.sk-ok{color:var(--green)}.sk-d{color:var(--muted)}.sk-v{color:var(--cyan)}.sk-c{color:var(--text)}
+
+/* ─ Market page sections ─ */
+.mkt-section{margin:48px 0}
+.mkt-divider{font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;font-family:var(--mono);padding-bottom:16px;border-bottom:1px solid var(--border);margin-bottom:24px}
+.gs-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:680px){.gs-grid{grid-template-columns:1fr}}
+.gs-card{background:var(--surf);border:1px solid var(--border);border-radius:var(--r-lg);padding:22px}
+.gs-rec{display:inline-flex;font-size:9px;font-weight:700;color:var(--p);background:var(--pbg);border:1px solid var(--pbd);border-radius:9999px;padding:1px 8px;font-family:var(--mono);letter-spacing:.05em;text-transform:uppercase;margin-bottom:10px}
+.gs-card-title{font-size:14px;font-weight:700;color:var(--text);letter-spacing:-.02em;margin-bottom:3px}
+.gs-card-sub{font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:18px}
+.gs-step{display:flex;align-items:flex-start;gap:10px;margin-bottom:11px}
+.gs-step:last-child{margin-bottom:0}
+.gs-step-n{width:18px;height:18px;border-radius:4px;background:var(--surf3);font-size:9px;font-weight:700;font-family:var(--mono);color:var(--muted);display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px}
+.gs-step-t{font-size:12px;color:var(--text2);line-height:1.6;font-family:var(--mono)}
+.gs-step-t strong{color:var(--text)}.gs-step-t code{color:var(--p)}
+.become-card{background:var(--surf);border:1px solid var(--border);border-radius:var(--r-lg);padding:26px;display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:start}
+@media(max-width:720px){.become-card{grid-template-columns:1fr}}
+.become-title{font-size:15px;font-weight:700;color:var(--text);letter-spacing:-.02em;margin-bottom:8px}
+.become-desc{font-size:12px;color:var(--text2);line-height:1.75;margin-bottom:18px}
+.become-reqs{display:flex;flex-direction:column;gap:7px}
+.become-req-row{display:flex;gap:10px;align-items:baseline}
+.become-req-k{font-size:10px;font-family:var(--mono);color:var(--muted);width:68px;flex-shrink:0;letter-spacing:.04em;padding-top:1px}
+.become-req-v{font-size:11px;font-family:var(--mono);color:var(--text2)}
+.codeblock{background:oklch(5.5% 0.004 275);border:1px solid var(--border);border-radius:var(--r-sm);padding:16px;font-family:var(--mono);font-size:11px;line-height:1.85;overflow-x:auto;white-space:pre;color:var(--text2)}
+.codeblock .cb-c{color:var(--muted)}.codeblock .cb-e{color:var(--orange)}.codeblock .cb-f{color:var(--cyan)}
+
+/* ─ Market: user guide (4-step horizontal) ─ */
+.user-guide-card{background:var(--surf);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;display:grid;grid-template-columns:repeat(4,1fr)}
+@media(max-width:780px){.user-guide-card{grid-template-columns:1fr 1fr}}
+@media(max-width:480px){.user-guide-card{grid-template-columns:1fr}}
+.ugs{padding:22px 22px 24px;border-right:1px solid var(--border)}
+.ugs:last-child{border-right:none}
+.ugs-num{font-size:9px;font-weight:700;font-family:var(--mono);color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.ugs-num::after{content:'';flex:1;height:1px;background:var(--border)}
+.ugs-head{font-size:13px;font-weight:700;color:var(--text);margin-bottom:6px;letter-spacing:-.01em;line-height:1.3}
+.ugs-desc{font-size:11px;color:var(--text2);line-height:1.7;font-family:var(--mono)}
+.ugs-action{margin-top:14px}
+
+/* ─ Market: provider zone ─ */
+.provider-zone{border-top:2px solid var(--border);margin-top:60px;padding-top:52px}
+.pz-head{margin-bottom:24px}
+.pz-badge{display:inline-flex;align-items:center;gap:6px;background:var(--pbg);border:1px solid var(--pbd);border-radius:9999px;padding:4px 14px;font-size:11px;font-weight:700;color:var(--p);letter-spacing:.04em;font-family:var(--mono);margin-bottom:14px}
+.pz-title{font-size:clamp(22px,3vw,30px);font-weight:700;color:var(--text);letter-spacing:-.03em;margin-bottom:8px}
+.pz-sub{font-size:13px;color:var(--text2);line-height:1.7;max-width:600px}
+.pz-card{background:var(--surf);border:1px solid var(--pbd);border-radius:var(--r-lg);padding:28px 32px}
+.pz-req-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:20px}
+.pz-req-item{background:oklch(14% 0.10 315 / 0.25);border:1px solid var(--pbd);border-radius:var(--r-sm);padding:12px 14px}
+.pz-req-label{font-size:9px;font-weight:700;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--p);margin-bottom:5px}
+.pz-req-val{font-size:12px;font-family:var(--mono);color:var(--text2);line-height:1.4}
 </style>
 </head>
 <body>
-<div id="grain" aria-hidden="true"></div>
 
 <!-- Topbar -->
 <header class="topbar">
-  <div class="logo">
-    <img src="/static/logo.svg" width="50" height="30" alt="0G" style="flex-shrink:0;display:block">
-    0G Sandbox<span class="logo-sub">Powered by 0G Network</span>
+  <div class="logo" onclick="showView('landing')">
+    <img src="/static/logo.svg" width="44" height="26" alt="0G" style="flex-shrink:0;display:block">
+    <span style="color:var(--border);margin:0 4px;font-weight:300">|</span>
+    Sandbox
+    <span class="logo-sub" style="margin-left:6px">by 0G Network</span>
   </div>
   <div class="topbar-right">
     <div class="chain-tag" id="chainTag"><div class="dot"></div>0G Galileo</div>
+    <button class="nav-link accent" id="marketNavBtn" onclick="showView('market')">Provider Market →</button>
     <button class="btn-connect" id="connectBtn" onclick="connectWallet()">Connect Wallet</button>
   </div>
 </header>
@@ -266,79 +369,235 @@ tbody tr:hover td{background:var(--surf)}
 <!-- Wallet Popover -->
 <div class="wallet-popover" id="walletPopover">
   <div class="wp-head">
-    <div class="wp-label">Wallet Address</div>
+    <div class="wp-label">Connected wallet</div>
     <div class="wp-addr" id="popAddr"></div>
   </div>
   <div class="wp-body">
     <div class="wp-row">
-      <span class="wp-k">Native Balance</span>
+      <span class="wp-k">native_balance</span>
       <span class="wp-v" id="popBalance">—</span>
     </div>
     <div class="wp-actions">
-      <button class="wp-btn" onclick="copyWalletAddr()">Copy Address</button>
+      <button class="wp-btn" onclick="copyWalletAddr()">Copy addr</button>
       <button class="wp-btn danger" onclick="logout()">Logout</button>
     </div>
   </div>
 </div>
 
-<!-- User Content -->
-<div class="page">
+<!-- ════════════════════════════════ LANDING VIEW ════════════════════════════════ -->
+<div class="view-landing">
 
-  <div id="userNoWallet" class="landing">
-    <p class="lt-kicker">0G Sandbox</p>
-    <h1 class="landing-title">Vibe code in<br><em>hardware-sealed</em><br>isolation.</h1>
-    <p class="landing-sub">Your code runs in a <strong>TDX hardware enclave</strong>. The server operator cannot read your files, outputs, or secrets — including 0G.</p>
-    <div class="lf-grid">
-      <div class="lf-col">
-        <span class="lf-num">01</span>
-        <div class="lf-text-title">Zero local pollution</div>
-        <div class="lf-text-desc">Fully isolated containers. Nothing touches your machine.</div>
-      </div>
-      <div class="lf-col">
-        <span class="lf-num">02</span>
-        <div class="lf-text-title">Provider-blind</div>
-        <div class="lf-text-desc">TDX hardware seals your workload. The operator is physically locked out.</div>
-      </div>
-      <div class="lf-col">
-        <span class="lf-num">03</span>
-        <div class="lf-text-title">Pay per second</div>
-        <div class="lf-text-desc">Stop a sandbox, billing stops immediately. No idle waste.</div>
+  <!-- Hero -->
+  <section class="s-hero">
+    <div class="s-wrap">
+      <div class="hero-inner">
+        <div>
+          <div class="hero-eyebrow">
+            <span class="eyebrow-tag"><span class="dot" style="width:5px;height:5px;box-shadow:none"></span>Powered by TEE &amp; Tapp</span>
+            <span class="eyebrow-tag" style="background:oklch(12% 0.05 250);border-color:oklch(24% 0.10 250);color:oklch(70% 0.15 250)">Powered by Daytona</span>
+          </div>
+          <h1 class="hero-title">Vibe code in<br><mark>hardware-sealed</mark><br>isolation.</h1>
+          <p class="hero-sub">Your code runs inside a <strong>TDX hardware enclave</strong>. The server operator cannot read your files, outputs, or secrets — not even 0G can.</p>
+          <div class="hero-cta">
+            <button class="btn-hero" id="ctaBtn" onclick="connectWallet()">Connect Wallet</button>
+            <button class="btn-hero-ghost" onclick="showView('market')">Provider Market →</button>
+          </div>
+          <div style="margin-top:10px">
+            <span class="hero-hint" id="ctaHint">no account · just a web3 wallet</span>
+          </div>
+        </div>
+        <div class="terminal">
+          <div class="terminal-bar">
+            <span class="tb-dot tb-red"></span>
+            <span class="tb-dot tb-yellow"></span>
+            <span class="tb-dot tb-green"></span>
+            <span class="tb-title">claude — 0g-sandbox</span>
+          </div>
+          <div class="terminal-body" id="termBody"></div>
+        </div>
       </div>
     </div>
-    <div class="landing-cta">
-      <button class="btn-landing" id="ctaBtn" onclick="connectWallet()">Connect Wallet</button>
-      <span class="landing-hint" id="ctaHint">No account needed — just a Web3 wallet</span>
+  </section>
+
+  <!-- Features -->
+  <section class="s-features">
+    <div class="feat-strip">
+      <div class="feat-block">
+        <span class="feat-num">01 — isolation</span>
+        <div class="feat-heading">Zero local pollution</div>
+        <div class="feat-desc">Fully containerized workspaces via Daytona. Nothing touches your machine. Start fresh, delete when done.</div>
+      </div>
+      <div class="feat-block">
+        <span class="feat-num">02 — privacy</span>
+        <div class="feat-heading">Provider-blind by hardware</div>
+        <div class="feat-desc">Your workload runs inside a TDX enclave. The billing proxy and signing key live there too — the operator is physically locked out.</div>
+      </div>
+      <div class="feat-block">
+        <span class="feat-num">03 — billing</span>
+        <div class="feat-heading">Per-second metering</div>
+        <div class="feat-desc">Stop a sandbox, billing stops immediately. EIP-712 vouchers are settled on-chain. No idle waste, no hidden fees.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Skill Guide -->
+  <section class="s-skill">
+    <div class="s-wrap">
+      <div class="skill-inner">
+        <div>
+          <span class="skill-eyebrow">0g-private-sandbox skill</span>
+          <h2 class="skill-title">Just tell Claude<br>what you want.</h2>
+          <p class="skill-desc">The 0g-private-sandbox Claude Code skill turns a conversation into a running sandbox — provider discovery, deposit, TEE acknowledgement, and SSH access, all in one flow.</p>
+          <div class="skill-steps">
+            <div class="skill-step">
+              <div class="skill-step-n">01</div>
+              <div class="skill-step-t">Enable the <strong>0g-private-sandbox</strong> skill in Claude Code</div>
+            </div>
+            <div class="skill-step">
+              <div class="skill-step-n">02</div>
+              <div class="skill-step-t">Say <strong>"I want a private sandbox on 0G"</strong></div>
+            </div>
+            <div class="skill-step">
+              <div class="skill-step-n">03</div>
+              <div class="skill-step-t">Provide your broker URL (or configure network manually) — Claude fetches chain config and discovers providers automatically</div>
+            </div>
+            <div class="skill-step">
+              <div class="skill-step-n">04</div>
+              <div class="skill-step-t">Claude deposits, creates the sandbox, and hands you SSH access</div>
+            </div>
+          </div>
+        </div>
+        <div class="skill-conv">
+          <div class="skill-conv-bar">
+            <div class="skill-conv-dot"></div>
+            <div class="skill-conv-title">claude — 0g-sandbox</div>
+          </div>
+          <span class="sk-u">&gt; I want a private sandbox on 0G</span><br>
+          <span class="sk-d">&nbsp;</span><br>
+          <span class="sk-d">  ✦ loading: </span><span class="sk-s">0g-private-sandbox</span><br>
+          <span class="sk-ok">  ✓</span><span class="sk-d"> skill loaded</span><br>
+          <span class="sk-d">&nbsp;</span><br>
+          <span class="sk-d">  Before we begin, a few details.</span><br>
+          <span class="sk-d">  Do you have a broker URL?</span><br>
+          <span class="sk-d">&nbsp;</span><br>
+          <span class="sk-u">&gt; yes&nbsp;&nbsp;https://47.236.111.154:8080</span><br>
+          <span class="sk-d">&nbsp;</span><br>
+          <span class="sk-d">  $ curl $API/api/info</span><br>
+          <span class="sk-ok">  ✓</span><span class="sk-d"> contract  0x2024eB0…4316</span><br>
+          <span class="sk-ok">  ✓</span><span class="sk-d"> network   0G Galileo (16602)</span><br>
+          <span class="sk-d">&nbsp;</span><br>
+          <span class="sk-ok">  ✓</span><span class="sk-d"> 0xB831… · 0.06 0G create · 0.001 0G/CPU/sec</span><br>
+          <span class="sk-ok">  ✓</span><span class="sk-d"> sandbox ready  </span><span class="sk-d" style="opacity:.4">3.8s</span><br>
+          <span class="sk-d">&nbsp;</span><br>
+          <span class="sk-d">  ssh  </span><span class="sk-c">ssh -p 2222 &lt;token&gt;@private-sandbox.0g.ai</span><br>
+          <span class="sk-u">&gt; <span style="animation:blink 1.1s step-end infinite">▊</span></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="s-footer">
+    <div class="s-wrap">
+      <div class="footer-inner">
+        <div class="footer-left">
+          <span class="footer-copy">© 2025 0G Network</span>
+          <a class="footer-link" href="https://github.com/0gfoundation/0g-sandbox" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0;opacity:.8"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            0gfoundation/0g-sandbox
+          </a>
+        </div>
+        <div class="footer-right">
+          <button class="btn btn-ghost btn-sm" onclick="showView('market')" style="font-family:var(--mono)">
+            Provider Market →
+          </button>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+</div><!-- /view-landing -->
+
+<!-- ════════════════════════════════ MARKET VIEW ════════════════════════════════ -->
+<div class="view-market">
+
+  <div class="s-wrap">
+    <div class="market-header">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+        <div>
+          <div class="market-title">Provider Market</div>
+          <div class="market-sub" id="providerCountLine">loading…</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="loadProviders(true)" style="font-family:var(--mono)">↻ refresh</button>
+      </div>
+    </div>
+    <div class="market-body">
+      <div id="providerSection">
+        <div class="empty" style="padding:40px 0">
+          <span class="skel" style="width:100%;height:100px;display:block;border-radius:10px"></span>
+        </div>
+      </div>
+
+      <!-- Create a Sandbox (web UI guide) -->
+      <div class="mkt-section">
+        <div class="mkt-divider">Create a sandbox</div>
+        <div class="user-guide-card">
+          <div class="ugs">
+            <div class="ugs-num">01</div>
+            <div class="ugs-head">Connect wallet</div>
+            <div class="ugs-desc">Click Connect Wallet (top right). Any EIP-1193 web3 wallet works — MetaMask, Rabby, etc.</div>
+          </div>
+          <div class="ugs">
+            <div class="ugs-num">02</div>
+            <div class="ugs-head">Pick a provider</div>
+            <div class="ugs-desc">Expand a provider above. Review the create fee and per-minute compute price before continuing.</div>
+          </div>
+          <div class="ugs">
+            <div class="ugs-num">03</div>
+            <div class="ugs-head">Acknowledge &amp; deposit</div>
+            <div class="ugs-desc">Acknowledge the provider's TEE signer (one-time). Deposit enough 0G to cover your session.</div>
+          </div>
+          <div class="ugs">
+            <div class="ugs-num">04</div>
+            <div class="ugs-head">Create &amp; SSH in</div>
+            <div class="ugs-desc">Click <strong>+ New Sandbox</strong>, choose a name and snapshot. SSH credentials appear once the sandbox is running.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Become a Provider -->
+      <div class="provider-zone">
+        <div class="pz-head">
+          <div class="pz-title">Serve sandboxes, earn 0G.</div>
+          <div class="pz-sub">Run 0G Sandbox service, stake 100 0G, and register your endpoint on-chain. Vouchers are signed inside a TEE enclave and settled on-chain — trustless for both sides.</div>
+        </div>
+        <div class="pz-card">
+          <div style="font-size:12px;color:var(--text2);line-height:2;font-family:var(--mono)">
+            <div><span style="color:var(--muted);display:inline-block;width:72px">deploy</span>run the billing service via Tapp on your TEE server</div>
+            <div><span style="color:var(--muted);display:inline-block;width:72px">register</span>/dashboard → Service Registration</div>
+            <div><span style="color:var(--muted);display:inline-block;width:72px">earn</span>withdraw anytime via dashboard or CLI</div>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 
-  <div id="userContent" style="display:none">
-    <div class="content-header">
-      <h2 class="content-title">Sandbox <em>Providers</em></h2>
-      <p class="content-sub">Acknowledge a provider's TEE signer, deposit balance, and spin up isolated sandboxes.</p>
-    </div>
-    <div id="providerSection">
-      <div class="empty" style="padding:40px 0">
-        <span class="skel" style="width:100%;height:120px;display:block;border-radius:10px"></span>
-      </div>
-    </div>
-  </div>
+</div><!-- /view-market -->
 
-</div>
-
-<!-- ═══ Modals ═══ -->
-
+<!-- ════════════════════════════════ MODALS ════════════════════════════════ -->
 <div class="modal-bg" id="createModal">
   <div class="modal">
     <div class="modal-title">Create Sandbox</div>
     <div class="field">
       <label>Name (optional)</label>
       <input id="sandboxName" type="text" placeholder="my-sandbox" maxlength="60">
-      <div class="hint">Leave blank to auto-generate a name.</div>
+      <div class="hint">Leave blank to auto-generate.</div>
     </div>
     <div class="field">
       <label>Snapshot (optional)</label>
-      <select id="snapshotSelect"><option value="">— Default (no snapshot) —</option></select>
-      <div class="hint">Select a pre-built environment, or leave blank for the default image.</div>
+      <select id="snapshotSelect"><option value="">— Default image —</option></select>
+      <div class="hint">Select a pre-built environment.</div>
     </div>
     <div id="createErr"></div>
     <div class="modal-btns">
@@ -355,7 +614,7 @@ tbody tr:hover td{background:var(--surf)}
       <label>Connect command (valid 60 min)</label>
       <div class="code-block" id="sshCommand">Loading…</div>
     </div>
-    <div style="font-size:12px;color:var(--muted)">The token is your SSH password — no key needed.</div>
+    <div style="font-size:11px;color:var(--muted);font-family:var(--mono)">Token is your SSH password — no key needed.</div>
     <div class="modal-btns">
       <button class="btn btn-ghost" onclick="closeModal('sshModal')">Close</button>
       <button class="btn btn-prim" onclick="copySSH()">Copy</button>
@@ -373,7 +632,7 @@ tbody tr:hover td{background:var(--surf)}
 
 <div class="modal-bg" id="confirmModal">
   <div class="modal" style="width:340px">
-    <p id="confirmMsg" style="color:var(--text2);font-size:13.5px;margin-bottom:20px;line-height:1.6"></p>
+    <p id="confirmMsg" style="color:var(--text2);font-size:13px;margin-bottom:20px;line-height:1.65;font-family:var(--mono)"></p>
     <div class="modal-btns">
       <button class="btn btn-ghost" id="confirmCancel">Cancel</button>
       <button class="btn btn-danger" id="confirmOk">Confirm</button>
@@ -388,9 +647,10 @@ tbody tr:hover td{background:var(--surf)}
 let walletAddr = null, signer = null, contract = null, info = null;
 let selectedProvider = null, _providerMap = {};
 const _subscribePending = new Set();
-let _chainCache = {}; // key: `${walletAddr}:${providerAddr}` → {acked, balance}
+let _chainCache = {};
 const eip6963Providers = new Map();
 let _refreshTimer = null, _activeProvider = null;
+
 function _onAccountsChanged(a) {
   if (!a || !a.length) { location.reload(); return; }
   initWallet(a[0], _activeProvider);
@@ -408,11 +668,30 @@ const ABI = [
 window.addEventListener('eip6963:announceProvider', e => eip6963Providers.set(e.detail.info.uuid, e.detail));
 window.dispatchEvent(new Event('eip6963:requestProvider'));
 
+// ── View routing ──────────────────────────────────────────────────────────────
+function showView(v) {
+  document.body.classList.toggle('v-market', v === 'market');
+  history.replaceState(null, '', v === 'market' ? '#market' : '#');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (v === 'market') loadProviders();
+}
+
 window.onload = async () => {
+  // Apply hash-based view on load
+  if (window.location.hash === '#market') document.body.classList.add('v-market');
+
   info = await fetch('/api/info').then(r => r.json()).catch(() => null);
   if (info) {
-    document.getElementById('chainTag').innerHTML = `<div class="dot"></div>Chain ${info.chain_id}`;
+    document.getElementById('chainTag').innerHTML = `<div class="dot"></div>chain_${info.chain_id}`;
   }
+
+  // Start terminal animation immediately
+  startTerminalAnimation();
+
+  // Load providers (public data, no wallet needed)
+  loadProviders();
+
+  // Auto-reconnect wallet
   const lastUUID = localStorage.getItem('walletUUID');
   if (lastUUID && eip6963Providers.has(lastUUID)) {
     const p = eip6963Providers.get(lastUUID).provider;
@@ -425,11 +704,67 @@ window.onload = async () => {
   }
 };
 
+// ── Terminal animation ────────────────────────────────────────────────────────
+const TERM_LINES = [
+  { html: `<span class="tc-prompt">&gt;</span> <span class="tc-user">I want a private sandbox on 0G for vibe coding</span>`, gap: 0 },
+  { html: `<span class="tc-dim"> </span>`, gap: 300 },
+  { html: `<span class="tc-dim">  ✦ loading: </span><span class="tc-skill">0g-private-sandbox</span>`, gap: 500 },
+  { html: `<span class="tc-ok">  ✓</span><span class="tc-dim"> skill loaded</span>`, gap: 900 },
+  { html: `<span class="tc-dim"> </span>`, gap: 300 },
+  { html: `<span class="tc-dim">  Before we begin, a few details.</span>`, gap: 400 },
+  { html: `<span class="tc-dim"> </span>`, gap: 200 },
+  { html: `<span class="tc-dim">  Do you have a broker URL?</span>`, gap: 300 },
+  { html: `<span class="tc-key">  yes </span><span class="tc-dim">— fetch chain config automatically</span>`, gap: 200 },
+  { html: `<span class="tc-key">  no  </span><span class="tc-dim">— configure network manually</span>`, gap: 200 },
+  { html: `<span class="tc-dim"> </span>`, gap: 600 },
+  { html: `<span class="tc-prompt">&gt;</span> <span class="tc-user">yes  https://47.236.111.154:8080</span>`, gap: 700 },
+  { html: `<span class="tc-dim"> </span>`, gap: 300 },
+  { html: `<span class="tc-dim">  $ curl $API/api/info</span>`, gap: 400 },
+  { html: `<span class="tc-ok">  ✓</span><span class="tc-key"> contract </span><span class="tc-dim">0x2024eB0…4316</span>`, gap: 700 },
+  { html: `<span class="tc-ok">  ✓</span><span class="tc-key"> network  </span><span class="tc-val">0G Galileo Testnet (16602)</span>`, gap: 200 },
+  { html: `<span class="tc-dim"> </span>`, gap: 400 },
+  { html: `<span class="tc-dim">  $ go run ./cmd/user/ providers --api $API</span>`, gap: 400 },
+  { html: `<span class="tc-ok">  ✓</span><span class="tc-dim"> 0xB831… · 0.06 0G create · 0.001 0G/CPU/sec</span>`, gap: 800 },
+  { html: `<span class="tc-dim"> </span>`, gap: 300 },
+  { html: `<span class="tc-dim">  $ go run ./cmd/user/ create --api $API --name vibe-session</span>`, gap: 500 },
+  { html: `<span class="tc-ok">  ✓</span><span class="tc-dim"> TEE attestation verified</span>`, gap: 800 },
+  { html: `<span class="tc-ok">  ✓</span><span class="tc-dim"> billing session opened</span>`, gap: 400 },
+  { html: `<span class="tc-ok">  ✓</span><span class="tc-dim"> sandbox ready</span><span class="tc-dim" style="opacity:.4">  3.8s</span>`, gap: 400 },
+  { html: `<span class="tc-dim"> </span>`, gap: 300 },
+  { html: `<span class="tc-key">  id   </span><span class="tc-val">a1b2c3d4ef56</span>`, gap: 300 },
+  { html: `<span class="tc-key">  ssh  </span><span class="tc-cmd">ssh -p 2222 &lt;token&gt;@private-sandbox.0g.ai</span>`, gap: 300 },
+  { html: `<span class="tc-dim"> </span>`, gap: 500 },
+  { html: `<span class="tc-prompt">&gt;</span> <span class="cursor">▊</span>`, gap: 300 },
+];
+
+let _termTimer = null;
+
+function startTerminalAnimation() {
+  if (_termTimer) clearTimeout(_termTimer);
+  const body = document.getElementById('termBody');
+  if (!body) return;
+  body.innerHTML = '';
+  let elapsed = 0;
+  TERM_LINES.forEach((line, idx) => {
+    elapsed += line.gap;
+    _termTimer = setTimeout(() => {
+      const span = document.createElement('span');
+      span.className = 'tl';
+      span.innerHTML = line.html;
+      span.style.cssText = 'opacity:0;animation:lineIn 0.25s ease forwards';
+      body.appendChild(span);
+      body.scrollTop = body.scrollHeight;
+    }, elapsed);
+  });
+  // Restart loop after pause
+  const total = elapsed + 4000;
+  _termTimer = setTimeout(startTerminalAnimation, total);
+}
+
 // ── Wallet Popover ────────────────────────────────────────────────────────────
 function toggleWalletPopover(e) {
   e.stopPropagation();
-  const p = document.getElementById('walletPopover');
-  p.classList.toggle('open');
+  document.getElementById('walletPopover').classList.toggle('open');
 }
 document.addEventListener('click', e => {
   const p = document.getElementById('walletPopover');
@@ -437,10 +772,8 @@ document.addEventListener('click', e => {
 });
 function copyWalletAddr() {
   if (navigator.clipboard) {
-    navigator.clipboard.writeText(walletAddr).then(()=>toast('Address copied','success')).catch(()=>copyFallback(walletAddr));
-  } else {
-    copyFallback(walletAddr);
-  }
+    navigator.clipboard.writeText(walletAddr).then(()=>toast('address copied','success')).catch(()=>copyFallback(walletAddr));
+  } else { copyFallback(walletAddr); }
 }
 
 // ── Wallet ────────────────────────────────────────────────────────────────────
@@ -448,10 +781,10 @@ function connectWallet() {
   const list = document.getElementById('walletList'); list.innerHTML = '';
   const wallets = [...eip6963Providers.values()];
   if (window.ethereum && !wallets.length) wallets.push({ info:{ uuid:'__legacy__', name:'Browser Wallet', icon:'' }, provider:window.ethereum });
-  if (!wallets.length) { list.innerHTML='<p style="color:var(--muted);font-size:13px">No wallets detected.</p>'; openModal('walletModal'); return; }
+  if (!wallets.length) { list.innerHTML='<p style="color:var(--muted);font-size:13px;font-family:var(--mono)">no wallets detected</p>'; openModal('walletModal'); return; }
   wallets.forEach(({ info:wi, provider:prov }) => {
     const btn = document.createElement('button');
-    btn.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surf2);cursor:pointer;font-family:inherit;font-size:13.5px;font-weight:500;width:100%;color:var(--text);transition:background .15s';
+    btn.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surf2);cursor:pointer;font-family:inherit;font-size:13px;font-weight:500;width:100%;color:var(--text);transition:background .15s';
     btn.onmouseover = () => btn.style.background='var(--surf3)';
     btn.onmouseout  = () => btn.style.background='var(--surf2)';
     if (wi.icon) { const img=document.createElement('img'); img.src=wi.icon; img.width=img.height=28; img.style.borderRadius='6px'; btn.appendChild(img); }
@@ -479,6 +812,7 @@ async function initWallet(addr, prov) {
 
   document.querySelectorAll('.addr-chip,.logout-btn').forEach(el=>el.remove());
   document.getElementById('connectBtn').style.display = 'none';
+  document.getElementById('marketNavBtn').style.display = 'none';
   const chip = document.createElement('div');
   chip.className='addr-chip'; chip.textContent=shortAddr(addr); chip.title=addr;
   chip.onclick = toggleWalletPopover;
@@ -486,18 +820,16 @@ async function initWallet(addr, prov) {
   document.getElementById('popAddr').textContent = addr;
 
   const ctaBtn = document.getElementById('ctaBtn');
-  ctaBtn.textContent = 'Get Started →';
-  ctaBtn.onclick = () => document.getElementById('userContent').scrollIntoView({ behavior:'smooth', block:'start' });
-  document.getElementById('ctaHint').textContent = 'Connected — scroll down to view providers';
-  document.getElementById('userContent').style.display = '';
-  setTimeout(() => document.getElementById('userContent')?.scrollIntoView({ behavior:'smooth', block:'start' }), 120);
+  ctaBtn.textContent = 'Provider Market →';
+  ctaBtn.onclick = () => showView('market');
+  document.getElementById('ctaHint').textContent = `connected · ${shortAddr(addr)}`;
 
   if (_activeProvider && _activeProvider !== prov) try { _activeProvider.removeListener('accountsChanged',_onAccountsChanged); } catch(_){}
   if (_activeProvider !== prov) { prov.on('accountsChanged',_onAccountsChanged); _activeProvider=prov; }
 
   await loadUserData();
   if (_refreshTimer) clearInterval(_refreshTimer);
-  _refreshTimer = setInterval(()=>{ if(walletAddr){ refreshBalances(); } }, 30000);
+  _refreshTimer = setInterval(()=>{ if(walletAddr) refreshBalances(); }, 30000);
 }
 
 async function ensureChain(prov) {
@@ -518,15 +850,16 @@ async function logout() {
   localStorage.removeItem('walletUUID');
   document.querySelectorAll('.addr-chip,.logout-btn').forEach(el=>el.remove());
   document.getElementById('connectBtn').style.display='';
+  document.getElementById('marketNavBtn').style.display='';
   document.getElementById('walletPopover').classList.remove('open');
   document.getElementById('popAddr').textContent='';
   document.getElementById('popBalance').textContent='—';
   const ctaBtn = document.getElementById('ctaBtn');
   ctaBtn.textContent = 'Connect Wallet';
   ctaBtn.onclick = connectWallet;
-  document.getElementById('ctaHint').textContent = 'No account needed — just a Web3 wallet';
-  document.getElementById('userContent').style.display='none';
-  window.scrollTo({ top:0, behavior:'smooth' });
+  document.getElementById('ctaHint').textContent = 'no account · just a web3 wallet';
+  showView('landing');
+  loadProviders();
 }
 
 // ── User Data ─────────────────────────────────────────────────────────────────
@@ -551,64 +884,80 @@ async function refreshBalances() {
   if (!addrs.length) return;
   await Promise.all(addrs.map(async key => {
     const balEl = document.getElementById('pv-bal-' + key);
-    const refundEl = document.getElementById('pv-refund-' + key);
     if (!balEl) return;
     try {
       const [bal, pendingRefund] = await contract.getBalance(walletAddr, _providerMap[key].address);
       balEl.textContent = fmtNeuron(bal.toString());
-      if (refundEl) refundEl.textContent = BigInt(pendingRefund.toString()) > 0n ? `Pending refund: ${fmtNeuron(pendingRefund.toString())}` : '';
+      const refundEl = document.getElementById('pv-refund-' + key);
+      if (refundEl) refundEl.textContent = BigInt(pendingRefund.toString()) > 0n ? `pending_refund: ${fmtNeuron(pendingRefund.toString())}` : '';
     } catch(_) {}
   }));
 }
 
-// ── Providers + Sandboxes ─────────────────────────────────────────────────────
+// ── Providers ─────────────────────────────────────────────────────────────────
 let _pollTimer = null;
 
 async function loadProviders(forceChain=false) {
-  if (!contract || !walletAddr) return;
   const section = document.getElementById('providerSection');
+  const countEl = document.getElementById('providerCountLine');
   try {
     const providers = await fetch('/api/providers').then(r=>r.json()).catch(()=>[]);
     if (!providers?.length) {
+      if (countEl) countEl.textContent = 'no providers registered';
       section.innerHTML = '<div class="empty" style="padding:40px 0">No providers registered yet.</div>';
       return;
     }
 
-    // Fetch sandboxes + health from each provider in parallel (always fresh)
-    const sbxByProvider = {}, healthByProvider = {};
+    // Health check — no auth needed
+    const healthByProvider = {};
     await Promise.all(providers.map(async p => {
       const key = p.address.toLowerCase();
-      const [sbxRes, healthRes] = await Promise.allSettled([
-        fetch(`/proxy/${p.address}/api/sandbox_list?wallet=${encodeURIComponent(walletAddr)}`),
-        Promise.race([fetch(`/proxy/${p.address}/healthz`), new Promise((_,r)=>setTimeout(()=>r(new Error('timeout')),3000))]),
-      ]);
-      sbxByProvider[key] = (sbxRes.status==='fulfilled' && sbxRes.value.ok) ? (await sbxRes.value.json().catch(()=>[])) : [];
-      healthByProvider[key] = healthRes.status==='fulfilled' && healthRes.value.ok;
+      const res = await Promise.race([
+        fetch(`/proxy/${p.address}/healthz`),
+        new Promise((_,r)=>setTimeout(()=>r(new Error('timeout')),3000))
+      ]).catch(()=>null);
+      healthByProvider[key] = res?.ok === true;
     }));
 
-    // On-chain data: use cache when possible to avoid slow RPC round-trips.
-    const cacheKeys = providers.map(p => `${walletAddr}:${p.address}`);
-    const allCached = !forceChain && cacheKeys.every(k => _chainCache[k]);
-    let ackedArr, balancesArr;
-    if (allCached) {
-      ackedArr    = cacheKeys.map(k => _chainCache[k].acked);
-      balancesArr = cacheKeys.map(k => _chainCache[k].balance);
-    } else {
-      [ackedArr, balancesArr] = await Promise.all([
-        Promise.all(providers.map(p => contract.isTEEAcknowledged(walletAddr, p.address).catch(()=>false))),
-        Promise.all(providers.map(p => contract.getBalance(walletAddr, p.address).catch(()=>[0n,0n,0n]))),
-      ]);
-      providers.forEach((p, i) => {
-        _chainCache[`${walletAddr}:${p.address}`] = { acked: ackedArr[i], balance: balancesArr[i] };
-      });
+    // On-chain + sandbox data — only if wallet connected
+    let ackedArr = providers.map(()=>false);
+    let balancesArr = providers.map(()=>[0n,0n,0n]);
+    const sbxByProvider = {};
+    if (contract && walletAddr) {
+      const cacheKeys = providers.map(p => `${walletAddr}:${p.address}`);
+      const allCached = !forceChain && cacheKeys.every(k => _chainCache[k]);
+      if (allCached) {
+        ackedArr    = cacheKeys.map(k => _chainCache[k].acked);
+        balancesArr = cacheKeys.map(k => _chainCache[k].balance);
+      } else {
+        [ackedArr, balancesArr] = await Promise.all([
+          Promise.all(providers.map(p => contract.isTEEAcknowledged(walletAddr, p.address).catch(()=>false))),
+          Promise.all(providers.map(p => contract.getBalance(walletAddr, p.address).catch(()=>[0n,0n,0n]))),
+        ]);
+        providers.forEach((p, i) => {
+          _chainCache[`${walletAddr}:${p.address}`] = { acked: ackedArr[i], balance: balancesArr[i] };
+        });
+      }
+      await Promise.all(providers.map(async p => {
+        const key = p.address.toLowerCase();
+        try {
+          const r = await fetch(`/proxy/${p.address}/api/sandbox_list?wallet=${encodeURIComponent(walletAddr)}`);
+          sbxByProvider[key] = r.ok ? (await r.json().catch(()=>[])) : [];
+        } catch(_) { sbxByProvider[key] = []; }
+      }));
     }
 
-    // Sort: online first, then offline
-    const sortedIdx = providers.map((_,i)=>i).sort((a,b) => {
-      const ha = healthByProvider[providers[a].address.toLowerCase()] ? 1 : 0;
-      const hb = healthByProvider[providers[b].address.toLowerCase()] ? 1 : 0;
-      return hb - ha;
-    });
+    const onlineCount = Object.values(healthByProvider).filter(Boolean).length;
+    if (countEl) countEl.textContent = walletAddr
+      ? `${providers.length} providers · ${onlineCount} online`
+      : `${providers.length} providers · ${onlineCount} online · connect wallet to manage`;
+
+    const sortedIdx = providers.map((_,i)=>i).sort((a,b) =>
+      (healthByProvider[providers[b].address.toLowerCase()]?1:0) - (healthByProvider[providers[a].address.toLowerCase()]?1:0)
+    );
+
+    // Remember open items
+    const openKeys = new Set([...section.querySelectorAll('.pv-item.open')].map(el => el.id.replace('pv-','')));
 
     section.innerHTML = '';
     sortedIdx.forEach(i => {
@@ -620,91 +969,95 @@ async function loadProviders(forceChain=false) {
       const [bal, pendingRefund] = balancesArr[i];
       const isUp = healthByProvider[key];
 
-      const card = document.createElement('div');
-      card.className = 'card' + (isAcked ? ' pv-subscribed' : '');
-      card.id = 'pv-' + key;
-      card.innerHTML = `
-        <div class="card-head">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <span class="pv-addr" title="${p.address}">${shortAddr(p.address)}</span>
-            <span class="tag ${isUp ? 'running' : 'error'}"><span class="tag-dot"></span>${isUp ? 'Online' : 'Offline'}</span>
-            ${isAcked ? '<span class="badge green">Acknowledged</span>' : ''}
+      let bodyHTML = '';
+      if (!walletAddr) {
+        bodyHTML = `
+          <div class="pv-detail-section">
+            <div class="pv-detail-row"><span class="pv-detail-key">address</span><span class="pv-detail-val">${p.address}</span></div>
+            <div class="pv-detail-row"><span class="pv-detail-key">tee_signer</span><span class="pv-detail-val">${p.tee_signer}<span class="tip"><span class="tip-icon">?</span><span class="tip-box">Billing runs inside a TDX hardware enclave. The signing key is physically isolated — the operator cannot forge charges or read your sandbox.</span></span></span></div>
           </div>
-          <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
-            <button class="btn btn-sm btn-ghost" title="Refresh" onclick="loadProviders(true)">↻</button>
-            ${_subscribePending.has(p.address)
-              ? `<button class="btn btn-sm btn-ghost" disabled>…</button>`
-              : isAcked
-                ? `<button class="btn btn-sm btn-danger" onclick="doUnsubscribe('${p.address}',this)">Revoke</button>`
-                : `<span style="display:inline-flex;align-items:center;gap:4px"><button class="btn btn-sm btn-prim" onclick="doSubscribe('${p.address}',this)">Acknowledge</button><span class="tip"><span class="tip-icon">?</span><span class="tip-box" style="right:0;left:auto;transform:none;white-space:normal">Confirming you trust this provider's TEE signer key to authorize billing charges. Required before depositing or creating sandboxes.</span></span></span>`
-            }
+          <div class="pv-connect-prompt">connect wallet to acknowledge and create sandboxes</div>`;
+      } else if (!isAcked) {
+        bodyHTML = `
+          <div class="pv-detail-section">
+            <div class="pv-detail-row"><span class="pv-detail-key">address</span><span class="pv-detail-val">${p.address}</span></div>
+            <div class="pv-detail-row"><span class="pv-detail-key">tee_signer</span><span class="pv-detail-val">${p.tee_signer}<span class="tip"><span class="tip-icon">?</span><span class="tip-box">Billing runs inside a TDX hardware enclave. The signing key is physically isolated — the operator cannot forge charges or read your sandbox.</span></span></span></div>
           </div>
-        </div>
-        <div class="pv-stats">
-          <div class="pv-stat">
-            <span class="pv-stat-val">${fmtNeuron(p.price_per_cpu_per_min)}</span>
-            <span class="pv-stat-key">CPU / min</span>
+          <div class="pv-connect-prompt">acknowledge this provider's TEE signer to deposit balance and create sandboxes</div>`;
+      } else {
+        bodyHTML = `
+          <div class="pv-balance-section" style="background:oklch(7% 0.004 275)">
+            <div class="pv-balance-label">balance</div>
+            <div class="pv-balance-main">
+              <div>
+                <span id="pv-bal-${key}" class="pv-balance-amount">${fmtNeuron(bal.toString())}</span>
+                <div id="pv-refund-${key}" class="pv-refund-line">${BigInt(pendingRefund.toString())>0n ? `pending_refund: ${fmtNeuron(pendingRefund.toString())}` : ''}</div>
+              </div>
+              <div class="pv-deposit-row">
+                <input type="number" step="0.001" min="0.001" value="0.1" id="dep-amt-${p.address}" class="ia-input" style="width:72px">
+                <span class="ia-unit">0G</span>
+                <button class="btn btn-prim btn-sm" onclick="doDeposit('${p.address}',this)" style="font-family:var(--mono)">deposit</button>
+                <button class="btn btn-ghost btn-sm" onclick="doRefund('${p.address}',this)" style="font-family:var(--mono)">refund</button>
+              </div>
+            </div>
+            <div class="err" id="dep-err-${p.address}" style="margin-top:6px"></div>
           </div>
-          <div class="pv-stat">
-            <span class="pv-stat-val">${fmtNeuron(p.price_per_mem_gb_per_min)}</span>
-            <span class="pv-stat-key">Mem GB / min</span>
-          </div>
-          <div class="pv-stat">
-            <span class="pv-stat-val">${fmtNeuron(p.create_fee)}</span>
-            <span class="pv-stat-key">Create fee</span>
-          </div>
-          <div class="pv-stat">
-            <span class="pv-stat-val" style="font-size:12px;display:inline-flex;align-items:center;gap:2px">
-              <span title="${p.tee_signer}">${shortAddr(p.tee_signer)}</span>
-              <span class="tip">
-                <span class="tip-icon">?</span>
-                <span class="tip-box">This provider's billing runs inside a TDX hardware enclave. The signing key is physically isolated — the server operator cannot forge charges or access your sandbox.</span>
-              </span>
-            </span>
-            <span class="pv-stat-key">TEE Signer</span>
-          </div>
-        </div>
+          <div class="pv-sandbox-section">
+            <div class="pv-sandbox-header">
+              <span class="pv-sandbox-label">sandboxes</span>
+              <button class="btn btn-sm btn-prim" onclick="setSelectedProvider(_providerMap['${key}']);openModal('createModal')" style="font-family:var(--mono)">+ new</button>
+            </div>
+            <div class="pv-sandbox-list" id="pv-sbxlist-${key}">
+              ${renderSandboxRows(mySbx, p.address)}
+            </div>
+          </div>`;
+      }
 
-        ${isAcked ? `
-        <div class="pv-balance-section">
-          <div class="pv-balance-label">Your Balance</div>
-          <div class="pv-balance-main">
-            <div>
-              <span id="pv-bal-${key}" class="pv-balance-amount">${fmtNeuron(bal.toString())}</span>
-              <div id="pv-refund-${key}" class="pv-refund-line">${BigInt(pendingRefund.toString())>0n ? `Pending refund: ${fmtNeuron(pendingRefund.toString())}` : ''}</div>
+      const item = document.createElement('div');
+      item.className = 'pv-item' + (isAcked ? ' pv-acknowledged' : '') + (openKeys.has(key) ? ' open' : '');
+      item.id = 'pv-' + key;
+      item.innerHTML = `
+        <div class="pv-item-head" onclick="toggleProvider('${key}')">
+          <span class="pv-expand-icon">›</span>
+          <div class="pv-item-meta">
+            <div class="pv-item-top">
+              <span class="pv-addr" title="${p.address}">${shortAddr(p.address)}</span>
+              <span class="tag ${isUp ? 'running' : 'error'}"><span class="tag-dot"></span>${isUp ? 'online' : 'offline'}</span>
+              ${isAcked ? '<span class="badge green">acknowledged</span>' : ''}
             </div>
-            <div class="pv-deposit-row">
-              <input type="number" step="0.001" min="0.001" value="0.1" id="dep-amt-${p.address}" class="ia-input" style="width:72px">
-              <span class="ia-unit">0G</span>
-              <button class="btn btn-prim btn-sm" onclick="doDeposit('${p.address}',this)">Deposit</button>
-              <button class="btn btn-ghost btn-sm" onclick="doRefund('${p.address}',this)">Refund</button>
+            <div class="pv-pricing-chips">
+              <span class="pv-chip">cpu <span>${fmtNeuron(p.price_per_cpu_per_min)}/min</span></span>
+              <span class="pv-chip">mem <span>${fmtNeuron(p.price_per_mem_gb_per_min)}/GB·min</span></span>
+              <span class="pv-chip">create <span>${fmtNeuron(p.create_fee)}</span></span>
             </div>
           </div>
-          <div class="err" id="dep-err-${p.address}" style="margin-top:6px"></div>
+          <div class="pv-item-actions">
+            ${walletAddr
+              ? (_subscribePending.has(p.address)
+                ? `<button class="btn btn-sm btn-ghost" disabled style="font-family:var(--mono)">…</button>`
+                : isAcked
+                  ? `<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();doUnsubscribe('${p.address}',this)" style="font-family:var(--mono)">revoke</button>`
+                  : `<button class="btn btn-sm btn-prim" onclick="event.stopPropagation();doSubscribe('${p.address}',this)" style="font-family:var(--mono)">acknowledge</button>`)
+              : ''}
+          </div>
         </div>
-        <div class="pv-sandbox-section">
-          <div class="pv-sandbox-header">
-            <span class="pv-sandbox-label">Sandboxes</span>
-            <button class="btn btn-sm btn-prim" onclick="setSelectedProvider(_providerMap['${key}']);openModal('createModal')">+ New Sandbox</button>
-          </div>
-          <div class="pv-sandbox-list">
-            ${renderSandboxRows(mySbx, p.address)}
-          </div>
-        </div>` : ''}`;
-      section.appendChild(card);
+        <div class="pv-item-body" id="pv-body-${key}">${bodyHTML}</div>`;
+      section.appendChild(item);
     });
 
     const allSbx = Object.values(sbxByProvider).flat();
-    const transient = allSbx.some(s=>['starting','archiving','stopping'].includes((s.state||'').toLowerCase()));
-    transient ? _startPoll() : _stopPoll();
+    allSbx.some(s=>['starting','archiving','stopping'].includes((s.state||'').toLowerCase())) ? _startPoll() : _stopPoll();
   } catch(e) {
-    section.innerHTML = `<div class="empty">Failed to load: ${e.message}</div>`;
+    section.innerHTML = `<div class="empty">error: ${e.message}</div>`;
   }
 }
 
-function setSelectedProvider(p) {
-  selectedProvider = p;
+function toggleProvider(key) {
+  const item = document.getElementById('pv-' + key);
+  if (item) item.classList.toggle('open');
 }
+
+function setSelectedProvider(p) { selectedProvider = p; }
 
 function sandboxLabel(s) {
   const name = s.name && s.name !== s.id ? s.name : null;
@@ -714,8 +1067,7 @@ function sandboxLabel(s) {
 }
 
 function renderSandboxRows(sandboxes, providerAddr) {
-  if (!sandboxes?.length) return '<div class="pv-sandbox-empty">No sandboxes yet.<br><span style="font-size:11.5px">Click <strong>+ New Sandbox</strong> above to get started.</span></div>';
-  const pa = providerAddr;
+  if (!sandboxes?.length) return '<div class="pv-sandbox-empty">no sandboxes · click + new to get started</div>';
   return sandboxes.map(s => {
     const shortLabel = (s.name&&s.name!==s.id?s.name:s.id?.slice(0,8))||s.id;
     const st = (s.state||'').toLowerCase();
@@ -724,10 +1076,10 @@ function renderSandboxRows(sandboxes, providerAddr) {
       <span style="flex:1;min-width:0">${sandboxLabel(s)}</span>
       ${stateTag(s.state)}
       <div class="pv-sandbox-actions">
-        ${st==='started' ? `<button class="btn btn-sm btn-ghost" onclick="doSSH('${s.id}','${pa}')">SSH</button>` : ''}
-        ${['started','starting'].includes(st) ? `<button class="btn btn-sm btn-danger" onclick="doStop('${s.id}','${shortLabel}','${pa}')">Stop</button>` : ''}
-        ${['archived','stopped'].includes(st) ? `<button class="btn btn-sm btn-prim" onclick="doStart('${s.id}','${pa}')">Start</button>` : ''}
-        ${['archived','stopped','error'].includes(st) ? `<button class="btn btn-sm btn-ghost" onclick="doDelete('${s.id}','${shortLabel}','${pa}')">Delete</button>` : ''}
+        ${st==='started' ? `<button class="btn btn-sm btn-ghost" onclick="doSSH('${s.id}','${providerAddr}')" style="font-family:var(--mono)">ssh</button>` : ''}
+        ${['started','starting'].includes(st) ? `<button class="btn btn-sm btn-danger" onclick="doStop('${s.id}','${shortLabel}','${providerAddr}')" style="font-family:var(--mono)">stop</button>` : ''}
+        ${['archived','stopped'].includes(st) ? `<button class="btn btn-sm btn-prim" onclick="doStart('${s.id}','${providerAddr}')" style="font-family:var(--mono)">start</button>` : ''}
+        ${['archived','stopped','error'].includes(st) ? `<button class="btn btn-sm btn-ghost" onclick="doDelete('${s.id}','${shortLabel}','${providerAddr}')" style="font-family:var(--mono)">delete</button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -735,19 +1087,19 @@ function renderSandboxRows(sandboxes, providerAddr) {
 
 async function doSubscribe(addr, btn) {
   if (_subscribePending.has(addr)) return;
-  _subscribePending.add(addr); btn.disabled = true; btn.textContent = '…';
+  _subscribePending.add(addr); btn.disabled=true; btn.textContent='…';
   await sendTx('Acknowledge', () => contract.acknowledgeTEESigner(addr, true), {
-    onSuccess: () => { _subscribePending.delete(addr); loadProviders(true); },
-    onError:   () => { _subscribePending.delete(addr); btn.disabled=false; btn.textContent='Subscribe'; },
+    onSuccess: () => { _subscribePending.delete(addr); const k=`${walletAddr}:${addr}`; if(_chainCache[k]) _chainCache[k].acked=true; loadProviders(false); },
+    onError:   () => { _subscribePending.delete(addr); btn.disabled=false; btn.textContent='acknowledge'; },
   });
 }
 
 async function doUnsubscribe(addr, btn) {
   if (_subscribePending.has(addr)) return;
-  _subscribePending.add(addr); btn.disabled = true; btn.textContent = '…';
+  _subscribePending.add(addr); btn.disabled=true; btn.textContent='…';
   await sendTx('Revoke', () => contract.acknowledgeTEESigner(addr, false), {
-    onSuccess: () => { _subscribePending.delete(addr); loadProviders(true); },
-    onError:   () => { _subscribePending.delete(addr); btn.disabled=false; btn.textContent='Unsubscribe'; },
+    onSuccess: () => { _subscribePending.delete(addr); const k=`${walletAddr}:${addr}`; if(_chainCache[k]) _chainCache[k].acked=false; loadProviders(false); },
+    onError:   () => { _subscribePending.delete(addr); btn.disabled=false; btn.textContent='revoke'; },
   });
 }
 
@@ -769,53 +1121,48 @@ function showConfirm(msg, okLabel='Confirm') {
   return new Promise(resolve => {
     document.getElementById('confirmMsg').textContent = msg;
     document.getElementById('confirmOk').textContent = okLabel;
-    const bg = document.getElementById('confirmModal');
-    const ok = document.getElementById('confirmOk');
-    const cancel = document.getElementById('confirmCancel');
-    const cleanup = () => { bg.classList.remove('open'); ok.onclick = null; cancel.onclick = null; bg.onclick = null; };
+    const bg=document.getElementById('confirmModal'), ok=document.getElementById('confirmOk'), cancel=document.getElementById('confirmCancel');
+    const cleanup = () => { bg.classList.remove('open'); ok.onclick=null; cancel.onclick=null; bg.onclick=null; };
     ok.onclick = () => { cleanup(); resolve(true); };
     cancel.onclick = () => { cleanup(); resolve(false); };
-    bg.onclick = e => { if (e.target === bg) { cleanup(); resolve(false); } };
+    bg.onclick = e => { if(e.target===bg){ cleanup(); resolve(false); } };
     bg.classList.add('open');
   });
 }
 
 async function reloadProviderSandboxes(providerAddr) {
   const key = providerAddr.toLowerCase();
-  const card = document.getElementById('pv-' + key);
-  if (!card) return;
-  const listEl = card.querySelector('.pv-sandbox-list');
+  const listEl = document.getElementById('pv-sbxlist-' + key);
   if (!listEl) return;
   try {
     const r = await fetch(`/proxy/${providerAddr}/api/sandbox_list?wallet=${encodeURIComponent(walletAddr)}`);
-    const sandboxes = r.ok ? (await r.json().catch(() => [])) : [];
+    const sandboxes = r.ok ? (await r.json().catch(()=>[])) : [];
     listEl.innerHTML = renderSandboxRows(sandboxes, providerAddr);
-    const transient = sandboxes.some(s => ['starting','archiving','stopping'].includes((s.state||'').toLowerCase()));
-    transient ? _startPoll() : _stopPoll();
+    sandboxes.some(s=>['starting','archiving','stopping'].includes((s.state||'').toLowerCase())) ? _startPoll() : _stopPoll();
   } catch(_) {}
 }
 
 // ── User Actions ──────────────────────────────────────────────────────────────
 async function doDeposit(providerAddr, btn) {
   const amt = document.getElementById(`dep-amt-${providerAddr}`).value;
-  if (!amt || parseFloat(amt)<=0) { document.getElementById(`dep-err-${providerAddr}`).textContent='Enter a valid amount'; return; }
+  if (!amt || parseFloat(amt)<=0) { document.getElementById(`dep-err-${providerAddr}`).textContent='enter a valid amount'; return; }
   document.getElementById(`dep-err-${providerAddr}`).textContent='';
   if (btn) { btn.disabled=true; btn.textContent='…'; }
   await sendTx(`Deposit ${amt} 0G`, ()=>contract.deposit(walletAddr, providerAddr, {value:ethers.parseEther(amt)}), {
     onSuccess: ()=>{ loadUserData(); loadProviders(true); }, errEl:`dep-err-${providerAddr}`,
   });
-  if (btn) { btn.disabled=false; btn.textContent='Deposit'; }
+  if (btn) { btn.disabled=false; btn.textContent='deposit'; }
 }
 
 async function doRefund(providerAddr, btn) {
   const amt = document.getElementById(`dep-amt-${providerAddr}`).value;
-  if (!amt || parseFloat(amt)<=0) { document.getElementById(`dep-err-${providerAddr}`).textContent='Enter a valid amount'; return; }
+  if (!amt || parseFloat(amt)<=0) { document.getElementById(`dep-err-${providerAddr}`).textContent='enter a valid amount'; return; }
   document.getElementById(`dep-err-${providerAddr}`).textContent='';
   if (btn) { btn.disabled=true; btn.textContent='…'; }
   await sendTx('Refund request', ()=>contract.requestRefund(providerAddr, ethers.parseEther(amt)), {
     onSuccess: ()=>{ loadUserData(); loadProviders(true); }, errEl:`dep-err-${providerAddr}`,
   });
-  if (btn) { btn.disabled=false; btn.textContent='Refund'; }
+  if (btn) { btn.disabled=false; btn.textContent='refund'; }
 }
 
 async function fetchSandboxIds() {
@@ -825,83 +1172,79 @@ async function fetchSandboxIds() {
 }
 
 async function doCreate() {
-  if (!selectedProvider) { setErr('createErr','No provider selected'); return; }
+  if (!selectedProvider) { setErr('createErr','no provider selected'); return; }
   const name=document.getElementById('sandboxName').value.trim();
   const snapshot=document.getElementById('snapshotSelect').value;
   setErr('createErr',''); setLoading('createErr','');
-  const btn=document.getElementById('createBtn'); btn.disabled=true; btn.textContent='Creating… (may take ~60s)';
+  const btn=document.getElementById('createBtn'); btn.disabled=true; btn.textContent='creating… (~60s)';
   const prevIds=await fetchSandboxIds();
-  const body={};
-  if (name) body.name=name;
-  if (snapshot) body.snapshot=snapshot;
+  const body={}; if(name) body.name=name; if(snapshot) body.snapshot=snapshot;
   try {
     const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),180000);
     const resp=await signedFetch('POST','/api/sandbox',body,ctrl.signal); clearTimeout(timer);
     let data={}; try{ data=await resp.json(); }catch(_){}
     if (!resp.ok) {
-      if (resp.status===402) { setErr('createErr',`Insufficient balance (have ${fmtNeuron(data.balance)}, need ${fmtNeuron(data.required)}). Deposit first.`); return; }
-      if (resp.status===409) { setErr('createErr',`Name "${name}" is already taken — choose a different name.`); return; }
-      setLoading('createErr','Checking if sandbox was created…');
+      if (resp.status===402) { setErr('createErr',`insufficient balance (have ${fmtNeuron(data.balance)}, need ${fmtNeuron(data.required)})`); return; }
+      if (resp.status===409) { setErr('createErr',`name "${name}" already taken`); return; }
+      setLoading('createErr','checking if sandbox was created…');
       await new Promise(r=>setTimeout(r,3000));
       const created=[...(await fetchSandboxIds())].find(id=>!prevIds.has(id));
-      if (created) { try{await signedFetch('POST',`/api/sandbox/${created}/ensure-billing`);}catch(_){} toast('Sandbox created!','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; await reloadProviderSandboxes(selectedProvider?.address); return; }
-      setErr('createErr',data.error||`HTTP ${resp.status} — please try again.`); return;
+      if (created) { try{await signedFetch('POST',`/api/sandbox/${created}/ensure-billing`);}catch(_){} toast('sandbox created','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; await reloadProviderSandboxes(selectedProvider?.address); return; }
+      setErr('createErr',data.error||`HTTP ${resp.status}`); return;
     }
-    toast('Sandbox created!','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; await reloadProviderSandboxes(selectedProvider?.address);
+    toast('sandbox created','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; await reloadProviderSandboxes(selectedProvider?.address);
   } catch(e) {
     if (e.name==='AbortError') {
-      setLoading('createErr','Checking if sandbox was created…'); await new Promise(r=>setTimeout(r,3000));
+      setLoading('createErr','checking if sandbox was created…'); await new Promise(r=>setTimeout(r,3000));
       const created=[...(await fetchSandboxIds())].find(id=>!prevIds.has(id));
-      if (created) { try{await signedFetch('POST',`/api/sandbox/${created}/ensure-billing`);}catch(_){} toast('Sandbox created!','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; await reloadProviderSandboxes(selectedProvider?.address); return; }
-      setErr('createErr','Request timed out — please try again.');
+      if (created) { try{await signedFetch('POST',`/api/sandbox/${created}/ensure-billing`);}catch(_){} toast('sandbox created','success'); closeModal('createModal'); document.getElementById('sandboxName').value=''; await reloadProviderSandboxes(selectedProvider?.address); return; }
+      setErr('createErr','request timed out');
     } else { setErr('createErr',e.message); }
-  } finally {
-    btn.disabled=false; btn.textContent='Create & Start';
-  }
+  } finally { btn.disabled=false; btn.textContent='Create & Start'; }
 }
 
 async function doStop(id, label, providerAddr) {
-  if (!await showConfirm(`Stop sandbox "${label||id}"?`, 'Stop')) return;
+  if (!await showConfirm(`stop sandbox "${label||id}"?`, 'stop')) return;
   selectedProvider = _providerMap[providerAddr.toLowerCase()];
   const card = document.getElementById('pv-' + providerAddr.toLowerCase());
   const row = card?.querySelector(`.pv-sandbox-row[data-id="${id}"]`);
-  if (row) { row.querySelector('.tag').outerHTML = stateTag('stopping'); row.querySelectorAll('button').forEach(b=>b.disabled=true); }
+  if (row) { row.querySelector('.tag').outerHTML=stateTag('stopping'); row.querySelectorAll('button').forEach(b=>b.disabled=true); }
   const r=await signedFetch('POST',`/api/sandbox/${id}/stop`).catch(e=>{toast(e.message,'error');return null});
   if (!r) return;
-  if (!r.ok) { const d=await r.json().catch(()=>{}); toast(d?.error||'Failed','error'); await reloadProviderSandboxes(providerAddr); return; }
-  toast('Sandbox stopped','success'); await reloadProviderSandboxes(providerAddr);
+  if (!r.ok) { const d=await r.json().catch(()=>{}); toast(d?.error||'failed','error'); await reloadProviderSandboxes(providerAddr); return; }
+  toast('sandbox stopped','success'); await reloadProviderSandboxes(providerAddr);
 }
 
 async function doStart(id, providerAddr) {
   selectedProvider = _providerMap[providerAddr.toLowerCase()];
   const card = document.getElementById('pv-' + providerAddr.toLowerCase());
   const row = card?.querySelector(`.pv-sandbox-row[data-id="${id}"]`);
-  if (row) { row.querySelector('.tag').outerHTML = stateTag('starting'); row.querySelectorAll('button').forEach(b=>b.disabled=true); }
+  if (row) { row.querySelector('.tag').outerHTML=stateTag('starting'); row.querySelectorAll('button').forEach(b=>b.disabled=true); }
   const r=await signedFetch('POST',`/api/sandbox/${id}/start`).catch(e=>{toast(e.message,'error');return null});
   if (!r) return;
-  if (!r.ok) { let d={}; try{d=await r.json();}catch(_){} toast(d.error||'Failed to start','error'); await reloadProviderSandboxes(providerAddr); return; }
-  toast('Sandbox starting…','success'); await reloadProviderSandboxes(providerAddr);
+  if (!r.ok) { let d={}; try{d=await r.json();}catch(_){} toast(d.error||'failed to start','error'); await reloadProviderSandboxes(providerAddr); return; }
+  toast('sandbox starting…','success'); await reloadProviderSandboxes(providerAddr);
 }
 
 async function doDelete(id, label, providerAddr) {
-  if (!await showConfirm(`Delete sandbox "${label||id}"? This cannot be undone.`, 'Delete')) return;
+  if (!await showConfirm(`delete sandbox "${label||id}"? cannot be undone.`, 'delete')) return;
   selectedProvider = _providerMap[providerAddr.toLowerCase()];
   const card = document.getElementById('pv-' + providerAddr.toLowerCase());
   const row = card?.querySelector(`.pv-sandbox-row[data-id="${id}"]`);
-  if (row) { row.style.opacity='0.4'; row.querySelectorAll('button').forEach(b=>b.disabled=true); }
+  if (row) { row.style.opacity='0.35'; row.querySelectorAll('button').forEach(b=>b.disabled=true); }
   const r=await signedFetch('DELETE',`/api/sandbox/${id}`).catch(e=>{toast(e.message,'error');return null});
   if (!r) return;
-  if (!r.ok) { let d={}; try{d=await r.json();}catch(_){} toast(d.error||'Failed to delete','error'); await reloadProviderSandboxes(providerAddr); return; }
-  toast('Sandbox deleted','success'); await reloadProviderSandboxes(providerAddr);
+  if (!r.ok) { let d={}; try{d=await r.json();}catch(_){} toast(d.error||'failed to delete','error'); await reloadProviderSandboxes(providerAddr); return; }
+  toast('sandbox deleted','success'); await reloadProviderSandboxes(providerAddr);
 }
 
 async function doSSH(id, providerAddr) {
   selectedProvider = _providerMap[providerAddr.toLowerCase()];
-  document.getElementById('sshCommand').textContent='Loading…'; openModal('sshModal');
+  document.getElementById('sshCommand').textContent='loading…'; openModal('sshModal');
   try {
     const resp=await signedFetch('POST',`/api/sandbox/${id}/ssh-access`);
     const data=await resp.json().catch(()=>({}));
-    if (!resp.ok) { document.getElementById('sshCommand').textContent=data.error||'Failed'; return; }
+    if (!resp.ok) { document.getElementById('sshCommand').textContent=data.error||'failed'; return; }
     const cmd=data.sshCommand||'';
     document.getElementById('sshCommand').textContent=cmd.includes('@localhost')?cmd.replace('@localhost','@'+window.location.hostname):cmd;
   } catch(e) { document.getElementById('sshCommand').textContent=e.message; }
@@ -909,21 +1252,12 @@ async function doSSH(id, providerAddr) {
 
 function copySSH() {
   const text = document.getElementById('sshCommand').textContent;
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(text).then(()=>toast('Copied!','success')).catch(()=>copyFallback(text));
-  } else {
-    copyFallback(text);
-  }
+  if (navigator.clipboard) navigator.clipboard.writeText(text).then(()=>toast('copied','success')).catch(()=>copyFallback(text));
+  else copyFallback(text);
 }
 function copyFallback(text) {
-  try {
-    const ta = document.createElement('textarea');
-    ta.value = text; ta.style.cssText = 'position:fixed;opacity:0';
-    document.body.appendChild(ta); ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    toast('Copied!','success');
-  } catch(_) { toast('Copy failed — select manually','error'); }
+  try { const ta=document.createElement('textarea'); ta.value=text; ta.style.cssText='position:fixed;opacity:0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); toast('copied','success'); }
+  catch(_) { toast('copy failed','error'); }
 }
 
 async function loadSnapshots() {
@@ -931,11 +1265,9 @@ async function loadSnapshots() {
   try {
     const snaps=await fetch(`${providerProxyBase()}/api/snapshots`).then(r=>r.ok?r.json():[]).catch(()=>[]);
     const sel=document.getElementById('snapshotSelect');
-    sel.innerHTML='<option value="">— Default (no snapshot) —</option>';
+    sel.innerHTML='<option value="">— Default image —</option>';
     (snaps||[]).filter(s=>s.state==='active').forEach(s=>{
-      const opt=document.createElement('option');
-      opt.value=s.name; opt.textContent=`${s.name}  (${s.cpu}C / ${s.mem}GB)`;
-      sel.appendChild(opt);
+      const opt=document.createElement('option'); opt.value=s.name; opt.textContent=`${s.name}  (${s.cpu}C / ${s.mem}GB)`; sel.appendChild(opt);
     });
   } catch(_) {}
 }
@@ -945,9 +1277,7 @@ function genUUID() {
   if (crypto.randomUUID) return crypto.randomUUID();
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{ const r=crypto.getRandomValues(new Uint8Array(1))[0]&15; return(c==='x'?r:(r&0x3|0x8)).toString(16); });
 }
-function providerProxyBase() {
-  return selectedProvider ? `/proxy/${selectedProvider.address}` : '';
-}
+function providerProxyBase() { return selectedProvider ? `/proxy/${selectedProvider.address}` : ''; }
 async function signedFetch(method, path, body=null, signal=null) {
   const baseURL = providerProxyBase();
   const msg={action:method+':'+path,expires_at:Math.floor(Date.now()/1000)+300,nonce:genUUID(),payload:body||{},resource_id:''};
@@ -955,7 +1285,7 @@ async function signedFetch(method, path, body=null, signal=null) {
   return fetch(baseURL+path,{method,headers:{'Content-Type':'application/json','X-Wallet-Address':walletAddr,'X-Signed-Message':btoa(msgStr),'X-Wallet-Signature':sig},body:body?JSON.stringify(body):undefined,signal});
 }
 
-// ── Modals ─────────────────────────────────────────────────────────────────────
+// ── Modals ────────────────────────────────────────────────────────────────────
 function openModal(id)  { document.getElementById(id).classList.add('open'); if(id==='createModal') loadSnapshots(); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 document.querySelectorAll('.modal-bg').forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) m.classList.remove('open'); }));
@@ -972,21 +1302,19 @@ function pushToast(msg,type) {
 }
 function updateToast(el,msg,type,hash,autoRemove) {
   el.className='toast'+(type&&type!=='info'?' '+type:'');
-  if (hash) { el.innerHTML=''; const s=document.createElement('span'); s.textContent=msg; el.appendChild(s); const a=document.createElement('a'); a.href='https://chainscan-galileo.0g.ai/tx/'+hash; a.target='_blank'; a.rel='noopener'; a.textContent='↗ View tx'; el.appendChild(a); }
+  if (hash) { el.innerHTML=''; const s=document.createElement('span'); s.textContent=msg; el.appendChild(s); const a=document.createElement('a'); a.href='https://chainscan-galileo.0g.ai/tx/'+hash; a.target='_blank'; a.rel='noopener'; a.textContent='↗ tx'; el.appendChild(a); }
   else { el.textContent=msg; }
   if (autoRemove) setTimeout(()=>el.remove(),type==='error'?8000:6000);
 }
 async function waitMined(tx, timeout=120000, poll=3000) {
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
+  const deadline=Date.now()+timeout;
+  while (Date.now()<deadline) {
     try { return await tx.wait(); } catch(e) {
-      if ((e?.message||'').includes('no matching receipts')) {
-        await new Promise(r=>setTimeout(r,poll)); continue;
-      }
+      if ((e?.message||'').includes('no matching receipts')) { await new Promise(r=>setTimeout(r,poll)); continue; }
       throw e;
     }
   }
-  throw new Error('Transaction not confirmed within timeout');
+  throw new Error('tx not confirmed within timeout');
 }
 async function sendTx(label,txFn,{onSuccess,onError,errEl}={}) {
   const t=pushToast(label+'…','pending');
@@ -1003,16 +1331,12 @@ async function sendTx(label,txFn,{onSuccess,onError,errEl}={}) {
 function toast(msg,type='info') { const el=pushToast(msg,type); setTimeout(()=>el.remove(),4000); }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function stateBadge(s) {
-  switch((s||'').toLowerCase()){case'started':return'green';case'starting':return'blue';case'archived':case'archiving':return'gray';case'error':return'red';default:return'';}
-}
 function fmtNeuron(s) {
   if(!s||s==='0') return '0 0G';
   const n=BigInt(s); if(n===0n) return '0 0G';
   const val=Number(n)/1e18;
   return val>=0.000001 ? val.toFixed(6).replace(/\.?0+$/,'')+' 0G' : val.toExponential(2)+' 0G';
 }
-function fmtTime(ts) { return ts?new Date(ts*1000).toLocaleString():'—'; }
 function shortAddr(a) { if(!a||a.length<12) return a||'—'; return a.slice(0,8)+'…'+a.slice(-6); }
 function stateTag(state) {
   const s=(state||'').toLowerCase();
@@ -1021,7 +1345,6 @@ function stateTag(state) {
 }
 function setErr(id,msg){ const el=document.getElementById(id); if(!el) return; el.textContent=msg; el.className=msg?'err':''; }
 function setLoading(id,msg){ const el=document.getElementById(id); if(!el) return; el.textContent=msg; el.className=msg?'loading':''; }
-function setBusy(id,busy){ const el=document.getElementById(id); if(el){ el.disabled=busy; el.textContent=busy?'…':(el.dataset.label||el.textContent); } }
 </script>
 </body>
 </html>
