@@ -7,7 +7,7 @@
 <script src="/static/ethers.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -31,8 +31,9 @@
   --red:   oklch(60% 0.18 25);  --rbg: oklch(14% 0.07 25);  --rbd: oklch(26% 0.12 25);
   --orange:oklch(68% 0.16 55);  --obg: oklch(14% 0.07 55);  --obd: oklch(26% 0.12 55);
   /* Typography */
-  --sans: 'Syne', -apple-system, sans-serif;
-  --mono: 'Roboto Mono', 'Courier New', monospace;
+  --sans: 'Inter', -apple-system, sans-serif;
+  --mono: 'JetBrains Mono', 'Courier New', monospace;
+  --display: 'Instrument Serif', Georgia, serif;
   /* Motion */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --t-fast: 120ms; --t-base: 220ms; --t-slow: 350ms;
@@ -83,8 +84,8 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--text);ba
 /* ─ Landing ─ */
 .landing{padding:clamp(72px,10vw,120px) 0 clamp(80px,10vw,120px);max-width:780px}
 .lt-kicker{display:block;font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.14em;text-transform:uppercase;margin-bottom:24px}
-.landing-title{font-size:clamp(38px,5vw,66px);font-weight:800;line-height:1.04;letter-spacing:-.03em;color:var(--text);margin-bottom:28px}
-.landing-title em{font-style:normal;color:var(--p)}
+.landing-title{font-family:var(--display);font-size:clamp(40px,5.5vw,72px);font-weight:400;line-height:1.08;letter-spacing:-.01em;color:var(--text);margin-bottom:28px}
+.landing-title em{font-style:italic;color:var(--p)}
 .landing-sub{font-size:16px;color:var(--text2);line-height:1.75;margin-bottom:52px;max-width:480px}
 .landing-sub strong{color:var(--text);font-weight:600}
 .lf-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-bottom:52px;background:var(--border);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden}
@@ -604,15 +605,15 @@ async function loadProviders(forceChain=false) {
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <span class="pv-addr" title="${p.address}">${shortAddr(p.address)}</span>
             <span class="tag ${isUp ? 'running' : 'error'}"><span class="tag-dot"></span>${isUp ? 'Online' : 'Offline'}</span>
-            ${isAcked ? '<span class="badge green">Subscribed</span>' : ''}
+            ${isAcked ? '<span class="badge green">Acknowledged</span>' : ''}
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
             <button class="btn btn-sm btn-ghost" title="Refresh" onclick="loadProviders(true)">↻</button>
             ${_subscribePending.has(p.address)
               ? `<button class="btn btn-sm btn-ghost" disabled>…</button>`
               : isAcked
-                ? `<button class="btn btn-sm btn-danger" onclick="doUnsubscribe('${p.address}',this)">Unsubscribe</button>`
-                : `<button class="btn btn-sm btn-prim" onclick="doSubscribe('${p.address}',this)">Subscribe</button>`
+                ? `<button class="btn btn-sm btn-danger" onclick="doUnsubscribe('${p.address}',this)">Revoke</button>`
+                : `<span style="display:inline-flex;align-items:center;gap:4px"><button class="btn btn-sm btn-prim" onclick="doSubscribe('${p.address}',this)">Acknowledge</button><span class="tip"><span class="tip-icon">?</span><span class="tip-box" style="right:0;left:auto;transform:none;white-space:normal">Confirming you trust this provider's TEE signer key to authorize billing charges. Required before depositing or creating sandboxes.</span></span></span>`
             }
           </div>
         </div>
@@ -712,7 +713,7 @@ function renderSandboxRows(sandboxes, providerAddr) {
 async function doSubscribe(addr, btn) {
   if (_subscribePending.has(addr)) return;
   _subscribePending.add(addr); btn.disabled = true; btn.textContent = '…';
-  await sendTx('Subscribe', () => contract.acknowledgeTEESigner(addr, true), {
+  await sendTx('Acknowledge', () => contract.acknowledgeTEESigner(addr, true), {
     onSuccess: () => { _subscribePending.delete(addr); loadProviders(true); },
     onError:   () => { _subscribePending.delete(addr); btn.disabled=false; btn.textContent='Subscribe'; },
   });
@@ -721,7 +722,7 @@ async function doSubscribe(addr, btn) {
 async function doUnsubscribe(addr, btn) {
   if (_subscribePending.has(addr)) return;
   _subscribePending.add(addr); btn.disabled = true; btn.textContent = '…';
-  await sendTx('Unsubscribe', () => contract.acknowledgeTEESigner(addr, false), {
+  await sendTx('Revoke', () => contract.acknowledgeTEESigner(addr, false), {
     onSuccess: () => { _subscribePending.delete(addr); loadProviders(true); },
     onError:   () => { _subscribePending.delete(addr); btn.disabled=false; btn.textContent='Unsubscribe'; },
   });
