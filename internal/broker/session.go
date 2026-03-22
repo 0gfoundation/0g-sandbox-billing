@@ -38,12 +38,13 @@ type sessionChainClient interface {
 
 // SessionHandler handles POST and DELETE /api/session on the Broker.
 type SessionHandler struct {
-	providers      providerLookup
-	chain          sessionChainClient
-	payment        PaymentLayer
-	rdb            *redis.Client
-	log            *zap.Logger
-	topupIntervals int64
+	providers           providerLookup
+	chain               sessionChainClient
+	payment             PaymentLayer
+	rdb                 *redis.Client
+	log                 *zap.Logger
+	topupIntervals      int64
+	depositWaitTimeout  time.Duration
 }
 
 // NewSessionHandler creates a SessionHandler.
@@ -54,14 +55,36 @@ func NewSessionHandler(
 	rdb *redis.Client,
 	log *zap.Logger,
 	topupIntervals int64,
+	depositWaitTimeoutSec int64,
 ) *SessionHandler {
 	return &SessionHandler{
-		providers:      providers,
-		chain:          chain,
-		payment:        payment,
-		rdb:            rdb,
-		log:            log,
-		topupIntervals: topupIntervals,
+		providers:          providers,
+		chain:              chain,
+		payment:            payment,
+		rdb:                rdb,
+		log:                log,
+		topupIntervals:     topupIntervals,
+		depositWaitTimeout: time.Duration(depositWaitTimeoutSec) * time.Second,
+	}
+}
+
+// waitForBalance polls the on-chain balance until it reaches needed or the
+// depositWaitTimeout elapses. Returns true if balance reached, false if timeout.
+func (h *SessionHandler) waitForBalance(user, provider common.Address, needed *big.Int) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), h.depositWaitTimeout)
+	defer cancel()
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+			bal, _, _, err := h.chain.GetProviderBalance(ctx, user, provider)
+			if err == nil && bal.Cmp(needed) >= 0 {
+				return true
+			}
+		}
 	}
 }
 
@@ -122,15 +145,19 @@ func (h *SessionHandler) HandlePost(c *gin.Context) {
 	}
 
 	// 4. Read pricing from chain — never trust billing proxy's passed-in prices.
-	pricePerCPUPerSec, pricePerMemGBPerSec, _, err := h.chain.GetServicePricing(ctx, provider)
+	pricePerCPUPerSec, pricePerMemGBPerSec, createFee, err := h.chain.GetServicePricing(ctx, provider)
 	if err != nil {
 		h.log.Warn("session: GetServicePricing failed", zap.Error(err))
 		c.JSON(http.StatusBadGateway, gin.H{"error": "pricing unavailable"})
 		return
 	}
+	cpu, memGB := req.CPU, req.MemGB
+	if cpu == 0 && memGB == 0 {
+		cpu, memGB = 1, 1 // fallback to minimum spec when not provided
+	}
 	pricePerSec := new(big.Int).Add(
-		new(big.Int).Mul(pricePerCPUPerSec, big.NewInt(req.CPU)),
-		new(big.Int).Mul(pricePerMemGBPerSec, big.NewInt(req.MemGB)),
+		new(big.Int).Mul(pricePerCPUPerSec, big.NewInt(cpu)),
+		new(big.Int).Mul(pricePerMemGBPerSec, big.NewInt(memGB)),
 	)
 
 	// 5. Compute deficit.
@@ -141,16 +168,27 @@ func (h *SessionHandler) HandlePost(c *gin.Context) {
 		return
 	}
 	needed := new(big.Int).Mul(pricePerSec, big.NewInt(req.VoucherIntervalSec*h.topupIntervals))
+	// Pre-create calls (sandbox_id == "") also need to cover the create fee.
+	if req.SandboxID == "" && createFee != nil {
+		needed.Add(needed, createFee)
+	}
 	deficit := new(big.Int)
 	if balance.Cmp(needed) < 0 {
 		deficit.Sub(needed, balance)
 	}
 
-	// 6. Fund via PaymentLayer if deficit > 0.
+	// 6. Fund via PaymentLayer if deficit > 0, then wait for deposit to land.
 	if deficit.Sign() > 0 {
 		if err := h.payment.RequestDeposit(ctx, user, provider, deficit); err != nil {
 			h.log.Warn("session: PaymentLayer failed", zap.Error(err))
 			c.JSON(http.StatusBadGateway, gin.H{"error": "payment layer failed"})
+			return
+		}
+		if !h.waitForBalance(user, provider, needed) {
+			h.log.Warn("session: deposit not confirmed in time",
+				zap.String("user", user.Hex()),
+				zap.String("provider", provider.Hex()))
+			c.JSON(http.StatusGatewayTimeout, gin.H{"error": "deposit timeout"})
 			return
 		}
 	}
@@ -164,8 +202,8 @@ func (h *SessionHandler) HandlePost(c *gin.Context) {
 			SandboxID:          req.SandboxID,
 			User:               user.Hex(),
 			Provider:           provider.Hex(),
-			CPU:                req.CPU,
-			MemGB:              req.MemGB,
+			CPU:                cpu,
+			MemGB:              memGB,
 			PricePerSec:        pricePerSec.String(),
 			VoucherIntervalSec: req.VoucherIntervalSec,
 			RegisteredAt:       time.Now().UTC(),

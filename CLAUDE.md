@@ -224,17 +224,17 @@ go run ./cmd/checkbal/
 
 ## Tapp Production Deployment
 
-Deploying to a 0G Tapp TEE server via `tapp-cli`. Server: `47.236.111.154:50051`, app-id: `0g-sandbox`.
+Deploying to a 0G Tapp TEE server via `tapp-cli`. app-id: `0g-sandbox`.
 
 ### One-time setup
 
 ```bash
 export TAPP_PRIVATE_KEY=0x<key>
-TAPP_SERVER=http://47.236.111.154:50051
+TAPP_SERVER=http://<tapp-server-host>:50051
 
-# Login to Alibaba Cloud VPC registry (one-time per server)
+# Login to container registry (one-time per server)
 tapp-cli -s $TAPP_SERVER docker-login \
-  -r eliza-registry-vpc.ap-southeast-1.cr.aliyuncs.com \
+  -r <registry-host> \
   -u <user> -p <password>
 ```
 
@@ -256,23 +256,23 @@ tapp-cli -s $TAPP_SERVER get-app-key --app-id 0g-sandbox
 
 # 4. Register provider service on-chain (use PROVIDER_KEY = provider wallet private key)
 PROVIDER_KEY=0x<provider-key> go run ./cmd/provider/ register \
-  --api http://47.236.111.154:8080 \
+  --api http://<sandbox-host>:8080 \
   --tee-signer <tee-address-from-step3> \
   --price-per-cpu <neuron/cpu/min> \
   --price-per-mem <neuron/memGB/min> \
   --create-fee <neuron>
 
-# 5. Restart billing service to pick up the new registration
-tapp-cli -s $TAPP_SERVER stop-service --app-id 0g-sandbox --service-name billing
-tapp-cli -s $TAPP_SERVER start-service --app-id 0g-sandbox --service-name billing
+# 5. Restart to pick up the new registration (must use stop-app/start-app, not stop-service/start-service)
+tapp-cli -s $TAPP_SERVER stop-app --app-id 0g-sandbox
+tapp-cli -s $TAPP_SERVER start-app -f docker-compose.yml --app-id 0g-sandbox
 ```
 
 ### Redeploy after code changes
 
 ```bash
 # 1. Build and push
-docker build --target sandbox -t eliza-registry-vpc.ap-southeast-1.cr.aliyuncs.com/eliza/0g-sandbox:latest .
-docker push eliza-registry-vpc.ap-southeast-1.cr.aliyuncs.com/eliza/0g-sandbox:latest
+docker build --target sandbox -t <registry>/<image>:latest .
+docker push <registry>/<image>:latest
 
 # 2. Redeploy
 tapp-cli -s $TAPP_SERVER stop-app --app-id 0g-sandbox

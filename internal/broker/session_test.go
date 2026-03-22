@@ -39,13 +39,15 @@ func (m *mockProviderLookup) Get(addr string) (indexer.ProviderRecord, bool) {
 }
 
 type mockSessionChain struct {
-	mu         sync.Mutex
-	cpuPerSec  *big.Int
-	memPerSec  *big.Int
-	createFee  *big.Int
-	pricingErr error
-	balance    *big.Int
-	balErr     error
+	mu                   sync.Mutex
+	cpuPerSec            *big.Int
+	memPerSec            *big.Int
+	createFee            *big.Int
+	pricingErr           error
+	balance              *big.Int
+	balanceAfterDeposit  *big.Int // if set, returned on 2nd+ GetProviderBalance calls
+	balCallCount         int
+	balErr               error
 }
 
 func (m *mockSessionChain) GetServicePricing(_ context.Context, _ common.Address) (*big.Int, *big.Int, *big.Int, error) {
@@ -57,7 +59,12 @@ func (m *mockSessionChain) GetServicePricing(_ context.Context, _ common.Address
 func (m *mockSessionChain) GetProviderBalance(_ context.Context, _, _ common.Address) (*big.Int, *big.Int, *big.Int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.balance, big.NewInt(0), big.NewInt(0), m.balErr
+	m.balCallCount++
+	bal := m.balance
+	if m.balanceAfterDeposit != nil && m.balCallCount > 1 {
+		bal = m.balanceAfterDeposit
+	}
+	return bal, big.NewInt(0), big.NewInt(0), m.balErr
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -88,7 +95,7 @@ func newSessionSetup(t *testing.T, teeKey *ecdsa.PrivateKey, chain sessionChainC
 		},
 	}
 	rdb := newTestRedis(t)
-	h := NewSessionHandler(providers, chain, payment, rdb, zap.NewNop(), 3)
+	h := NewSessionHandler(providers, chain, payment, rdb, zap.NewNop(), 3, 90)
 	return h, providers
 }
 
@@ -238,7 +245,9 @@ func TestHandlePost_deficit_triggersPayment(t *testing.T) {
 	// needed = 40×60×3 = 7200
 	// balance = 100 → deficit = 7200-100 = 7100
 	mp := &mockPaymentLayer{}
-	h, _ := newSessionSetup(t, key, defaultChain(100), mp)
+	chain := defaultChain(100)
+	chain.balanceAfterDeposit = big.NewInt(10_000) // simulate deposit landing on-chain
+	h, _ := newSessionSetup(t, key, chain, mp)
 	router := newSessionRouter(h)
 
 	w := doPost(t, router, buildPostReq(t, key, "sb-1", 2, 4))
@@ -272,7 +281,9 @@ func TestHandlePost_paymentError(t *testing.T) {
 func TestHandlePost_fundingOnly_noSessionWritten(t *testing.T) {
 	key, _ := crypto.GenerateKey()
 	mp := &mockPaymentLayer{}
-	h, _ := newSessionSetup(t, key, defaultChain(0), mp)
+	chain := defaultChain(0)
+	chain.balanceAfterDeposit = big.NewInt(10_000) // simulate deposit landing on-chain
+	h, _ := newSessionSetup(t, key, chain, mp)
 	router := newSessionRouter(h)
 
 	// sandbox_id="" → funding-only, no session entry should be written

@@ -346,7 +346,10 @@ func (c *Client) GetVoucherEvents(ctx context.Context, sinceTimestamp uint64, pa
 
 		filtered := logs[:0]
 		for _, l := range logs {
-			if blockNums[l.BlockNumber] >= sinceTimestamp {
+			ts := blockNums[l.BlockNumber]
+			// Include events whose timestamp is unavailable (ts==0 means the
+			// HeaderByNumber call failed); exclude only confirmed-older events.
+			if ts == 0 || ts >= sinceTimestamp {
 				filtered = append(filtered, l)
 			}
 		}

@@ -94,11 +94,16 @@ func NewHTTPPaymentLayer(url string, signer *ecdsa.PrivateKey, log *zap.Logger, 
 	}
 }
 
+type depositEntry struct {
+	User     string `json:"user"`
+	Provider string `json:"provider"`
+	Amount   string `json:"amount"`
+}
+
 type depositRequest struct {
-	User      string `json:"user"`
-	Provider  string `json:"provider"`
-	Amount    string `json:"amount"`
-	Timestamp int64  `json:"timestamp"` // milliseconds
+	Type      string         `json:"type"`
+	Deposits  []depositEntry `json:"deposits"`
+	Timestamp int64          `json:"timestamp"` // milliseconds
 }
 
 type depositResponse struct {
@@ -128,9 +133,10 @@ func (h *HTTPPaymentLayer) RequestDeposit(ctx context.Context, user, provider co
 	sig[64] += 27 // normalize V to Ethereum convention (27/28)
 
 	body, _ := json.Marshal(depositRequest{
-		User:      user.Hex(),
-		Provider:  provider.Hex(),
-		Amount:    amount.String(),
+		Type: "sandbox_router",
+		Deposits: []depositEntry{
+			{User: user.Hex(), Provider: provider.Hex(), Amount: amount.String()},
+		},
 		Timestamp: ts,
 	})
 
@@ -206,7 +212,7 @@ func (h *HTTPPaymentLayer) pollDepositStatus(requestID string, user, provider co
 			resp.Body.Close()                      //nolint:errcheck
 
 			switch sr.Status {
-			case "success":
+			case "success", "complete":
 				h.rdb.Del(ctx, inflightKey(user, provider)) //nolint:errcheck
 				h.log.Info("payment layer: deposit confirmed",
 					zap.String("request_id", requestID),

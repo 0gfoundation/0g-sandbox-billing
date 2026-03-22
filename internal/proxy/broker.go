@@ -35,7 +35,7 @@ func newBrokerClient(url string, teeKey *ecdsa.PrivateKey, providerAddr string, 
 		teeKey:             teeKey,
 		providerAddr:       providerAddr,
 		voucherIntervalSec: voucherIntervalSec,
-		httpClient:         &http.Client{Timeout: 30 * time.Second},
+		httpClient:         &http.Client{Timeout: 3 * time.Minute},
 		log:                log,
 	}
 }

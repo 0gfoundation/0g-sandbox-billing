@@ -12,12 +12,13 @@ import (
 
 // Sandbox represents a Daytona sandbox resource.
 type Sandbox struct {
-	ID     string            `json:"id"`
-	Name   string            `json:"name"`
-	State  string            `json:"state"`
-	Labels map[string]string `json:"labels"`
-	CPU    int               `json:"cpu"`
-	Memory int               `json:"memory"` // GB
+	ID       string            `json:"id"`
+	Name     string            `json:"name"`
+	State    string            `json:"state"`
+	Labels   map[string]string `json:"labels"`
+	CPU      int               `json:"cpu"`
+	Memory   int               `json:"memory"` // GB
+	Snapshot string            `json:"snapshot,omitempty"`
 }
 
 // Snapshot represents a Daytona snapshot resource.

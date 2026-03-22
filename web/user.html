@@ -438,7 +438,7 @@ body.v-market .view-market{display:block}
     <div class="s-wrap">
       <div class="feat-intro">
         <span class="feat-intro-label">Why 0G Sandbox</span>
-        <div class="feat-intro-title">Code freely. Nothing leaks — not to the server, not to the operator.</div>
+        <div class="feat-intro-title">Code freely. Nothing leaks — not to the sandbox provider, not to 0G.</div>
       </div>
     </div>
     <div class="feat-strip">
@@ -507,7 +507,7 @@ body.v-market .view-market{display:block}
         <div>
           <span class="skill-eyebrow">0g-private-sandbox skill</span>
           <h2 class="skill-title">Just tell Claude<br>what you want.</h2>
-          <p class="skill-desc">The 0g-private-sandbox Claude Code skill turns a conversation into a running sandbox — provider discovery, deposit, TEE acknowledgement, and SSH access, all in one flow.</p>
+          <p class="skill-desc">The 0g-private-sandbox Claude Code skill turns a conversation into a running sandbox — provider discovery, deposit, TEE acknowledgement, and vibe coding, all in one conversation. No SSH required.</p>
           <div class="skill-steps">
             <div class="skill-step">
               <div class="skill-step-n">01</div>
@@ -523,7 +523,7 @@ body.v-market .view-market{display:block}
             </div>
             <div class="skill-step">
               <div class="skill-step-n">04</div>
-              <div class="skill-step-t">Claude deposits, creates the sandbox, and hands you SSH credentials</div>
+              <div class="skill-step-t">Claude deposits, creates the sandbox, and starts coding directly in the conversation</div>
             </div>
           </div>
         </div>
@@ -532,21 +532,15 @@ body.v-market .view-market{display:block}
             <div class="skill-conv-dot"></div>
             <div class="skill-conv-title">sandbox — connected</div>
           </div>
-          <span class="sk-d">  # Step 1 — get SSH credentials</span><br>
+          <span class="sk-d">  &gt; write a program that prints Hello from 0G Sandbox</span><br>
           <span class="sk-d">&nbsp;</span><br>
-          <span class="sk-d">  $ </span><span class="sk-c">go run ./cmd/user/ ssh-access \</span><br>
-          <span class="sk-c">&nbsp;&nbsp;&nbsp;&nbsp;--api $API --id $SANDBOX_ID</span><br>
+          <span class="sk-ok">  ✓</span><span class="sk-d"> creating sandbox...</span><br>
+          <span class="sk-ok">  ✓</span><span class="sk-d"> sandbox ready</span><br>
+          <span class="sk-ok">  ✓</span><span class="sk-d"> writing hello.py</span><br>
+          <span class="sk-ok">  ✓</span><span class="sk-d"> rsync → </span><span class="sk-v">sandbox-a1b2c3</span><br>
           <span class="sk-d">&nbsp;</span><br>
-          <span class="sk-ok">  ✓</span><span class="sk-d"> ssh -p </span><span class="sk-v">2222</span><span class="sk-d"> &lt;token&gt;@private-sandbox.0g.ai</span><br>
-          <span class="sk-d">  Password: </span><span class="sk-v">e4f9…b3a1</span><br>
-          <span class="sk-d">&nbsp;</span><br>
-          <span class="sk-d">  # Step 2 — connect</span><br>
-          <span class="sk-d">&nbsp;</span><br>
-          <span class="sk-d">  $ </span><span class="sk-c">ssh -p 2222 e4f9…b3a1@private-sandbox.0g.ai</span><br>
-          <span class="sk-d">&nbsp;</span><br>
-          <span class="sk-ok">  ✓</span><span class="sk-d"> daytona@sandbox-a1b2c3:~$</span><span style="animation:blink 1.1s step-end infinite;color:var(--green)"> ▊</span><br>
-          <span class="sk-d">&nbsp;</span><br>
-          <span class="sk-d">  # token expires in 60 min · re-run ssh-access to refresh</span>
+          <span class="sk-d">  0g@sandbox-a1b2c3:~$ </span><span class="sk-c">python hello.py</span><br>
+          <span class="sk-v">  Hello from 0G Sandbox</span><span class="sk-ok"> ·</span><span style="animation:blink 1.1s step-end infinite;color:var(--green)"> ▊</span>
         </div>
       </div>
     </div>
@@ -615,8 +609,8 @@ body.v-market .view-market{display:block}
           </div>
           <div class="ugs">
             <div class="ugs-num">04</div>
-            <div class="ugs-head">Create &amp; SSH in</div>
-            <div class="ugs-desc">Click <strong>+ New Sandbox</strong>, choose a name and snapshot. SSH credentials appear once the sandbox is running.</div>
+            <div class="ugs-head">Create &amp; start coding</div>
+            <div class="ugs-desc">Click <strong>+ New Sandbox</strong>, choose a name and snapshot. Your sandbox is ready to use once running.</div>
           </div>
         </div>
       </div>
@@ -1128,7 +1122,13 @@ function renderSandboxRows(sandboxes, providerAddr) {
     const st = (s.state||'').toLowerCase();
     return `
     <div class="pv-sandbox-row" data-id="${s.id}">
-      <span style="flex:1;min-width:0">${sandboxLabel(s)}</span>
+      <span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
+        ${sandboxLabel(s)}
+        <span style="font-size:10px;color:var(--muted);font-family:var(--mono);display:flex;gap:8px">
+          ${s.cpu?`<span>${s.cpu}C / ${s.memory??'?'}GB</span>`:''}
+          ${s.snapshot?`<span title="${s.snapshot}" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.snapshot}</span>`:''}
+        </span>
+      </span>
       ${stateTag(s.state)}
       <div class="pv-sandbox-actions">
         ${st==='started' ? `<button class="btn btn-sm btn-ghost" onclick="doSSH('${s.id}','${providerAddr}')" style="font-family:var(--mono)">ssh</button>` : ''}
@@ -1277,7 +1277,7 @@ async function doStart(id, providerAddr) {
   if (row) { row.querySelector('.tag').outerHTML=stateTag('starting'); row.querySelectorAll('button').forEach(b=>b.disabled=true); }
   const r=await signedFetch('POST',`/api/sandbox/${id}/start`).catch(e=>{toast(e.message,'error');return null});
   if (!r) return;
-  if (!r.ok) { let d={}; try{d=await r.json();}catch(_){} toast(d.error||'failed to start','error'); await reloadProviderSandboxes(providerAddr); return; }
+  if (!r.ok) { let d={}; try{d=await r.json();}catch(_){} const msg = d.balance&&d.required ? `insufficient balance (have ${fmtNeuron(d.balance)}, need ${fmtNeuron(d.required)})` : (d.error||'failed to start'); toast(msg,'error'); await reloadProviderSandboxes(providerAddr); return; }
   toast('sandbox starting…','success'); await reloadProviderSandboxes(providerAddr);
 }
 

@@ -57,22 +57,25 @@ type EventFetcher interface {
 
 // Handler wires up all proxy routes onto a Gin engine.
 type Handler struct {
-	dtona              *daytona.Client
-	billing            BillingHooks
-	rp                 *httputil.ReverseProxy
-	balCheck           BalanceChecker // nil = no check
-	ackCheck           AckChecker     // nil = no check
-	eventFetcher       EventFetcher   // nil = events endpoint disabled
-	minBalance         *big.Int       // minimum balance required to create/start a sandbox
-	providerAddress    string         // only this wallet may call provider-only endpoints
-	sshGatewayHost     string         // if set, replaces localhost in SSH commands
-	computePricePerSec *big.Int
-	rdb                *redis.Client
-	broker             *brokerClient // nil = broker integration disabled
-	log                *zap.Logger
+	dtona               *daytona.Client
+	billing             BillingHooks
+	rp                  *httputil.ReverseProxy
+	balCheck            BalanceChecker // nil = no check
+	ackCheck            AckChecker     // nil = no check
+	eventFetcher        EventFetcher   // nil = events endpoint disabled
+	createFee           *big.Int       // charged once on sandbox create
+	pricePerCPUPerSec   *big.Int       // per CPU core per second
+	pricePerMemGBPerSec *big.Int       // per GB memory per second
+	voucherIntervalSec  int64
+	providerAddress     string // only this wallet may call provider-only endpoints
+	sshGatewayHost      string // if set, replaces localhost in SSH commands
+	computePricePerSec  *big.Int
+	rdb                 *redis.Client
+	broker              *brokerClient // nil = broker integration disabled
+	log                 *zap.Logger
 }
 
-func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, ackCheck AckChecker, eventFetcher EventFetcher, minBalance, computePricePerSec *big.Int, providerAddress, sshGatewayHost string, rdb *redis.Client, log *zap.Logger, brokerURL string, teeKey *ecdsa.PrivateKey, voucherIntervalSec int64) *Handler {
+func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, ackCheck AckChecker, eventFetcher EventFetcher, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec *big.Int, providerAddress, sshGatewayHost string, rdb *redis.Client, log *zap.Logger, brokerURL string, teeKey *ecdsa.PrivateKey, voucherIntervalSec int64) *Handler {
 	target, _ := url.Parse(dtona.BaseURL())
 	rp := httputil.NewSingleHostReverseProxy(target)
 
@@ -100,7 +103,7 @@ func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker,
 	if brokerURL != "" && teeKey != nil {
 		broker = newBrokerClient(brokerURL, teeKey, providerAddress, voucherIntervalSec, log)
 	}
-	return &Handler{dtona: dtona, billing: bh, rp: rp, balCheck: balCheck, ackCheck: ackCheck, eventFetcher: eventFetcher, minBalance: minBalance, computePricePerSec: computePricePerSec, providerAddress: providerAddress, sshGatewayHost: sshGatewayHost, rdb: rdb, broker: broker, log: log}
+	return &Handler{dtona: dtona, billing: bh, rp: rp, balCheck: balCheck, ackCheck: ackCheck, eventFetcher: eventFetcher, createFee: createFee, pricePerCPUPerSec: pricePerCPUPerSec, pricePerMemGBPerSec: pricePerMemGBPerSec, voucherIntervalSec: voucherIntervalSec, computePricePerSec: computePricePerSec, providerAddress: providerAddress, sshGatewayHost: sshGatewayHost, rdb: rdb, broker: broker, log: log}
 }
 
 // BrokerDeregister removes a sandbox from broker monitoring. No-op if broker is disabled.
@@ -168,6 +171,15 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		return
 	}
 	reqCPU, reqMemGB := extractResources(body)
+	// For snapshot creates the request body has no cpu/memory fields.
+	// Look up the snapshot spec so the broker pre-create call uses the real resource cost.
+	if reqCPU == 0 && reqMemGB == 0 {
+		if snapName := extractSnapshotName(body); snapName != "" {
+			if snap, err := h.dtona.GetSnapshot(c.Request.Context(), snapName); err == nil && snap != nil {
+				reqCPU, reqMemGB = snap.CPU, snap.Mem
+			}
+		}
+	}
 
 	// Pre-check: reject if user has not acknowledged the TEE signer.
 	if h.ackCheck != nil {
@@ -184,14 +196,16 @@ func (h *Handler) handleCreate(c *gin.Context) {
 	}
 
 	// Pre-check: reject if on-chain balance is below the minimum required.
-	if h.balCheck != nil && h.minBalance != nil {
+	// create requires createFee + one voucher interval of compute for the requested spec.
+	if h.balCheck != nil {
+		required := new(big.Int).Add(h.createFee, h.intervalCost(reqCPU, reqMemGB))
 		balance, err := h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
 		if err != nil {
 			h.log.Error("balance check", zap.String("wallet", wallet), zap.Error(err))
 			c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
 			return
 		}
-		if balance.Cmp(h.minBalance) < 0 && h.broker != nil {
+		if balance.Cmp(required) < 0 && h.broker != nil {
 			// Ask the broker to top up the user's balance (funding-only call:
 			// sandbox_id="" means no monitoring session is registered yet).
 			if berr := h.broker.registerSession(c.Request.Context(), "", wallet, int64(reqCPU), int64(reqMemGB)); berr != nil {
@@ -206,11 +220,11 @@ func (h *Handler) handleCreate(c *gin.Context) {
 				}
 			}
 		}
-		if balance.Cmp(h.minBalance) < 0 {
+		if balance.Cmp(required) < 0 {
 			c.JSON(http.StatusPaymentRequired, gin.H{
 				"error":    "insufficient balance",
 				"balance":  balance.String(),
-				"required": h.minBalance.String(),
+				"required": required.String(),
 			})
 			return
 		}
@@ -288,31 +302,43 @@ func (h *Handler) handleStart(c *gin.Context) {
 		}
 	}
 
-	// Always register the session with the broker on restart so it is included
-	// in ongoing balance monitoring (every restart contributes to burn rate).
-	if h.broker != nil {
-		cpu, memGB := 0, 0
-		if sb, err := h.dtona.GetSandbox(c.Request.Context(), id); err == nil {
-			cpu, memGB = sb.CPU, sb.Memory
-		}
-		if berr := h.broker.registerSession(c.Request.Context(), id, wallet, int64(cpu), int64(memGB)); berr != nil {
-			h.log.Warn("broker pre-start register", zap.String("id", id), zap.Error(berr))
-		}
+	// Fetch sandbox spec once; used for both broker registration and balance check.
+	cpu, memGB := 0, 0
+	if sb, err := h.dtona.GetSandbox(c.Request.Context(), id); err == nil {
+		cpu, memGB = sb.CPU, sb.Memory
 	}
 
-	// Pre-check: reject if on-chain balance is below the minimum required.
-	if h.balCheck != nil && h.minBalance != nil {
+	// Pre-check: reject if on-chain balance is below one voucher interval for this sandbox's spec.
+	// If insufficient and broker is configured, request a top-up and wait for it to land.
+	if h.balCheck != nil {
+		required := h.intervalCost(cpu, memGB)
 		balance, err := h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
 		if err != nil {
 			h.log.Error("balance check (start)", zap.String("wallet", wallet), zap.Error(err))
 			c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
 			return
 		}
-		if balance.Cmp(h.minBalance) < 0 {
+		if balance.Cmp(required) < 0 && h.broker != nil {
+			if berr := h.broker.registerSession(c.Request.Context(), id, wallet, int64(cpu), int64(memGB)); berr != nil {
+				h.log.Warn("broker pre-start fund", zap.String("id", id), zap.Error(berr))
+			} else {
+				// Re-check balance after broker waited for deposit.
+				balance, err = h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
+				if err != nil {
+					h.log.Error("balance re-check (start)", zap.String("wallet", wallet), zap.Error(err))
+					c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
+					return
+				}
+			}
+		} else if h.broker != nil {
+			// Balance sufficient: register for monitoring only (non-blocking).
+			go h.broker.registerSession(context.WithoutCancel(c.Request.Context()), id, wallet, int64(cpu), int64(memGB))
+		}
+		if balance.Cmp(required) < 0 {
 			c.JSON(http.StatusPaymentRequired, gin.H{
 				"error":    "insufficient balance",
 				"balance":  balance.String(),
-				"required": h.minBalance.String(),
+				"required": required.String(),
 			})
 			return
 		}
@@ -762,6 +788,20 @@ type safeWriter struct{ gin.ResponseWriter }
 //nolint:staticcheck
 func (s safeWriter) CloseNotify() <-chan bool { return make(chan bool, 1) }
 
+// intervalCost returns the compute cost for one voucher interval given cpu/mem.
+// Uses per-resource prices if set; falls back to flat computePricePerSec.
+func (h *Handler) intervalCost(cpu, memGB int) *big.Int {
+	interval := big.NewInt(h.voucherIntervalSec)
+	if h.pricePerCPUPerSec != nil && h.pricePerCPUPerSec.Sign() > 0 ||
+		h.pricePerMemGBPerSec != nil && h.pricePerMemGBPerSec.Sign() > 0 {
+		cpuCost := new(big.Int).Mul(h.pricePerCPUPerSec, big.NewInt(int64(cpu)))
+		memCost := new(big.Int).Mul(h.pricePerMemGBPerSec, big.NewInt(int64(memGB)))
+		perSec := new(big.Int).Add(cpuCost, memCost)
+		return new(big.Int).Mul(perSec, interval)
+	}
+	return new(big.Int).Mul(h.computePricePerSec, interval)
+}
+
 // extractID tries to parse {"id": "..."} from a JSON response body.
 func extractID(body []byte) string {
 	var m struct {
@@ -782,4 +822,13 @@ func extractResources(body []byte) (cpu, memGB int) {
 	}
 	json.NewDecoder(bytes.NewReader(body)).Decode(&m) //nolint:errcheck
 	return m.CPU, m.Memory
+}
+
+// extractSnapshotName parses the "snapshot" field from a sandbox create request body.
+func extractSnapshotName(body []byte) string {
+	var m struct {
+		Snapshot string `json:"snapshot"`
+	}
+	json.NewDecoder(bytes.NewReader(body)).Decode(&m) //nolint:errcheck
+	return m.Snapshot
 }
