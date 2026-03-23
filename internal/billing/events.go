@@ -27,10 +27,11 @@ type EventHandler struct {
 	log                 *zap.Logger
 }
 
-// VoucherSigner signs and enqueues a voucher into Redis.
+// VoucherSigner enqueues an unsigned voucher into Redis.
+// Nonce assignment and signing are deferred to the settler, which is
+// single-threaded and guarantees strict nonce ordering.
 type VoucherSigner interface {
-	SignAndEnqueue(ctx context.Context, v *voucher.SandboxVoucher) error
-	IncrNonce(ctx context.Context, owner, provider string) (*big.Int, error)
+	Enqueue(ctx context.Context, v *voucher.SandboxVoucher) error
 }
 
 func NewEventHandler(
@@ -79,19 +80,14 @@ func (h *EventHandler) emitPeriodVoucher(ctx context.Context, sandboxID, ownerAd
 	if fee.Sign() == 0 {
 		return nextVoucherAt, nil
 	}
-	nonce, err := h.signer.IncrNonce(ctx, ownerAddr, h.providerAddress)
-	if err != nil {
-		return 0, err
-	}
 	v := &voucher.SandboxVoucher{
 		SandboxID: sandboxID,
 		User:      common.HexToAddress(ownerAddr),
 		Provider:  common.HexToAddress(h.providerAddress),
 		TotalFee:  fee,
 		UsageHash: voucher.BuildUsageHash(sandboxID, periodStart, nextVoucherAt, h.voucherIntervalSec),
-		Nonce:     nonce,
 	}
-	if err := h.signer.SignAndEnqueue(ctx, v); err != nil {
+	if err := h.signer.Enqueue(ctx, v); err != nil {
 		return 0, err
 	}
 	return nextVoucherAt, nil
@@ -101,11 +97,6 @@ func (h *EventHandler) emitPeriodVoucher(ctx context.Context, sandboxID, ownerAd
 // the first compute period, and open the billing session.
 // cpu and memGB are the sandbox's allocated resources used to compute billing rate.
 func (h *EventHandler) OnCreate(ctx context.Context, sandboxID, ownerAddr string, cpu, memGB int) {
-	nonce, err := h.signer.IncrNonce(ctx, ownerAddr, h.providerAddress)
-	if err != nil {
-		h.log.Error("OnCreate: incr nonce", zap.String("sandbox", sandboxID), zap.Error(err))
-		return
-	}
 	now := time.Now().Unix()
 	v := &voucher.SandboxVoucher{
 		SandboxID: sandboxID,
@@ -113,10 +104,9 @@ func (h *EventHandler) OnCreate(ctx context.Context, sandboxID, ownerAddr string
 		Provider:  common.HexToAddress(h.providerAddress),
 		TotalFee:  new(big.Int).Set(h.createFee),
 		UsageHash: voucher.BuildUsageHash(sandboxID, now, now, 0),
-		Nonce:     nonce,
 	}
-	if err := h.signer.SignAndEnqueue(ctx, v); err != nil {
-		h.log.Error("OnCreate: sign/enqueue create-fee", zap.String("sandbox", sandboxID), zap.Error(err))
+	if err := h.signer.Enqueue(ctx, v); err != nil {
+		h.log.Error("OnCreate: enqueue create-fee", zap.String("sandbox", sandboxID), zap.Error(err))
 		return
 	}
 

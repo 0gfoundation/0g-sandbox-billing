@@ -5,10 +5,14 @@ import (
 	"errors"
 	"math/big"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"go.uber.org/zap"
+
+	"github.com/0gfoundation/0g-sandbox/internal/voucher"
 )
 
 // newTestHandlerWithInterval creates an EventHandler with a custom interval.
@@ -196,37 +200,22 @@ func TestRunGeneration_MultipleSessions_OneVoucherEach(t *testing.T) {
 	}
 }
 
-// ── IncrNonce error: skip that session ────────────────────────────────────────
-
-func TestRunGeneration_IncrNonceError_SkipsSession(t *testing.T) {
-	rdb, _ := newTestRedis(t)
-	ms := &mockSigner{incrErr: errors.New("nonce store down")}
-	const intervalSec = int64(3600)
-	h := NewEventHandler(rdb, testProvider, big.NewInt(pricePerSec), big.NewInt(0), new(big.Int), new(big.Int), intervalSec, ms, zap.NewNop())
-	ctx := context.Background()
-
-	due := time.Now().Unix() - 10
-	CreateSession(ctx, rdb, Session{ //nolint:errcheck
-		SandboxID: "sb-nonce-err", Owner: testOwner, Provider: testProvider,
-		NextVoucherAt: due, PricePerSec: "100",
-	})
-
-	runGeneration(ctx, rdb, h, zap.NewNop())
-
-	if ms.count() != 0 {
-		t.Errorf("expected 0 vouchers on nonce error, got %d", ms.count())
-	}
-	// NextVoucherAt must NOT be advanced on error
-	sess, _ := GetSession(ctx, rdb, "sb-nonce-err")
-	if sess.NextVoucherAt != due {
-		t.Errorf("NextVoucherAt should be unchanged on nonce error: got %d want %d",
-			sess.NextVoucherAt, due)
-	}
+// selectiveErrSigner fails Enqueue for sessions owned by failOwner.
+type selectiveErrSigner struct {
+	mockSigner
+	failOwner string
 }
 
-// ── IncrNonce error on one session, others still processed ───────────────────
+func (s *selectiveErrSigner) Enqueue(ctx context.Context, v *voucher.SandboxVoucher) error {
+	if strings.EqualFold(v.User.Hex(), common.HexToAddress(s.failOwner).Hex()) {
+		return errors.New("selective enqueue error")
+	}
+	return s.mockSigner.Enqueue(ctx, v)
+}
 
-func TestRunGeneration_IncrNonceError_OtherSessionsUnaffected(t *testing.T) {
+// ── Enqueue error on one session, others still processed ─────────────────────
+
+func TestRunGeneration_EnqueueError_OtherSessionsUnaffected(t *testing.T) {
 	rdb, _ := newTestRedis(t)
 
 	failOwner := "0xFAILFAILFAILFAILFAILFAILFAILFAILFAILFA"
@@ -254,19 +243,6 @@ func TestRunGeneration_IncrNonceError_OtherSessionsUnaffected(t *testing.T) {
 	if ms.last().SandboxID != "sb-ok" {
 		t.Errorf("wrong voucher sandbox: got %q", ms.last().SandboxID)
 	}
-}
-
-// selectiveErrSigner fails IncrNonce for a specific owner address.
-type selectiveErrSigner struct {
-	mockSigner
-	failOwner string
-}
-
-func (s *selectiveErrSigner) IncrNonce(ctx context.Context, owner, provider string) (*big.Int, error) {
-	if owner == s.failOwner {
-		return nil, errors.New("selective nonce error")
-	}
-	return s.mockSigner.IncrNonce(ctx, owner, provider)
 }
 
 // ── Enqueue error: NextVoucherAt NOT updated ──────────────────────────────────
@@ -320,9 +296,7 @@ func TestRunGeneration_VoucherHasCorrectAddresses(t *testing.T) {
 	if v.Provider.Hex() == zeroAddr {
 		t.Error("Provider address is zero")
 	}
-	if v.Nonce == nil || v.Nonce.Sign() <= 0 {
-		t.Error("Nonce should be positive")
-	}
+	// Note: Nonce is assigned by the settler (not the generator), so it remains nil here.
 }
 
 // ── Flat-rate fallback when PricePerSec is empty ─────────────────────────────

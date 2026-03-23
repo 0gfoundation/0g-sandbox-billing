@@ -478,7 +478,7 @@ func TestComponent_HappyPath(t *testing.T) {
 	}
 	settlerCtx, settlerCancel := context.WithCancel(ctx)
 	defer settlerCancel()
-	go settler.Run(settlerCtx, cfg, rdb, onchain, stopCh, zap.NewNop())
+	go settler.Run(settlerCtx, cfg, rdb, onchain, signer, stopCh, zap.NewNop())
 
 	// ── 4. Assert: on-chain lastNonce == 1 ────────────────────────────────────
 	waitFor(t, "on-chain lastNonce == 1", 10*time.Second, func() bool {
@@ -561,7 +561,7 @@ func TestComponent_InsufficientBalance(t *testing.T) {
 	}
 	settlerCtx, settlerCancel := context.WithCancel(ctx)
 	defer settlerCancel()
-	go settler.Run(settlerCtx, cfg, rdb, onchain, stopCh, zap.NewNop())
+	go settler.Run(settlerCtx, cfg, rdb, onchain, signer, stopCh, zap.NewNop())
 	go runStopHandler(ctx, stopCh, dtona, rdb, zap.NewNop(), nil)
 
 	// ── 3. Assert: Daytona received stop for the correct sandbox ──────────────

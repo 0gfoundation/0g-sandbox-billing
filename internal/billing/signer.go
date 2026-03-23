@@ -66,18 +66,33 @@ func NewSigner(
 	}
 }
 
-// SignAndEnqueue signs the voucher with the TEE private key and pushes it onto
-// the provider's voucher queue in Redis.
-func (s *Signer) SignAndEnqueue(ctx context.Context, v *voucher.SandboxVoucher) error {
-	if err := voucher.Sign(v, s.privKey, s.chainID, s.contractAddr); err != nil {
-		return fmt.Errorf("sign voucher: %w", err)
-	}
+// Enqueue serialises the voucher and pushes it onto the provider's voucher
+// queue in Redis. The voucher is pushed unsigned and without a nonce; the
+// settler assigns the nonce and signs atomically before on-chain submission,
+// ensuring strict ordering even under concurrent OnCreate goroutines.
+func (s *Signer) Enqueue(ctx context.Context, v *voucher.SandboxVoucher) error {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("marshal voucher: %w", err)
 	}
 	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, s.providerAddr.Hex())
 	return s.rdb.RPush(ctx, queueKey, string(raw)).Err()
+}
+
+// Sign assigns a nonce and signs the voucher with the TEE private key.
+// Called by the settler immediately before on-chain submission.
+func (s *Signer) Sign(ctx context.Context, v *voucher.SandboxVoucher) error {
+	owner := v.User.Hex()
+	provider := v.Provider.Hex()
+	nonce, err := s.IncrNonce(ctx, owner, provider)
+	if err != nil {
+		return fmt.Errorf("incr nonce: %w", err)
+	}
+	v.Nonce = nonce
+	if err := voucher.Sign(v, s.privKey, s.chainID, s.contractAddr); err != nil {
+		return fmt.Errorf("sign voucher: %w", err)
+	}
+	return nil
 }
 
 // IncrNonce atomically increments and returns the nonce for a (owner, provider) pair.

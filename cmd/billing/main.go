@@ -177,7 +177,7 @@ func main() {
 	// ── Goroutines ────────────────────────────────────────────────────────────
 	// Recovery must start after stopCh is ready but before settler writes to it.
 	go recoverPendingStops(ctx, rdb, stopCh, log)
-	go settler.Run(ctx, cfg, rdb, onchain, stopCh, log)
+	go settler.Run(ctx, cfg, rdb, onchain, signer, stopCh, log)
 	go billing.RunGenerator(ctx, rdb, billingHandler, log)
 
 	// ── HTTP server ───────────────────────────────────────────────────────────

@@ -234,9 +234,9 @@ func TestIncrNonce_ConcurrentSeed(t *testing.T) {
 	}
 }
 
-// ── SignAndEnqueue ─────────────────────────────────────────────────────────────
+// ── Enqueue ───────────────────────────────────────────────────────────────────
 
-func TestSignAndEnqueue_PushesToQueue(t *testing.T) {
+func TestEnqueue_PushesToQueue(t *testing.T) {
 	s, rdb, _ := newTestSignerFull(t)
 	ctx := context.Background()
 
@@ -245,12 +245,11 @@ func TestSignAndEnqueue_PushesToQueue(t *testing.T) {
 		User:      common.HexToAddress(testOwner),
 		Provider:  common.HexToAddress(testProviderHex),
 		TotalFee:  big.NewInt(500),
-		Nonce:     big.NewInt(1),
 		UsageHash: voucher.BuildUsageHash("sb-sign-1", 1000, 1060, 1),
 	}
 
-	if err := s.SignAndEnqueue(ctx, v); err != nil {
-		t.Fatalf("SignAndEnqueue: %v", err)
+	if err := s.Enqueue(ctx, v); err != nil {
+		t.Fatalf("Enqueue: %v", err)
 	}
 
 	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, common.HexToAddress(testProviderHex).Hex())
@@ -263,7 +262,7 @@ func TestSignAndEnqueue_PushesToQueue(t *testing.T) {
 	}
 }
 
-func TestSignAndEnqueue_QueueItemIsValidJSON(t *testing.T) {
+func TestEnqueue_QueueItemIsValidJSON(t *testing.T) {
 	s, rdb, _ := newTestSignerFull(t)
 	ctx := context.Background()
 
@@ -272,10 +271,9 @@ func TestSignAndEnqueue_QueueItemIsValidJSON(t *testing.T) {
 		User:      common.HexToAddress(testOwner),
 		Provider:  common.HexToAddress(testProviderHex),
 		TotalFee:  big.NewInt(200),
-		Nonce:     big.NewInt(7),
 		UsageHash: voucher.BuildUsageHash("sb-json", 2000, 2060, 1),
 	}
-	s.SignAndEnqueue(ctx, v) //nolint:errcheck
+	s.Enqueue(ctx, v) //nolint:errcheck
 
 	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, common.HexToAddress(testProviderHex).Hex())
 	raw, _ := rdb.LPop(ctx, queueKey).Result()
@@ -287,15 +285,11 @@ func TestSignAndEnqueue_QueueItemIsValidJSON(t *testing.T) {
 	if got.SandboxID != "sb-json" {
 		t.Errorf("SandboxID: got %q want %q", got.SandboxID, "sb-json")
 	}
-	if got.Nonce.Int64() != 7 {
-		t.Errorf("Nonce: got %d want 7", got.Nonce.Int64())
-	}
-	if len(got.Signature) != 65 {
-		t.Errorf("Signature length: got %d want 65", len(got.Signature))
-	}
 }
 
-func TestSignAndEnqueue_SignatureVerifiable(t *testing.T) {
+// ── Sign + Enqueue ────────────────────────────────────────────────────────────
+
+func TestSign_SignatureVerifiable(t *testing.T) {
 	s, rdb, signerAddr := newTestSignerFull(t)
 	ctx := context.Background()
 
@@ -306,10 +300,12 @@ func TestSignAndEnqueue_SignatureVerifiable(t *testing.T) {
 		User:      common.HexToAddress(testOwner),
 		Provider:  common.HexToAddress(testProviderHex),
 		TotalFee:  big.NewInt(300),
-		Nonce:     big.NewInt(1),
 		UsageHash: voucher.BuildUsageHash("sb-verify", 3000, 3060, 1),
 	}
-	s.SignAndEnqueue(ctx, v) //nolint:errcheck
+	if err := s.Sign(ctx, v); err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	s.Enqueue(ctx, v) //nolint:errcheck
 
 	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, common.HexToAddress(testProviderHex).Hex())
 	raw, _ := rdb.LPop(ctx, queueKey).Result()
@@ -325,7 +321,7 @@ func TestSignAndEnqueue_SignatureVerifiable(t *testing.T) {
 	}
 }
 
-func TestSignAndEnqueue_QueueKeyUsesProviderAddress(t *testing.T) {
+func TestEnqueue_QueueKeyUsesProviderAddress(t *testing.T) {
 	s, rdb, _ := newTestSignerFull(t)
 	ctx := context.Background()
 
@@ -334,9 +330,8 @@ func TestSignAndEnqueue_QueueKeyUsesProviderAddress(t *testing.T) {
 		User:      common.HexToAddress(testOwner),
 		Provider:  common.HexToAddress(testProviderHex),
 		TotalFee:  big.NewInt(100),
-		Nonce:     big.NewInt(1),
 	}
-	s.SignAndEnqueue(ctx, v) //nolint:errcheck
+	s.Enqueue(ctx, v) //nolint:errcheck
 
 	correctKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, common.HexToAddress(testProviderHex).Hex())
 	wrongKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, "0x0000000000000000000000000000000000000000")
@@ -351,7 +346,7 @@ func TestSignAndEnqueue_QueueKeyUsesProviderAddress(t *testing.T) {
 	}
 }
 
-func TestSignAndEnqueue_MultipleVouchers_FIFOOrder(t *testing.T) {
+func TestEnqueue_MultipleVouchers_FIFOOrder(t *testing.T) {
 	s, rdb, _ := newTestSignerFull(t)
 	ctx := context.Background()
 	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, common.HexToAddress(testProviderHex).Hex())
@@ -362,9 +357,8 @@ func TestSignAndEnqueue_MultipleVouchers_FIFOOrder(t *testing.T) {
 			User:      common.HexToAddress(testOwner),
 			Provider:  common.HexToAddress(testProviderHex),
 			TotalFee:  big.NewInt(i * 100),
-			Nonce:     big.NewInt(i),
 		}
-		s.SignAndEnqueue(ctx, v) //nolint:errcheck
+		s.Enqueue(ctx, v) //nolint:errcheck
 	}
 
 	for i := int64(1); i <= 3; i++ {

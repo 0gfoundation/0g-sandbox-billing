@@ -228,9 +228,9 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		}
 		if available.Cmp(createRequired) < 0 {
 			c.JSON(http.StatusPaymentRequired, gin.H{
-				"error":    "insufficient balance",
-				"balance":  balance.String(),
-				"required": createRequired.String(),
+				"error":     "insufficient balance",
+				"available": available.String(),
+				"required":  createRequired.String(),
 			})
 			return
 		}
@@ -363,9 +363,9 @@ func (h *Handler) handleStart(c *gin.Context) {
 		}
 		if available.Cmp(startRequired) < 0 {
 			c.JSON(http.StatusPaymentRequired, gin.H{
-				"error":    "insufficient balance",
-				"balance":  balance.String(),
-				"required": startRequired.String(),
+				"error":     "insufficient balance",
+				"available": available.String(),
+				"required":  startRequired.String(),
 			})
 			return
 		}

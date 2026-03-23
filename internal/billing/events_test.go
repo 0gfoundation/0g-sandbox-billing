@@ -18,22 +18,10 @@ import (
 type mockSigner struct {
 	mu       sync.Mutex
 	vouchers []*voucher.SandboxVoucher
-	nonce    int64
-	incrErr  error
 	enqErr   error
 }
 
-func (m *mockSigner) IncrNonce(_ context.Context, _, _ string) (*big.Int, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.incrErr != nil {
-		return nil, m.incrErr
-	}
-	m.nonce++
-	return big.NewInt(m.nonce), nil
-}
-
-func (m *mockSigner) SignAndEnqueue(_ context.Context, v *voucher.SandboxVoucher) error {
+func (m *mockSigner) Enqueue(_ context.Context, v *voucher.SandboxVoucher) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.enqErr != nil {
@@ -132,38 +120,6 @@ func TestOnCreate_EmitsTwoVouchers(t *testing.T) {
 	wantNextMax := after + testIntervalSec
 	if sess.NextVoucherAt < wantNextMin || sess.NextVoucherAt > wantNextMax {
 		t.Errorf("NextVoucherAt %d not in [%d, %d]", sess.NextVoucherAt, wantNextMin, wantNextMax)
-	}
-}
-
-func TestOnCreate_MonotonicallyIncrementsNonce(t *testing.T) {
-	ms := &mockSigner{}
-	h, _ := newTestHandler(t, ms)
-	ctx := context.Background()
-
-	h.OnCreate(ctx, "sb-a", testOwner, 1, 1)
-	h.OnCreate(ctx, "sb-b", testOwner, 1, 1)
-
-	// Each OnCreate emits 2 vouchers → 4 total
-	if ms.count() != 4 {
-		t.Fatalf("expected 4 vouchers, got %d", ms.count())
-	}
-	for i := 1; i < len(ms.vouchers); i++ {
-		n0 := ms.vouchers[i-1].Nonce.Int64()
-		n1 := ms.vouchers[i].Nonce.Int64()
-		if n1 != n0+1 {
-			t.Errorf("nonces not monotone at [%d,%d]: %d, %d", i-1, i, n0, n1)
-		}
-	}
-}
-
-func TestOnCreate_IncrNonceError_NoVoucher(t *testing.T) {
-	ms := &mockSigner{incrErr: errors.New("nonce service down")}
-	h, _ := newTestHandler(t, ms)
-
-	h.OnCreate(context.Background(), testSandbox, testOwner, 1, 1)
-
-	if ms.count() != 0 {
-		t.Errorf("expected 0 vouchers on nonce error, got %d", ms.count())
 	}
 }
 

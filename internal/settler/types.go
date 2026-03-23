@@ -19,3 +19,11 @@ type StopSignal struct {
 type ChainClient interface {
 	SettleFeesWithTEE(ctx context.Context, vouchers []voucher.SandboxVoucher) ([]chain.SettlementStatus, error)
 }
+
+// NonceSigner assigns a monotone nonce and cryptographically signs a voucher
+// in place. Satisfied by *billing.Signer; decoupled here to avoid import cycles.
+// The settler is single-threaded, so calling Sign sequentially guarantees
+// strict nonce ordering even under concurrent OnCreate goroutines.
+type NonceSigner interface {
+	Sign(ctx context.Context, v *voucher.SandboxVoucher) error
+}

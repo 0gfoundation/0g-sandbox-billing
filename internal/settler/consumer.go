@@ -15,8 +15,10 @@ import (
 
 const maxBatchSize = 50
 
-// Run is the main settler loop: BLPOP → settle → handle statuses.
-func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain ChainClient, stopCh chan<- StopSignal, log *zap.Logger) {
+// Run is the main settler loop: BLPOP → sign → settle → handle statuses.
+// nonceSigner assigns nonces and signs vouchers sequentially, guaranteeing
+// strict nonce ordering regardless of how many goroutines enqueued the vouchers.
+func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain ChainClient, nonceSigner NonceSigner, stopCh chan<- StopSignal, log *zap.Logger) {
 	queueKey := fmt.Sprintf(voucher.VoucherQueueKeyFmt, cfg.Chain.ProviderAddress)
 	// lockTime/2 as BLPOP timeout (half the lock window for responsiveness)
 	blpopTimeout := time.Duration(cfg.Billing.VoucherIntervalSec) * time.Second / 2
@@ -67,6 +69,25 @@ func Run(ctx context.Context, cfg *config.Config, rdb *redis.Client, onchain Cha
 		}
 
 		if len(vouchers) == 0 {
+			continue
+		}
+
+		// Assign nonces and sign in order. The settler is the sole consumer,
+		// so sequential Sign calls guarantee strictly-increasing nonces.
+		signingOK := true
+		for i := range vouchers {
+			if err := nonceSigner.Sign(ctx, &vouchers[i]); err != nil {
+				log.Error("settler: sign voucher",
+					zap.String("sandbox", vouchers[i].SandboxID),
+					zap.Error(err),
+				)
+				signingOK = false
+				break
+			}
+		}
+		if !signingOK {
+			_ = rdb.LPush(ctx, queueKey, firstItem)
+			time.Sleep(5 * time.Second)
 			continue
 		}
 
