@@ -139,6 +139,7 @@ func (h *EventHandler) OnCreate(ctx context.Context, sandboxID, ownerAddr string
 	}
 	periodFee := new(big.Int).Mul(price, big.NewInt(h.voucherIntervalSec))
 	totalUpfront := new(big.Int).Add(h.createFee, periodFee)
+	Release(ctx, h.rdb, ownerAddr, h.providerAddress, totalUpfront)
 	_ = events.Push(ctx, h.rdb, events.Event{
 		Type:      events.TypeCreated,
 		Message:   fmt.Sprintf("Sandbox %s created, create-fee %s + first-period %s neuron, rate %s neuron/sec", sandboxID, h.createFee.String(), periodFee.String(), price.String()),
@@ -178,6 +179,8 @@ func (h *EventHandler) OnStart(ctx context.Context, sandboxID, ownerAddr string,
 	if err := CreateSession(ctx, h.rdb, s); err != nil {
 		h.log.Error("OnStart: create session", zap.String("sandbox", sandboxID), zap.Error(err))
 	}
+	periodFee := new(big.Int).Mul(price, big.NewInt(h.voucherIntervalSec))
+	Release(ctx, h.rdb, ownerAddr, h.providerAddress, periodFee)
 }
 
 // OnStop handles POST /sandbox/:id/stop success: delete billing session.

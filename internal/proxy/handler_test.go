@@ -117,7 +117,7 @@ func newTestEngine(dtona *daytona.Client, bh BillingHooks, wallet string) *gin.E
 		c.Set("wallet_address", wallet)
 		c.Next()
 	})
-	NewHandler(dtona, bh, nil, nil, nil, nil, nil, "", "", nil, zap.NewNop(), "", nil, 0).Register(api)
+	NewHandler(dtona, bh, nil, nil, nil, nil, nil, nil, nil, "", "", nil, zap.NewNop(), "", nil, 0).Register(api)
 	return r
 }
 

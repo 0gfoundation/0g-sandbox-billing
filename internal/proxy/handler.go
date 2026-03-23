@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/gin-gonic/gin"
@@ -197,15 +198,19 @@ func (h *Handler) handleCreate(c *gin.Context) {
 
 	// Pre-check: reject if on-chain balance is below the minimum required.
 	// create requires createFee + one voucher interval of compute for the requested spec.
+	// available = chainBalance - reserved prevents concurrent requests from double-spending.
+	var createRequired *big.Int
+	createReserved := false
 	if h.balCheck != nil {
-		required := new(big.Int).Add(h.createFee, h.intervalCost(reqCPU, reqMemGB))
+		createRequired = new(big.Int).Add(h.createFee, h.intervalCost(reqCPU, reqMemGB))
 		balance, err := h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
 		if err != nil {
 			h.log.Error("balance check", zap.String("wallet", wallet), zap.Error(err))
 			c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
 			return
 		}
-		if balance.Cmp(required) < 0 && h.broker != nil {
+		available := availableBalance(balance, billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress))
+		if available.Cmp(createRequired) < 0 && h.broker != nil {
 			// Ask the broker to top up the user's balance (funding-only call:
 			// sandbox_id="" means no monitoring session is registered yet).
 			if berr := h.broker.registerSession(c.Request.Context(), "", wallet, int64(reqCPU), int64(reqMemGB)); berr != nil {
@@ -218,15 +223,25 @@ func (h *Handler) handleCreate(c *gin.Context) {
 					c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
 					return
 				}
+				available = availableBalance(balance, billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress))
 			}
 		}
-		if balance.Cmp(required) < 0 {
+		if available.Cmp(createRequired) < 0 {
 			c.JSON(http.StatusPaymentRequired, gin.H{
 				"error":    "insufficient balance",
 				"balance":  balance.String(),
-				"required": required.String(),
+				"required": createRequired.String(),
 			})
 			return
+		}
+		// Reserve the cost to prevent concurrent requests from double-spending.
+		// TTL is a safety net: if the process crashes before OnCreate fires, the
+		// reservation auto-expires after 2 voucher intervals.
+		ttl := time.Duration(h.voucherIntervalSec*2) * time.Second
+		if err := billing.Reserve(c.Request.Context(), h.rdb, wallet, h.providerAddress, createRequired, ttl); err != nil {
+			h.log.Warn("balance reservation failed (non-fatal)", zap.String("wallet", wallet), zap.Error(err))
+		} else {
+			createReserved = true
 		}
 	}
 
@@ -275,8 +290,15 @@ func (h *Handler) handleCreate(c *gin.Context) {
 					}
 				}
 				h.billing.OnCreate(ctx, id, wallet, cpu, memGB)
+				// OnCreate enqueues vouchers; reservation released there.
 			}()
+		} else if createReserved {
+			// 2xx but no sandbox ID extracted — release reservation immediately.
+			billing.Release(c.Request.Context(), h.rdb, wallet, h.providerAddress, createRequired)
 		}
+	} else if createReserved {
+		// Daytona returned an error — release reservation immediately.
+		billing.Release(c.Request.Context(), h.rdb, wallet, h.providerAddress, createRequired)
 	}
 }
 
@@ -310,15 +332,19 @@ func (h *Handler) handleStart(c *gin.Context) {
 
 	// Pre-check: reject if on-chain balance is below one voucher interval for this sandbox's spec.
 	// If insufficient and broker is configured, request a top-up and wait for it to land.
+	// available = chainBalance - reserved prevents concurrent requests from double-spending.
+	var startRequired *big.Int
+	startReserved := false
 	if h.balCheck != nil {
-		required := h.intervalCost(cpu, memGB)
+		startRequired = h.intervalCost(cpu, memGB)
 		balance, err := h.balCheck.GetBalance(c.Request.Context(), common.HexToAddress(wallet), common.HexToAddress(h.providerAddress))
 		if err != nil {
 			h.log.Error("balance check (start)", zap.String("wallet", wallet), zap.Error(err))
 			c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
 			return
 		}
-		if balance.Cmp(required) < 0 && h.broker != nil {
+		available := availableBalance(balance, billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress))
+		if available.Cmp(startRequired) < 0 && h.broker != nil {
 			if berr := h.broker.registerSession(c.Request.Context(), id, wallet, int64(cpu), int64(memGB)); berr != nil {
 				h.log.Warn("broker pre-start fund", zap.String("id", id), zap.Error(berr))
 			} else {
@@ -329,18 +355,25 @@ func (h *Handler) handleStart(c *gin.Context) {
 					c.JSON(http.StatusBadGateway, gin.H{"error": "balance check failed"})
 					return
 				}
+				available = availableBalance(balance, billing.GetReserved(c.Request.Context(), h.rdb, wallet, h.providerAddress))
 			}
 		} else if h.broker != nil {
 			// Balance sufficient: register for monitoring only (non-blocking).
 			go h.broker.registerSession(context.WithoutCancel(c.Request.Context()), id, wallet, int64(cpu), int64(memGB))
 		}
-		if balance.Cmp(required) < 0 {
+		if available.Cmp(startRequired) < 0 {
 			c.JSON(http.StatusPaymentRequired, gin.H{
 				"error":    "insufficient balance",
 				"balance":  balance.String(),
-				"required": required.String(),
+				"required": startRequired.String(),
 			})
 			return
+		}
+		ttl := time.Duration(h.voucherIntervalSec*2) * time.Second
+		if err := billing.Reserve(c.Request.Context(), h.rdb, wallet, h.providerAddress, startRequired, ttl); err != nil {
+			h.log.Warn("balance reservation failed (non-fatal)", zap.String("wallet", wallet), zap.Error(err))
+		} else {
+			startReserved = true
 		}
 	}
 
@@ -353,7 +386,10 @@ func (h *Handler) handleStart(c *gin.Context) {
 				cpu, memGB = sb.CPU, sb.Memory
 			}
 			h.billing.OnStart(ctx, id, wallet, cpu, memGB)
+			// OnStart enqueues voucher; reservation released there.
 		}()
+	} else if startReserved {
+		billing.Release(c.Request.Context(), h.rdb, wallet, h.providerAddress, startRequired)
 	}
 }
 
@@ -822,6 +858,15 @@ func extractResources(body []byte) (cpu, memGB int) {
 	}
 	json.NewDecoder(bytes.NewReader(body)).Decode(&m) //nolint:errcheck
 	return m.CPU, m.Memory
+}
+
+// availableBalance returns chainBalance - reserved, floored at zero.
+func availableBalance(chainBalance, reserved *big.Int) *big.Int {
+	available := new(big.Int).Sub(chainBalance, reserved)
+	if available.Sign() < 0 {
+		available.SetInt64(0)
+	}
+	return available
 }
 
 // extractSnapshotName parses the "snapshot" field from a sandbox create request body.
