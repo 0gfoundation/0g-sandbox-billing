@@ -4,11 +4,13 @@ Network: **0G Galileo Testnet** (chain ID 16602)
 Explorer: https://chainscan-galileo.0g.ai
 Deployer/Owner: `0xB831371eb2703305f1d9F8542163633D0675CEd7`
 
+> Chinese version: [CONTRACTS.zh.md](CONTRACTS.zh.md)
+
 ---
 
 ## Dev Contract
 
-> 用于本地开发和集成测试。数据可随时重置。
+> For local development and integration tests. Data may be reset at any time.
 
 | Component | Address |
 |-----------|---------|
@@ -17,10 +19,10 @@ Deployer/Owner: `0xB831371eb2703305f1d9F8542163633D0675CEd7`
 
 **Upgrade history:**
 
-| Date | Impl | 变更说明 |
-|------|------|---------|
-| initial | — | 首次部署：per-provider 余额隔离，owner 模型 |
-| 2026-03-10 | `0x9a3D6C66e3e6E020D8D40d851Db76D76EBfa93f2` | 移除 `settleFeesWithTEE` 中 `msg.sender == provider` 限制，TEE key 直接签结算 tx，无需 `PROVIDER_PRIVATE_KEY` |
+| Date | Impl | Notes |
+|------|------|-------|
+| initial | — | Initial deploy: per-provider balance isolation, owner model |
+| 2026-03-10 | `0x9a3D6C66e3e6E020D8D40d851Db76D76EBfa93f2` | Removed `msg.sender == provider` check in `settleFeesWithTEE`; TEE key signs settlement txs directly, no `PROVIDER_PRIVATE_KEY` needed |
 
 ```env
 SETTLEMENT_CONTRACT=0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3
@@ -30,7 +32,7 @@ SETTLEMENT_CONTRACT=0x2024eB0Cc14316fF8Cc425bFB7CC37FD8713E9b3
 
 ## Testnet Contract
 
-> 正式测试网部署，用于 provider 注册和真实计费测试。
+> Production testnet deployment for provider registration and real billing tests.
 
 | Component | Address |
 |-----------|---------|
@@ -161,8 +163,8 @@ Then set `PROVIDER_ADDRESS` in `.env` and fund the TEE address with 0G for gas.
 
 ---
 
-## 设计说明
+## Design Notes
 
-- **Proxy 地址永不变** — 升级只替换 implementation，proxy 地址是对外稳定地址
-- **结算开放** — `settleFeesWithTEE` 任何人可调用，provider 由 voucher 内的 `v.provider` 字段标识，与 `msg.sender` 无关
-- **Provider stake 未实现退出机制** — 质押 ETH 目前无法取回，待后续实现 `requestExit` / `withdrawStake`
+- **Proxy address never changes** — upgrading only replaces the implementation; the proxy address is the stable external-facing address
+- **Open settlement** — `settleFeesWithTEE` can be called by anyone; the provider is identified by `v.provider` in the voucher, not `msg.sender`
+- **Provider stake has no exit mechanism** — staked ETH cannot currently be withdrawn; `requestExit` / `withdrawStake` to be implemented
