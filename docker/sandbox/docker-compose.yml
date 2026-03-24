@@ -2,14 +2,14 @@ services:
 
   # ── Sandbox proxy (this repo) ──────────────────────────────────────────────
   sandbox:
-    image: 0g-sandbox:dev
-    pull_policy: never
+    image: eliza-registry-vpc.ap-southeast-1.cr.aliyuncs.com/eliza/0g-sandbox:sandbox
+    pull_policy: always
     ports:
       - "${PORT:-8080}:8080"
     environment:
       # Daytona API — internal only; must never be changed to a public URL.
       DAYTONA_API_URL:         http://api:3000
-      DAYTONA_ADMIN_KEY:       ${DAYTONA_ADMIN_KEY:-7a818c729dc7f97e58caf77275f4a63ba877d28fc8d654b21708a7572eadf8f2}
+      DAYTONA_ADMIN_KEY:       ${DAYTONA_ADMIN_KEY}
       # Redis (sandbox's own instance, separate from Daytona's)
       REDIS_ADDR:              sandbox-redis:6379
       REDIS_PASSWORD:          ${REDIS_PASSWORD:-}
@@ -69,15 +69,15 @@ services:
       - OTEL_ENABLED=false
       - RESOURCE_LIMITS_DISABLED=true
       - DEFAULT_SNAPSHOT=daytonaio/sandbox:0.5.0-slim
-      - ENCRYPTION_KEY=${DAYTONA_ENCRYPTION_KEY:-supersecretkey}
-      - ENCRYPTION_SALT=${DAYTONA_ENCRYPTION_SALT:-supersecretsalt}
+      - ENCRYPTION_KEY=${DAYTONA_ENCRYPTION_KEY}
+      - ENCRYPTION_SALT=${DAYTONA_ENCRYPTION_SALT}
       - NODE_ENV=production
       - PORT=3000
       - DB_HOST=db
       - DB_PORT=5432
-      - DB_USERNAME=${DAYTONA_DB_USER:-daytona}
-      - DB_PASSWORD=${DAYTONA_DB_PASSWORD:-a63e835f8f4110779bbbc968410fac2f3766f3071395881b}
-      - DB_DATABASE=${DAYTONA_DB_NAME:-daytona}
+      - DB_USERNAME=${DAYTONA_DB_USER}
+      - DB_PASSWORD=${DAYTONA_DB_PASSWORD}
+      - DB_DATABASE=${DAYTONA_DB_NAME}
       - REDIS_HOST=daytona-redis
       - REDIS_PORT=6379
       - OIDC_CLIENT_ID=daytona
@@ -107,8 +107,8 @@ services:
       - S3_ENDPOINT=http://minio:9000
       - S3_STS_ENDPOINT=http://minio:9000/minio/v1/assume-role
       - S3_REGION=us-east-1
-      - S3_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
-      - S3_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - S3_ACCESS_KEY=${MINIO_ROOT_USER}
+      - S3_SECRET_KEY=${MINIO_ROOT_PASSWORD}
       - S3_DEFAULT_BUCKET=daytona
       - S3_ACCOUNT_ID=/
       - S3_ROLE_NAME=/
@@ -117,12 +117,12 @@ services:
       - MAINTENANCE_MODE=false
       - PROXY_DOMAIN=${PROXY_DOMAIN:-proxy.localhost:4000}
       - PROXY_PROTOCOL=http
-      - PROXY_API_KEY=${DAYTONA_PROXY_API_KEY:-super_secret_key}
+      - PROXY_API_KEY=${DAYTONA_PROXY_API_KEY}
       - PROXY_TEMPLATE_URL=http://{{PORT}}-{{sandboxId}}.${PROXY_DOMAIN:-proxy.localhost:4000}
       - DEFAULT_RUNNER_DOMAIN=runner:3003
       - DEFAULT_RUNNER_API_URL=http://runner:3003
       - DEFAULT_RUNNER_PROXY_URL=http://runner:3003
-      - DEFAULT_RUNNER_API_KEY=${DAYTONA_RUNNER_API_KEY:-secret_api_token}
+      - DEFAULT_RUNNER_API_KEY=${DAYTONA_RUNNER_API_KEY}
       - DEFAULT_RUNNER_CPU=4
       - DEFAULT_RUNNER_MEMORY=8
       - DEFAULT_RUNNER_DISK=50
@@ -147,14 +147,14 @@ services:
       - ADMIN_SNAPSHOT_QUOTA=1000
       - ADMIN_VOLUME_QUOTA=10000
       - DEFAULT_ORG_QUOTA_VOLUME_QUOTA=10000
-      - SSH_GATEWAY_API_KEY=${DAYTONA_SSH_GATEWAY_API_KEY:-ssh_secret_api_token}
+      - SSH_GATEWAY_API_KEY=${DAYTONA_SSH_GATEWAY_API_KEY}
       - SSH_GATEWAY_COMMAND=ssh -p 2222 {{TOKEN}}@localhost
       - SSH_GATEWAY_URL=localhost:2222
       - SSH_GATEWAY_PUBLIC_KEY=c3NoLWVkMjU1MTkgQUFBQUMzTnphQzFsWkRJMU5URTVBQUFBSU9HUDVKa3VYbVhieEhxYXVxNUxuQ2hoUkFXamIxWGdlQjloS0J6OUhPVE8gZGF5dG9uYS1nYXRld2F5Cg==
       - SKIP_USER_EMAIL_VERIFICATION=true
       - RUN_MIGRATIONS=true
-      - HEALTH_CHECK_API_KEY=${DAYTONA_HEALTH_CHECK_API_KEY:-supersecretkey}
-      - ADMIN_API_KEY=${DAYTONA_ADMIN_KEY:-7a818c729dc7f97e58caf77275f4a63ba877d28fc8d654b21708a7572eadf8f2}
+      - HEALTH_CHECK_API_KEY=${DAYTONA_HEALTH_CHECK_API_KEY}
+      - ADMIN_API_KEY=${DAYTONA_ADMIN_KEY}
       - POSTHOG_API_KEY=
       - POSTHOG_HOST=
     depends_on:
@@ -178,13 +178,13 @@ services:
     environment:
       - ENVIRONMENT=production
       - API_PORT=3003
-      - DAYTONA_RUNNER_TOKEN=${DAYTONA_RUNNER_API_KEY:-secret_api_token}
+      - DAYTONA_RUNNER_TOKEN=${DAYTONA_RUNNER_API_KEY}
       - LOG_FILE_PATH=/home/daytona/runner/runner.log
       - RESOURCE_LIMITS_DISABLED=true
       - AWS_ENDPOINT_URL=http://minio:9000
       - AWS_REGION=us-east-1
-      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
-      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
       - AWS_DEFAULT_BUCKET=daytona
       - DAYTONA_API_URL=http://api:3000/api
       - RUNNER_DOMAIN=${RUNNER_DOMAIN:-runner}
@@ -204,7 +204,7 @@ services:
     environment:
       - DAYTONA_API_URL=http://api:3000/api
       - PROXY_PORT=4000
-      - PROXY_API_KEY=${DAYTONA_PROXY_API_KEY:-super_secret_key}
+      - PROXY_API_KEY=${DAYTONA_PROXY_API_KEY}
       - PROXY_PROTOCOL=http
       - OIDC_CLIENT_ID=daytona
       - OIDC_CLIENT_SECRET=
@@ -225,10 +225,10 @@ services:
       - "2222:2222"
     environment:
       - API_URL=http://api:3000/api
-      - API_KEY=${DAYTONA_SSH_GATEWAY_API_KEY:-ssh_secret_api_token}
+      - API_KEY=${DAYTONA_SSH_GATEWAY_API_KEY}
       - SSH_GATEWAY_PORT=2222
-      - SSH_PRIVATE_KEY=${DAYTONA_SSH_GATEWAY_PRIVATE_KEY:-LS0tLS1CRUdJTiBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0KYjNCbGJuTnphQzFyWlhrdGRqRUFBQUFBQkc1dmJtVUFBQUFFYm05dVpRQUFBQUFBQUFBQkFBQUFNd0FBQUF0emMyZ3RaVwpReU5UVXhPUUFBQUNEaGorU1pMbDVsMjhSNm1ycXVTNXdvWVVRRm8yOVY0SGdmWVNnYy9Semt6Z0FBQUpqY01lRVUzREhoCkZBQUFBQXR6YzJndFpXUXlOVFV4T1FBQUFDRGhqK1NaTGw1bDI4UjZtcnF1UzV3b1lVUUZvMjlWNEhnZllTZ2MvUnpremcKQUFBRUNYbjJ0ZzJtOUdqc0U2Nm1FYUxsUEV1T0MzUktRc3U4OGcvQmRiRlZyOTZ1R1A1Smt1WG1YYnhIcWF1cTVMbkNoaApSQVdqYjFYZ2VCOWhLQno5SE9UT0FBQUFEMlJoZVhSdmJtRXRaMkYwWlhkaGVRRUNBd1FGQmc9PQotLS0tLUVORCBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0K}
-      - SSH_HOST_KEY=${DAYTONA_SSH_GATEWAY_HOST_KEY:-LS0tLS1CRUdJTiBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0KYjNCbGJuTnphQzFyWlhrdGRqRUFBQUFBQkc1dmJtVUFBQUFFYm05dVpRQUFBQUFBQUFBQkFBQUFNd0FBQUF0emMyZ3RaVwpReU5UVXhPUUFBQUNEbWt0d0hVVzMwd2VjQkZiSTRpS284SEkzejZqRnh1TDYwQmtTWnlaK2FJd0FBQUppU05HaWVralJvCm5nQUFBQXR6YzJndFpXUXlOVFV4T1FBQUFDRG1rdHdIVVczMHdlY0JGYkk0aUtvOEhJM3o2akZ4dUw2MEJrU1p5WithSXcKQUFBRUJhck95SFdxSHlpVzlvMGQ0VjJjYVhlL2RWM3FOZnFWV3k5bWkvQ3YveDNPYVMzQWRSYmZUQjV3RVZzamlJcWp3YwpqZlBxTVhHNHZyUUdSSm5KbjVvakFBQUFGR1JoZVhSdmJtRXRaMkYwWlhkaGVTMW9iM04wQVE9PQotLS0tLUVORCBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0K}
+      - SSH_PRIVATE_KEY=${DAYTONA_SSH_GATEWAY_PRIVATE_KEY}
+      - SSH_HOST_KEY=${DAYTONA_SSH_GATEWAY_HOST_KEY}
     networks:
       - app-net
     restart: always
@@ -251,13 +251,13 @@ services:
   db:
     image: postgres@sha256:1090bc3a8ccfb0b55f78a494d76f8d603434f7e4553543d6e807bc7bd6bbd17f
     environment:
-      - POSTGRES_PASSWORD=${DAYTONA_DB_PASSWORD:-a63e835f8f4110779bbbc968410fac2f3766f3071395881b}
-      - POSTGRES_USER=${DAYTONA_DB_USER:-daytona}
-      - POSTGRES_DB=${DAYTONA_DB_NAME:-daytona}
+      - POSTGRES_PASSWORD=${DAYTONA_DB_PASSWORD}
+      - POSTGRES_USER=${DAYTONA_DB_USER}
+      - POSTGRES_DB=${DAYTONA_DB_NAME}
     volumes:
-      - db_data:/var/lib/postgresql
+      - db_data_prod:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DAYTONA_DB_USER:-daytona} -d ${DAYTONA_DB_NAME:-daytona}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DAYTONA_DB_USER} -d ${DAYTONA_DB_NAME}"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -282,8 +282,8 @@ services:
   minio:
     image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
     volumes:
       - minio_data:/data
     command: server /data
@@ -316,5 +316,7 @@ volumes:
   daytona_redis_data:
   dex_db:
   db_data:
+  db_data_test:
+  db_data_prod:
   minio_data:
   registry_data:

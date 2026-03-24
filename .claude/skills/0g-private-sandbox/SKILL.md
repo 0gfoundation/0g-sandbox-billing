@@ -290,11 +290,13 @@ Confirm installed before proceeding:
 go run ./cmd/user/ exec --api $API --id $SANDBOX_ID --cmd "rsync --version"
 ```
 
-### Step 2 — Sync via rsync
+### Step 2 — Test rsync protocol support (MANDATORY before syncing)
+
+The sandbox SSH shell may be restricted and block the rsync protocol even when rsync binary is present. Always test first:
 
 ```bash
 export LOCAL_DIR=/path/to/your/project
-export REMOTE_DIR=/home/daytona/project
+export REMOTE_DIR=~/workspace
 
 # Get SSH credentials
 # NOTE: use 2>&1 — "Password:" line comes from stderr
@@ -307,6 +309,25 @@ TOKEN=$(echo "$SSH_OUTPUT" | grep '^Password:' | awk '{print $2}')
 # ⚠️ Known issue: SSH via domain may hang. Replace domain with direct IP if needed:
 # USER_HOST=$(echo "$USER_HOST" | sed 's/private-sandbox-testnet.0g.ai/43.106.147.28/')
 
+# Test rsync protocol — create a tiny test file and try to sync it
+echo "test" > /tmp/_rsync_test.txt
+RSYNC_TEST=$(sshpass -p $TOKEN rsync -q \
+  -e "ssh -p $PORT -o StrictHostKeyChecking=no -o BatchMode=no" \
+  /tmp/_rsync_test.txt $USER_HOST:/tmp/_rsync_test.txt 2>&1)
+
+if echo "$RSYNC_TEST" | grep -q "connection unexpectedly closed\|rsync error"; then
+  echo "⚠️  rsync protocol not supported by this sandbox SSH — use toolbox upload instead (see below)"
+  export RSYNC_OK=0
+else
+  echo "✅ rsync works — proceeding with sync"
+  export RSYNC_OK=1
+fi
+rm -f /tmp/_rsync_test.txt
+```
+
+**If `RSYNC_OK=1` → proceed with rsync sync:**
+
+```bash
 # Initial full sync
 # NOTE: rsync may exit 255 even on success — verify files instead of exit code
 sshpass -p $TOKEN rsync -avz \
@@ -325,6 +346,26 @@ done &
 
 > SSH token expires ~1h. Re-run `ssh-access` to refresh.
 
+**If `RSYNC_OK=0` → use toolbox upload instead:**
+
+```bash
+# Upload a single file
+FILE=main.py
+go run ./cmd/user/ toolbox \
+  --api $API --id $SANDBOX_ID \
+  --method POST --action files/upload \
+  --body "{\"path\":\"$REMOTE_DIR/$FILE\",\"content\":\"$(base64 -w0 $LOCAL_DIR/$FILE)\"}"
+
+# For multiple files — loop over them
+for FILE in $(find $LOCAL_DIR -type f -not -path '*/.git/*' -not -name '*.pyc'); do
+  REL=${FILE#$LOCAL_DIR/}
+  go run ./cmd/user/ toolbox \
+    --api $API --id $SANDBOX_ID \
+    --method POST --action files/upload \
+    --body "{\"path\":\"$REMOTE_DIR/$REL\",\"content\":\"$(base64 -w0 $FILE)\"}"
+done
+```
+
 ### Run code after sync
 
 ```bash
@@ -332,17 +373,7 @@ go run ./cmd/user/ exec --api $API --id $SANDBOX_ID \
   --cmd "sh -c 'cd $REMOTE_DIR && python3 main.py'"
 ```
 
-From now on: agent only **edits local files + execs in sandbox**. Never manually rsync again.
-
-### Fallback: toolbox upload (only if rsync/sshpass installation itself fails)
-
-```bash
-FILE=main.py
-go run ./cmd/user/ toolbox \
-  --api $API --id $SANDBOX_ID \
-  --method POST --action files/upload \
-  --body "{\"path\":\"$REMOTE_DIR/$FILE\",\"content\":\"$(base64 -w0 $LOCAL_DIR/$FILE)\"}"
-```
+From now on: agent only **edits local files + execs in sandbox**. Never manually rsync again. For watch mode with toolbox: upload only the changed file after each edit.
 
 ---
 
@@ -538,5 +569,6 @@ go run ./cmd/user/ toolbox \
 | SSH token expired | 60-min TTL | Re-run `ssh-access` |
 | `sudo apt-get` fails in sandbox | User may already be root | Try without sudo |
 | rsync exit 255 | SSH closes after transfer | Normal — verify files instead |
+| rsync `connection unexpectedly closed (code 12)` | Sandbox SSH is restricted shell, blocks rsync protocol | Use toolbox upload fallback |
 | Toolbox 403 | Wrong owner | Confirm `SANDBOX_ID` belongs to this `USER_KEY` |
 | `exec` output missing env vars | No login shell | Wrap: `sh -c '. ~/.cargo/env && ...'` |
