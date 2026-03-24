@@ -161,7 +161,7 @@ func main() {
 	})
 
 	// Session endpoints — called by the billing proxy (TEE-signed requests).
-	sessionHandler := broker.NewSessionHandler(idx, onchain, payment, rdb, log, cfg.Broker.TopupIntervals)
+	sessionHandler := broker.NewSessionHandler(idx, onchain, payment, rdb, log, cfg.Broker.TopupIntervals, cfg.Broker.DepositPollTimeoutSec)
 	r.POST("/api/session", sessionHandler.HandlePost)
 	r.DELETE("/api/session/:id", sessionHandler.HandleDelete)
 

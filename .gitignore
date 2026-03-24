@@ -22,3 +22,4 @@ contracts/lib/
 *.key
 *.pem
 *.p12
+mock-payment
