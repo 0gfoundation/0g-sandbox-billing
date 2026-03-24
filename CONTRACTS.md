@@ -47,6 +47,120 @@ SETTLEMENT_CONTRACT=0xd7e0CD227e602FedBb93c36B1F5bf415398508a4
 
 ---
 
+## Architecture
+
+```
+User/Billing ──► BeaconProxy  (stable address, all ETH/state lives here)
+                     │ reads implementation from beacon
+                     ▼
+               UpgradeableBeacon  (stores current impl, owned by deployer)
+                     │ delegatecall
+                     ▼
+               SandboxServing impl  (pure logic, no state, replaceable)
+```
+
+The **proxy address never changes**. Upgrading only replaces the implementation.
+Given the proxy address, beacon and impl can always be derived on-chain:
+
+```bash
+# Beacon address — ERC-1967 slot
+cast storage <proxy> 0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50
+
+# Current implementation
+cast call <beacon> "implementation()(address)"
+
+# Beacon owner
+cast call <beacon> "owner()(address)"
+```
+
+---
+
+## Deploy (first time)
+
+Deploys the full beacon-proxy stack in 3 steps:
+1. SandboxServing implementation (no constructor args)
+2. UpgradeableBeacon (impl, deployer)
+3. BeaconProxy (beacon, initialize(providerStake))
+
+```bash
+go run ./cmd/deploy/ \
+  --rpc      https://evmrpc-testnet.0g.ai \
+  --key      0x<deployer-private-key> \
+  --chain-id 16602 \
+  --stake    0
+```
+
+Output:
+```
+Implementation : 0x...
+Beacon         : 0x...
+Proxy (stable) : 0x...   ← set this as SETTLEMENT_CONTRACT
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--rpc` | `https://evmrpc-testnet.0g.ai` | EVM RPC endpoint |
+| `--key` | (required) | Deployer private key (hex, with or without 0x) |
+| `--chain-id` | `16602` | Chain ID |
+| `--stake` | `0` | `providerStake` passed to `initialize()` (neuron) |
+
+---
+
+## Upgrade
+
+Deploys a new implementation and points the beacon at it.
+**Proxy address is unchanged** — no `.env` update needed, no user re-acknowledgement required.
+
+```bash
+go run ./cmd/upgrade/ \
+  --rpc      https://evmrpc-testnet.0g.ai \
+  --key      0x<deployer-private-key> \
+  --chain-id 16602 \
+  --proxy    0x<proxy-address>
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--rpc` | `https://evmrpc-testnet.0g.ai` | EVM RPC endpoint |
+| `--key` | (required) | Deployer/owner private key |
+| `--chain-id` | `16602` | Chain ID |
+| `--proxy` | (required*) | BeaconProxy address — beacon resolved automatically |
+| `--beacon` | (required*) | UpgradeableBeacon address (alternative to `--proxy`) |
+
+\* Provide either `--proxy` or `--beacon`.
+
+---
+
+## Verify
+
+Verifies all three contracts on the block explorer.
+**Only the proxy address is needed** — beacon and impl are resolved automatically from chain.
+
+```bash
+./scripts/verify-contracts.sh --proxy 0x<proxy-address>
+```
+
+---
+
+## Provider Registration
+
+After deploying the contract, register the service on-chain using `cmd/provider`.
+See [`CLI.md`](CLI.md) for full details.
+
+```bash
+# Get TEE signer address from tapp-daemon
+tapp-cli -s http://<server>:50051 get-app-key --app-id 0g-sandbox
+# → Ethereum Address: 0x61beb835...
+
+PROVIDER_KEY=0x<provider-key> go run ./cmd/provider/ init-service \
+  --tee-signer <TEE-signer-address> \
+  --url        http://<billing-proxy>:8080
+```
+
+Then set `PROVIDER_ADDRESS` in `.env` and fund the TEE address with 0G for gas.
+
+---
+
 ## 设计说明
 
 - **Proxy 地址永不变** — 升级只替换 implementation，proxy 地址是对外稳定地址
