@@ -237,7 +237,7 @@ services:
     image: dexidp/dex@sha256:1b4a6eee8550240b0faedad04d984ca939513650e1d9bd423502c67355e3822f
     volumes:
       - ./config/dex/config.yaml:/etc/dex/config.yaml
-      - dex_db:/var/dex
+      - ${DEX_DB_DATA:-dex_db}:/var/dex
     entrypoint: ['sh', '-c', 'touch /var/dex/dex.db && exec dex serve /etc/dex/config.yaml']
     healthcheck:
       test: ["CMD", "wget", "--spider", "--quiet", "http://localhost:5556/dex/.well-known/openid-configuration"]
@@ -269,7 +269,7 @@ services:
   daytona-redis:
     image: redis@sha256:8b81dd37ff027bec4e516d41acfbe9fe2460070dc6d4a4570a2ac5b9d59df065
     volumes:
-      - daytona_redis_data:/data
+      - ${DAYTONA_REDIS_DATA:-daytona_redis_data}:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -285,7 +285,7 @@ services:
       - MINIO_ROOT_USER=${MINIO_ROOT_USER}
       - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
     volumes:
-      - minio_data:/data
+      - ${MINIO_DATA:-minio_data}:/data
     command: server /data
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
@@ -315,10 +315,13 @@ volumes:
   sandbox_redis_data:
   sandbox_redis_data_dev:
   daytona_redis_data:
+  daytona_redis_data_dev:
   dex_db:
+  dex_db_dev:
   db_data:
   db_data_test:
   db_data_dev:
   db_data_prod:
   minio_data:
+  minio_data_dev:
   registry_data:
