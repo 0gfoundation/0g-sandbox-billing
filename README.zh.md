@@ -59,9 +59,11 @@ Prompt ──► 0G Compute（TEE 内 AI 推理）
 
 ## 启动服务器
 
-将 `.env.example` 复制为 `.env`，填入必要参数，然后：
+将 `docker/sandbox/.env.dev` 复制为 `.env`，填入必要参数，然后：
 
 ```bash
+cp docker/sandbox/.env.dev .env
+# 编辑 .env
 go run ./cmd/billing/
 ```
 
@@ -75,9 +77,9 @@ go run ./cmd/billing/
 | `RPC_URL` | （必填）| EVM RPC 地址 |
 | `CHAIN_ID` | （必填）| 链 ID（如 16602）|
 | `REDIS_ADDR` | `redis:6379` | Redis 地址 |
-| `COMPUTE_PRICE_PER_SEC` | `16667` | 每个沙盒的费用（neuron/秒，约 1M neuron/分钟）|
-| `CREATE_FEE` | `5000000` | 每次沙盒创建的固定费用（neuron）|
-| `VOUCHER_INTERVAL_SEC` | `3600` | voucher 刷新间隔（秒）|
+| `COMPUTE_PRICE_PER_SEC` | `16667` | 计算费用 fallback（链上 Provider 注册后以链上值为准）|
+| `CREATE_FEE` | `5000000` | 创建沙盒固定费用 fallback（链上注册后以链上值为准）|
+| `VOUCHER_INTERVAL_SEC` | `60` | voucher 刷新间隔（秒）|
 | `PORT` | `8080` | HTTP 服务端口 |
 | `MOCK_TEE` | — | 设为 `true` 用于本地开发（使用 `MOCK_APP_PRIVATE_KEY` 代替 TDX gRPC）|
 | `MOCK_APP_PRIVATE_KEY` | — | `MOCK_TEE=true` 时使用的十六进制私钥 |
@@ -112,7 +114,7 @@ rm -f /tmp/daytona_gw /tmp/daytona_gw.pub /tmp/daytona_host /tmp/daytona_host.pu
 
 ```bash
 # 构建镜像
-docker build -t billing:latest .
+docker build --target sandbox -t 0g-sandbox:dev .
 
 # 部署（或修改后重新部署）
 tapp-cli -s http://<tapp-server>:50051 stop-app  --app-id 0g-sandbox
