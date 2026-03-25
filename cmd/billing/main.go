@@ -257,7 +257,6 @@ func main() {
 			"contract_address":    cfg.Chain.ContractAddress,
 			"provider_address":    cfg.Chain.ProviderAddress,
 			"chain_id":            cfg.Chain.ChainID,
-			"rpc_url":             cfg.Chain.RPCURL,
 			"compute_price_per_sec": computePricePerSec.String(),
 			"create_fee":          createFee.String(),
 			"voucher_interval_sec": cfg.Billing.VoucherIntervalSec,

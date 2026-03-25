@@ -210,7 +210,6 @@ Server configuration and pricing.
   "contract_address":     "0x...",
   "provider_address":     "0x...",
   "chain_id":             16602,
-  "rpc_url":              "https://evmrpc-testnet.0g.ai",
   "create_fee":           "60000000000000000",
   "compute_price_per_sec":"0",
   "voucher_interval_sec": 60,
