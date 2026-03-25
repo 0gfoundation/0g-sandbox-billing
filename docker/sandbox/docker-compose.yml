@@ -48,7 +48,7 @@ services:
   sandbox-redis:
     image: redis@sha256:8b81dd37ff027bec4e516d41acfbe9fe2460070dc6d4a4570a2ac5b9d59df065
     volumes:
-      - sandbox_redis_data:/data
+      - ${SANDBOX_REDIS_DATA:-sandbox_redis_data}:/data
     command: >
       redis-server --appendonly yes --requirepass "${REDIS_PASSWORD:-}"
     healthcheck:
@@ -313,6 +313,7 @@ networks:
 
 volumes:
   sandbox_redis_data:
+  sandbox_redis_data_dev:
   daytona_redis_data:
   dex_db:
   db_data:
