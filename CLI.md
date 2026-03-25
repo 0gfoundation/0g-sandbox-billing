@@ -498,14 +498,24 @@ Create a new sandbox. Requires sufficient on-chain balance and prior `acknowledg
 go run ./cmd/user/ create \
   --api        <0g-sandbox-url> \
   [--key       <hex>] \
-  [--snapshot  <snapshot-name>]
+  [--snapshot  <snapshot-name>] \
+  [--name      <display-name>] \
+  [--class     small|medium|large] \
+  [--cpu       <cores>] \
+  [--memory    <gb>] \
+  [--disk      <gb>]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--api` | `http://localhost:8080` | 0G Sandbox service URL |
 | `--key` | `USER_KEY` env | User private key |
-| `--snapshot` | — | Snapshot name to use as the sandbox base (optional) |
+| `--snapshot` | — | Snapshot name to use as the sandbox base |
+| `--name` | — | Sandbox display name |
+| `--class` | — | Preset resource class: `small`, `medium`, or `large` |
+| `--cpu` | — | CPU cores (overrides `--class`) |
+| `--memory` | — | Memory in GB (overrides `--class`) |
+| `--disk` | — | Disk in GB (overrides `--class`) |
 
 **Example**
 

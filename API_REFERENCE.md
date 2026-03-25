@@ -537,7 +537,12 @@ Use the provider address shown here for `balance`, `acknowledge`, and `deposit`.
 ```bash
 USER_KEY=0x<key> go run ./cmd/user/ create \
   --api http://<proxy>:8080 \
-  [--image <docker-image>]
+  [--snapshot <snapshot-name>] \
+  [--name     <display-name>] \
+  [--class    small|medium|large] \
+  [--cpu      <cores>] \
+  [--memory   <gb>] \
+  [--disk     <gb>]
 ```
 
 #### `list` — List sandboxes
