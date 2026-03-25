@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -252,15 +253,20 @@ func main() {
 		c.JSON(http.StatusOK, providers)
 	})
 
+	rpcOrigin := cfg.Chain.RPCURL
+	if u, err := url.Parse(cfg.Chain.RPCURL); err == nil {
+		rpcOrigin = u.Scheme + "://" + u.Host
+	}
 	r.GET("/info", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"contract_address":    cfg.Chain.ContractAddress,
-			"provider_address":    cfg.Chain.ProviderAddress,
-			"chain_id":            cfg.Chain.ChainID,
+			"contract_address":      cfg.Chain.ContractAddress,
+			"provider_address":      cfg.Chain.ProviderAddress,
+			"chain_id":              cfg.Chain.ChainID,
+			"rpc_url":               rpcOrigin,
 			"compute_price_per_sec": computePricePerSec.String(),
-			"create_fee":          createFee.String(),
-			"voucher_interval_sec": cfg.Billing.VoucherIntervalSec,
-			"min_balance":         minBalance.String(),
+			"create_fee":            createFee.String(),
+			"voucher_interval_sec":  cfg.Billing.VoucherIntervalSec,
+			"min_balance":           minBalance.String(),
 		})
 	})
 
