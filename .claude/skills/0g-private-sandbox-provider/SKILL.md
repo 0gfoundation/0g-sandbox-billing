@@ -15,7 +15,25 @@ repository: https://github.com/0gfoundation/0g-sandbox
 
 Detect the language of the user's message and respond in that language throughout the entire session.
 
-Output the following verbatim and wait for the answer before doing anything else:
+First, set up the `0g-provider` CLI (run silently before asking anything):
+
+```bash
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m); [ "$ARCH" = "x86_64" ] && ARCH=amd64; [ "$ARCH" = "aarch64" ] && ARCH=arm64
+if command -v 0g-provider &>/dev/null; then
+  export PROVIDER_CLI=0g-provider
+elif [ -x "$HOME/.local/bin/0g-provider" ]; then
+  export PROVIDER_CLI="$HOME/.local/bin/0g-provider"
+else
+  mkdir -p ~/.local/bin
+  curl -fsSL "https://github.com/0gfoundation/0g-sandbox/releases/latest/download/0g-provider_${OS}_${ARCH}" \
+    -o ~/.local/bin/0g-provider && chmod +x ~/.local/bin/0g-provider
+  export PROVIDER_CLI="$HOME/.local/bin/0g-provider"
+fi
+echo "CLI ready: $PROVIDER_CLI"
+```
+
+Then output the following verbatim and wait for the answer:
 
 ---
 
@@ -95,8 +113,7 @@ Fill in:
 Ask the user for all values, then run:
 
 ```bash
-export PATH=$PATH:/usr/local/go/bin
-PROVIDER_KEY=0x<provider-wallet-key> go run ./cmd/provider/ register \
+PROVIDER_KEY=0x<provider-wallet-key> $PROVIDER_CLIregister \
   --rpc <rpc-url> \
   --chain-id <chain-id> \
   --contract <settlement-contract> \
@@ -116,7 +133,7 @@ Network presets:
 ### Step 4 — Verify registration
 
 ```bash
-go run ./cmd/provider/ status \
+$PROVIDER_CLIstatus \
   --rpc <rpc-url> \
   --contract <settlement-contract> \
   --address <provider-address>
@@ -142,8 +159,7 @@ Re-run registration with new values. No stake required for updates.
 **Via CLI:**
 
 ```bash
-export PATH=$PATH:/usr/local/go/bin
-PROVIDER_KEY=0x<key> go run ./cmd/provider/ register \
+PROVIDER_KEY=0x<key> $PROVIDER_CLIregister \
   --rpc <rpc-url> \
   --chain-id <chain-id> \
   --contract <settlement-contract> \
@@ -205,7 +221,7 @@ docker exec <runner-container> docker push \
 Or with the built-in helper (default runner: `0g-sandbox-billing-runner-1`):
 
 ```bash
-go run ./cmd/provider/ push-image \
+$PROVIDER_CLIpush-image \
   --image <image-name>:<version> \
   --runner <runner-container-name>
 ```
@@ -233,13 +249,13 @@ After the image is in the registry, register it as a snapshot:
 
 ```bash
 # Single snapshot (custom or default spec)
-PROVIDER_KEY=0x<key> go run ./cmd/provider/ snapshot \
+PROVIDER_KEY=0x<key> $PROVIDER_CLIsnapshot \
   --api http://<billing-proxy>:8080 \
   --image registry:6000/daytona/<image-name>:<version> \
   --name <snapshot-name>
 
 # With size tiers (creates <name>-small, <name>-medium, <name>-large)
-PROVIDER_KEY=0x<key> go run ./cmd/provider/ snapshot \
+PROVIDER_KEY=0x<key> $PROVIDER_CLIsnapshot \
   --api http://<billing-proxy>:8080 \
   --image registry:6000/daytona/<image-name>:<version> \
   --name <snapshot-name> \
@@ -254,8 +270,8 @@ State: `pending` → `active` in ~30s (Daytona pulls the image).
 ### List / delete snapshots
 
 ```bash
-PROVIDER_KEY=0x<key> go run ./cmd/provider/ snapshots --api http://<billing-proxy>:8080
-PROVIDER_KEY=0x<key> go run ./cmd/provider/ delete-snapshot \
+PROVIDER_KEY=0x<key> $PROVIDER_CLIsnapshots --api http://<billing-proxy>:8080
+PROVIDER_KEY=0x<key> $PROVIDER_CLIdelete-snapshot \
   --api http://<billing-proxy>:8080 --id <snapshot-name>
 ```
 
@@ -264,8 +280,7 @@ PROVIDER_KEY=0x<key> go run ./cmd/provider/ delete-snapshot \
 ## Withdraw Earnings
 
 ```bash
-export PATH=$PATH:/usr/local/go/bin
-PROVIDER_KEY=0x<key> go run ./cmd/provider/ withdraw \
+PROVIDER_KEY=0x<key> $PROVIDER_CLIwithdraw \
   --rpc <rpc-url> \
   --chain-id <chain-id> \
   --contract <settlement-contract>
@@ -321,9 +336,8 @@ Each event: `timestamp`, `user`, `total_fee`, `nonce`, `status` (SUCCESS / INSUF
 ## Status Check
 
 ```bash
-export PATH=$PATH:/usr/local/go/bin
 # With address (no key needed)
-go run ./cmd/provider/ status \
+$PROVIDER_CLIstatus \
   --rpc <rpc-url> \
   --contract <settlement-contract> \
   --address <provider-address>

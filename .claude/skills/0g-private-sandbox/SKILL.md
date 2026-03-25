@@ -21,17 +21,22 @@ Output the following verbatim and wait for all answers before doing anything els
 
 Before we begin, I need a few details.
 
-**Prerequisite** — commands require Go. Check it's available:
+**Prerequisite** — set up the `0g-user` CLI:
 
 ```bash
-export PATH=$PATH:/usr/local/go/bin
-go version
-```
-
-If Go is missing:
-```bash
-curl -L https://go.dev/dl/go1.23.4.linux-amd64.tar.gz | sudo tar -C /usr/local -xz
-export PATH=$PATH:/usr/local/go/bin
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m); [ "$ARCH" = "x86_64" ] && ARCH=amd64; [ "$ARCH" = "aarch64" ] && ARCH=arm64
+if command -v 0g-user &>/dev/null; then
+  export USER_CLI=0g-user
+elif [ -x "$HOME/.local/bin/0g-user" ]; then
+  export USER_CLI="$HOME/.local/bin/0g-user"
+else
+  mkdir -p ~/.local/bin
+  curl -fsSL "https://github.com/0gfoundation/0g-sandbox/releases/latest/download/0g-user_${OS}_${ARCH}" \
+    -o ~/.local/bin/0g-user && chmod +x ~/.local/bin/0g-user
+  export USER_CLI="$HOME/.local/bin/0g-user"
+fi
+echo "CLI ready: $USER_CLI"
 ```
 
 ---
@@ -105,18 +110,16 @@ Then proceed to **User Onboarding**.
 
 ### Step 0 — Wallet
 
-**No wallet yet** — generate one:
+**No wallet yet** — generate one (use whichever tool is available):
 
 ```bash
-go run - <<'EOF'
-package main
-import ("fmt"; "github.com/ethereum/go-ethereum/crypto")
-func main() {
-    k, _ := crypto.GenerateKey()
-    fmt.Printf("Private Key: 0x%x\nAddress:     %s\n",
-        crypto.FromECDSA(k), crypto.PubkeyToAddress(k.PublicKey).Hex())
-}
-EOF
+# Option 1: Foundry cast (recommended)
+cast wallet new
+
+# Option 2: Node.js with ethers
+node -e "const {ethers}=require('ethers'); const w=ethers.Wallet.createRandom(); console.log('Private Key:',w.privateKey,'\nAddress:    ',w.address)"
+
+# Option 3: MetaMask / Rabby / any EVM wallet — export the private key after creating
 ```
 
 Tell the user to save their private key securely — it will not be shown again.
@@ -127,12 +130,12 @@ Tell the user to save their private key securely — it will not be shown again.
 
 **Direct path** — scan the chain:
 ```bash
-go run ./cmd/user/ providers
+$USER_CLIproviders
 ```
 
 **Broker path** — query provider index via broker (no chain scan):
 ```bash
-go run ./cmd/user/ providers --api $API
+$USER_CLIproviders --api $API
 ```
 
 After picking a provider, update `API` to the selected provider URL (from the export commands printed by the command). From this point on, `API` always points to the provider, not the broker.
@@ -165,7 +168,7 @@ Note the create fee and per-resource pricing for the chosen provider — you wil
 Use the wallet address (not the private key) to check balance:
 
 ```bash
-go run ./cmd/user/ balance --address <wallet-address> --provider $PROVIDER
+$USER_CLIbalance --address <wallet-address> --provider $PROVIDER
 ```
 
 Output:
@@ -180,7 +183,7 @@ At minimum the balance must cover the **create fee** (shown in Step 1 output) pl
 
 If depositing:
 ```bash
-go run ./cmd/user/ deposit --provider $PROVIDER --amount <amount>
+$USER_CLIdeposit --provider $PROVIDER --amount <amount>
 ```
 
 Confirm balance again after deposit.
@@ -190,17 +193,17 @@ Confirm balance again after deposit.
 Only required when contract balance was 0 before depositing:
 
 ```bash
-go run ./cmd/user/ acknowledge --provider $PROVIDER
+$USER_CLIacknowledge --provider $PROVIDER
 ```
 
 ### Step 4 — Check for existing sandboxes
 
 ```bash
-go run ./cmd/user/ list --api $API
+$USER_CLIlist --api $API
 ```
 
 - **Sandboxes found** → show list, ask: reuse one or create new?
-  - Reuse: `go run ./cmd/user/ start --api $API --id <id>`
+  - Reuse: `$USER_CLIstart --api $API --id <id>`
   - Create new → Step 5
 - **No sandboxes** → Step 5 directly
 
@@ -211,7 +214,7 @@ First ask:
 
 Then list available snapshots:
 ```bash
-go run ./cmd/user/ snapshots --api $API
+$USER_CLIsnapshots --api $API
 ```
 
 Based on goal, recommend:
@@ -232,10 +235,10 @@ Wait for confirmation before proceeding.
 
 ```bash
 # Without snapshot
-go run ./cmd/user/ create --api $API --name <friendly-name>
+$USER_CLIcreate --api $API --name <friendly-name>
 
 # With snapshot
-go run ./cmd/user/ create --api $API --name <friendly-name> --snapshot <name>
+$USER_CLIcreate --api $API --name <friendly-name> --snapshot <name>
 ```
 
 Copy the returned sandbox ID:
@@ -276,18 +279,18 @@ brew install rsync sshpass               # macOS
 
 **Sandbox — check and install if missing:**
 ```bash
-go run ./cmd/user/ exec --api $API --id $SANDBOX_ID --cmd "which rsync"
+$USER_CLIexec --api $API --id $SANDBOX_ID --cmd "which rsync"
 ```
 
 If the output is empty (not found), install it:
 ```bash
-go run ./cmd/user/ exec --api $API --id $SANDBOX_ID \
+$USER_CLIexec --api $API --id $SANDBOX_ID \
   --cmd "sh -c 'apt-get update -qq && apt-get install -y rsync'"
 ```
 
 Confirm installed before proceeding:
 ```bash
-go run ./cmd/user/ exec --api $API --id $SANDBOX_ID --cmd "rsync --version"
+$USER_CLIexec --api $API --id $SANDBOX_ID --cmd "rsync --version"
 ```
 
 ### Step 2 — Test rsync protocol support (MANDATORY before syncing)
@@ -300,7 +303,7 @@ export REMOTE_DIR=~/workspace
 
 # Get SSH credentials
 # NOTE: use 2>&1 — "Password:" line comes from stderr
-SSH_OUTPUT=$(go run ./cmd/user/ ssh-access --api $API --id $SANDBOX_ID 2>&1)
+SSH_OUTPUT=$($USER_CLIssh-access --api $API --id $SANDBOX_ID 2>&1)
 SSH_LINE=$(echo "$SSH_OUTPUT" | grep '^ssh ')
 PORT=$(echo "$SSH_LINE" | grep -o '\-p [0-9]*' | awk '{print $2}')
 USER_HOST=$(echo "$SSH_LINE" | awk '{print $NF}')
@@ -351,7 +354,7 @@ done &
 ```bash
 # Upload a single file
 FILE=main.py
-go run ./cmd/user/ toolbox \
+$USER_CLItoolbox \
   --api $API --id $SANDBOX_ID \
   --method POST --action files/upload \
   --body "{\"path\":\"$REMOTE_DIR/$FILE\",\"content\":\"$(base64 -w0 $LOCAL_DIR/$FILE)\"}"
@@ -359,7 +362,7 @@ go run ./cmd/user/ toolbox \
 # For multiple files — loop over them
 for FILE in $(find $LOCAL_DIR -type f -not -path '*/.git/*' -not -name '*.pyc'); do
   REL=${FILE#$LOCAL_DIR/}
-  go run ./cmd/user/ toolbox \
+  $USER_CLItoolbox \
     --api $API --id $SANDBOX_ID \
     --method POST --action files/upload \
     --body "{\"path\":\"$REMOTE_DIR/$REL\",\"content\":\"$(base64 -w0 $FILE)\"}"
@@ -369,7 +372,7 @@ done
 ### Run code after sync
 
 ```bash
-go run ./cmd/user/ exec --api $API --id $SANDBOX_ID \
+$USER_CLIexec --api $API --id $SANDBOX_ID \
   --cmd "sh -c 'cd $REMOTE_DIR && python3 main.py'"
 ```
 
@@ -381,13 +384,13 @@ From now on: agent only **edits local files + execs in sandbox**. Never manually
 
 ```bash
 # Clone repo into sandbox
-go run ./cmd/user/ toolbox \
+$USER_CLItoolbox \
   --api $API --id $SANDBOX_ID \
   --method POST --action git/clone \
   --body '{"url":"https://github.com/org/repo","path":"/home/daytona/project"}'
 
 # Install deps and run
-go run ./cmd/user/ exec --api $API --id $SANDBOX_ID \
+$USER_CLIexec --api $API --id $SANDBOX_ID \
   --cmd "sh -c 'cd /home/daytona/project && pip install -r requirements.txt && python main.py'"
 ```
 
@@ -431,23 +434,23 @@ If the output is empty, **stop and ask the user to set it** before continuing:
 Only proceed once confirmed non-empty.
 
 ```bash
-go run ./cmd/user/ exec --api $API --id $SANDBOX_ID \
+$USER_CLIexec --api $API --id $SANDBOX_ID \
   --cmd "/bin/bash -c 'openclaw config set gateway.mode local'"
 
-go run ./cmd/user/ exec --api $API --id $SANDBOX_ID \
+$USER_CLIexec --api $API --id $SANDBOX_ID \
   --cmd "/bin/bash -c 'export ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY; nohup bash -c \"openclaw gateway run --bind lan --port 3284 > /tmp/openclaw.log 2>&1\" &'"
 ```
 
 Wait 3s, confirm running:
 ```bash
-go run ./cmd/user/ exec --api $API --id $SANDBOX_ID \
+$USER_CLIexec --api $API --id $SANDBOX_ID \
   --cmd "/bin/bash -c 'sleep 3 && grep \"listening on\" /tmp/openclaw.log'"
 ```
 
 **Step 2 — Get gateway auth token**
 
 ```bash
-go run ./cmd/user/ exec --api $API --id $SANDBOX_ID \
+$USER_CLIexec --api $API --id $SANDBOX_ID \
   --cmd "/bin/bash -c 'node -e \"console.log(require(\\\"/root/.openclaw/openclaw.json\\\").gateway.auth.token)\"'"
 ```
 
@@ -473,7 +476,7 @@ ssh -N -L 13284:localhost:3284 -p 2222 -o StrictHostKeyChecking=no '<SSH_TOKEN>@
 **Option B — Self-configure via SSH**
 
 ```bash
-go run ./cmd/user/ ssh-access --api $API --id $SANDBOX_ID
+$USER_CLIssh-access --api $API --id $SANDBOX_ID
 ```
 
 Present the SSH token and the following exact steps to the user:
@@ -516,22 +519,22 @@ ssh -N -L 13284:localhost:3284 -p 2222 -o StrictHostKeyChecking=no '<TOKEN>@<HOS
 
 ```bash
 # List
-go run ./cmd/user/ list --api $API
+$USER_CLIlist --api $API
 
 # Start stopped sandbox
-go run ./cmd/user/ start --api $API --id $SANDBOX_ID
+$USER_CLIstart --api $API --id $SANDBOX_ID
 
 # Stop (pauses billing)
-go run ./cmd/user/ stop --api $API --id $SANDBOX_ID
+$USER_CLIstop --api $API --id $SANDBOX_ID
 
 # Delete (permanent)
-go run ./cmd/user/ delete --api $API --id $SANDBOX_ID
+$USER_CLIdelete --api $API --id $SANDBOX_ID
 
 # SSH access (60-min token)
-go run ./cmd/user/ ssh-access --api $API --id $SANDBOX_ID
+$USER_CLIssh-access --api $API --id $SANDBOX_ID
 
 # Check balance (use address, not key)
-go run ./cmd/user/ balance --address <wallet-address> --provider $PROVIDER
+$USER_CLIbalance --address <wallet-address> --provider $PROVIDER
 ```
 
 ---
@@ -539,7 +542,7 @@ go run ./cmd/user/ balance --address <wallet-address> --provider $PROVIDER
 ## Toolbox Quick Reference
 
 ```bash
-go run ./cmd/user/ toolbox \
+$USER_CLItoolbox \
   --api $API --id $SANDBOX_ID \
   [--method POST] --action <action> [--body '<json>']
 ```
