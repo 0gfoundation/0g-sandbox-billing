@@ -3,7 +3,7 @@ services:
   # ── Sandbox proxy (this repo) ──────────────────────────────────────────────
   sandbox:
     image: eliza-registry-vpc.ap-southeast-1.cr.aliyuncs.com/eliza/0g-sandbox:sandbox
-    pull_policy: always
+    pull_policy: if_not_present
     ports:
       - "${PORT:-8080}:8080"
     environment:
@@ -92,11 +92,11 @@ services:
       - DASHBOARD_BASE_API_URL=http://localhost:3000
       - TRANSIENT_REGISTRY_URL=http://registry:6000
       - TRANSIENT_REGISTRY_ADMIN=admin
-      - TRANSIENT_REGISTRY_PASSWORD=password
+      - TRANSIENT_REGISTRY_PASSWORD=${DAYTONA_REGISTRY_PASSWORD:-password}
       - TRANSIENT_REGISTRY_PROJECT_ID=daytona
       - INTERNAL_REGISTRY_URL=http://registry:6000
       - INTERNAL_REGISTRY_ADMIN=admin
-      - INTERNAL_REGISTRY_PASSWORD=password
+      - INTERNAL_REGISTRY_PASSWORD=${DAYTONA_REGISTRY_PASSWORD:-password}
       - INTERNAL_REGISTRY_PROJECT_ID=daytona
       - SMTP_HOST=localhost
       - SMTP_PORT=1025
@@ -150,7 +150,7 @@ services:
       - SSH_GATEWAY_API_KEY=${DAYTONA_SSH_GATEWAY_API_KEY}
       - SSH_GATEWAY_COMMAND=ssh -p 2222 {{TOKEN}}@localhost
       - SSH_GATEWAY_URL=localhost:2222
-      - SSH_GATEWAY_PUBLIC_KEY=c3NoLWVkMjU1MTkgQUFBQUMzTnphQzFsWkRJMU5URTVBQUFBSU9HUDVKa3VYbVhieEhxYXVxNUxuQ2hoUkFXamIxWGdlQjloS0J6OUhPVE8gZGF5dG9uYS1nYXRld2F5Cg==
+      - SSH_GATEWAY_PUBLIC_KEY=${DAYTONA_SSH_GATEWAY_PUBLIC_KEY}
       - SKIP_USER_EMAIL_VERIFICATION=true
       - RUN_MIGRATIONS=true
       - HEALTH_CHECK_API_KEY=${DAYTONA_HEALTH_CHECK_API_KEY}
@@ -189,7 +189,7 @@ services:
       - DAYTONA_API_URL=http://api:3000/api
       - RUNNER_DOMAIN=${RUNNER_DOMAIN:-runner}
       - SSH_GATEWAY_ENABLE=true
-      - SSH_PUBLIC_KEY=c3NoLWVkMjU1MTkgQUFBQUMzTnphQzFsWkRJMU5URTVBQUFBSU9HUDVKa3VYbVhieEhxYXVxNUxuQ2hoUkFXamIxWGdlQjloS0J6OUhPVE8gZGF5dG9uYS1nYXRld2F5Cg==
+      - SSH_PUBLIC_KEY=${DAYTONA_SSH_GATEWAY_PUBLIC_KEY}
     networks:
       - app-net
     depends_on:
@@ -255,7 +255,7 @@ services:
       - POSTGRES_USER=${DAYTONA_DB_USER}
       - POSTGRES_DB=${DAYTONA_DB_NAME}
     volumes:
-      - db_data_prod:/var/lib/postgresql
+      - ${DB_DATA_VOLUME:-db_data_prod}:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DAYTONA_DB_USER} -d ${DAYTONA_DB_NAME}"]
       interval: 5s
@@ -317,6 +317,7 @@ volumes:
   dex_db:
   db_data:
   db_data_test:
+  db_data_dev:
   db_data_prod:
   minio_data:
   registry_data:
