@@ -115,10 +115,10 @@ See [`CONTRACTS.md`](CONTRACTS.md) for architecture, deploy/upgrade/verify instr
 
 ## Running the Server
 
-Copy `.env.example` to `.env`, fill in the required values:
+Copy `docker/sandbox/.env.dev` to `.env`, fill in the required values:
 
 ```bash
-cp .env.example .env
+cp docker/sandbox/.env.dev .env
 # edit .env
 go run ./cmd/billing/
 ```
@@ -134,8 +134,8 @@ go run ./cmd/billing/
 | `CHAIN_ID` | (required) | Chain ID (e.g. 16602) |
 | `PROVIDER_ADDRESS` | (required) | Provider's Ethereum address |
 | `REDIS_ADDR` | `redis:6379` | Redis address |
-| `COMPUTE_PRICE_PER_SEC` | `16667` | neuron/sec per sandbox (≈ 1M neuron/min) |
-| `CREATE_FEE` | `5000000` | neuron flat fee per sandbox creation |
+| `COMPUTE_PRICE_PER_SEC` | `16667` | neuron/sec fallback (used only when per-resource on-chain pricing is not set) |
+| `CREATE_FEE` | `5000000` | neuron flat fee fallback (on-chain value takes priority after provider registration) |
 | `VOUCHER_INTERVAL_SEC` | `60` | voucher flush interval (seconds) |
 | `SSH_GATEWAY_HOST` | — | SSH gateway host rewritten in SSH commands (e.g. `43.106.147.28`); falls back to browser hostname if unset |
 | `PORT` | `8080` | HTTP server port |
@@ -172,9 +172,6 @@ the base64 values live only in `.env`).
 ```bash
 docker compose up
 ```
-
-The `billing` service image is pinned to a specific SHA256 digest in `docker-compose.yml`.
-Update the digest after rebuilding: `docker inspect billing:latest --format '{{.Id}}'`.
 
 ### Tapp Deployment (Production)
 
@@ -220,8 +217,9 @@ See [`CLI.md`](CLI.md) for the full `cmd/user` reference and onboarding flow.
 **Minimum balance to create a sandbox:**
 ```
 minBalance = CREATE_FEE + COMPUTE_PRICE_PER_SEC × VOUCHER_INTERVAL_SEC
-           = 5,000,000 + 16,667 × 3,600 ≈ 65,001,200 neuron ≈ 0.000065 0G
 ```
+Exact values depend on the provider's on-chain registration. Check `GET /info` for the live
+`create_fee`, `compute_price_per_sec`, and `min_balance` for the provider you're using.
 
 Sandboxes are automatically stopped when the user's balance is exhausted.
 
