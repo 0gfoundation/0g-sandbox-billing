@@ -64,18 +64,33 @@ inside a 0G Private Sandbox is to let Claude do the work for you.
 
 **Prerequisites**: [Claude Code](https://claude.ai/claude-code) installed.
 
+### Option A — Install the plugin (recommended, no cloning needed)
+
+```
+/plugin marketplace add 0gfoundation/0g-sandbox
+/plugin install 0g-private-sandbox@0g-sandbox
+/reload-plugins
+```
+
+Then invoke the skill anytime:
+
+```
+/0g-private-sandbox
+```
+
+### Option B — Clone the repo
+
 ```bash
-# 1. Clone this repo
 git clone https://github.com/0gfoundation/0g-sandbox.git
 cd 0g-sandbox
-
-# 2. Start Claude Code
 claude
 ```
 
 Then just describe what you want in plain language, for example:
 
 > "I want to use 0G private sandbox to play with OpenClaw"
+
+---
 
 Claude will walk you through the rest. When asked for configuration details, the key piece
 of information you need is:

@@ -51,6 +51,50 @@ Prompt ──► 0G Compute（TEE 内 AI 推理）
 
 ---
 
+## 快速上手：在私有沙盒中运行 OpenClaw
+
+**前提条件**：已安装 [Claude Code](https://claude.ai/claude-code)。
+
+### 方式一 — 安装 Claude Code 插件（推荐，无需克隆仓库）
+
+在 Claude Code 中执行：
+
+```
+/plugin marketplace add 0gfoundation/0g-sandbox
+/plugin install 0g-private-sandbox@0g-sandbox
+/reload-plugins
+```
+
+之后随时通过以下命令调用：
+
+```
+/0g-private-sandbox
+```
+
+### 方式二 — 克隆仓库
+
+```bash
+git clone https://github.com/0gfoundation/0g-sandbox.git
+cd 0g-sandbox
+claude
+```
+
+然后用自然语言描述需求，例如：
+
+> "我想用 0G private sandbox 来玩 OpenClaw"
+
+---
+
+Claude 会引导你完成后续所有步骤。需要填写配置时，关键信息如下：
+
+| 项目 | 值 |
+|------|-----|
+| **测试网合约** | `0xd7e0CD227e602FedBb93c36B1F5bf415398508a4` |
+| **RPC** | `https://evmrpc-testnet.0g.ai` |
+| **Chain ID** | `16602` |
+
+---
+
 ## 合约部署
 
 合约架构、部署/升级/验证操作及合约地址见 [`CONTRACTS.zh.md`](CONTRACTS.zh.md)。
