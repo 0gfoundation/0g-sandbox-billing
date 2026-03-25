@@ -25,6 +25,7 @@
 
 ```bash
 USER_KEY=0x<your-private-key> go run ./cmd/user/ deposit \
+  --provider 0x<provider-address> \
   --amount 0.01 \
   --rpc https://evmrpc-testnet.0g.ai \
   --chain-id 16602 \
@@ -209,9 +210,11 @@ Server configuration and pricing.
   "contract_address":     "0x...",
   "provider_address":     "0x...",
   "chain_id":             16602,
-  "create_fee_neuron":    "5000000",
+  "rpc_url":              "https://evmrpc-testnet.0g.ai",
+  "create_fee":           "60000000000000000",
   "compute_price_per_sec":"16667",
-  "voucher_interval_sec": 3600
+  "voucher_interval_sec": 3600,
+  "min_balance":          "65001200"
 }
 ```
 
@@ -220,13 +223,15 @@ On-chain service data for all known providers.
 ```json
 [
   {
-    "address":              "0x...",
-    "url":                  "https://...",
-    "tee_signer":           "0x...",
-    "compute_price_per_min":"1000020",
-    "compute_price_per_sec":"16667",
-    "create_fee":           "5000000",
-    "signer_version":       "1"
+    "address":                "0x...",
+    "url":                    "https://...",
+    "tee_signer":             "0x...",
+    "price_per_cpu_per_min":  "1000000000000000",
+    "price_per_cpu_per_sec":  "16666666666666",
+    "price_per_mem_gb_per_min":"500000000000000",
+    "price_per_mem_gb_per_sec":"8333333333333",
+    "create_fee":             "60000000000000000",
+    "signer_version":         "1"
   }
 ]
 ```
@@ -635,9 +640,9 @@ on the 0G Galileo testnet (chain ID 16602).
 
 ### Key Functions (SandboxServing ABI)
 
-#### `deposit(address user)`
+#### `deposit(address recipient, address provider)`
 
-Deposit 0G tokens into a user's account.
+Deposit 0G tokens into a user's account for a specific provider.
 ```
 payable; msg.value = amount in neuron (wei)
 ```
@@ -649,9 +654,9 @@ Allow (`accept=true`) or revoke (`accept=false`) a provider's TEE signer to char
 > The simplified wrapper `AcknowledgeTEESigner(address provider, bool accept)` looks up the
 > current TEE signer from the provider's service registration automatically.
 
-#### `getAccount(address user) → (balance, pendingRefund, refundUnlockAt)`
+#### `getBalance(address user, address provider) → (balance, pendingRefund, refundUnlockAt)`
 
-Read-only. Returns user balance and refund state in neuron.
+Read-only. Returns user balance and refund state (in neuron) for a specific provider.
 
 #### `getLastNonce(address user, address provider) → uint256`
 
@@ -661,16 +666,17 @@ Read-only. Returns the last settled nonce for a `(user, provider)` pair.
 
 Read-only. Returns total neuron earned by a provider.
 
-#### `getService(address provider) → ServiceInfo`
+#### `services(address provider) → Service`
 
-Read-only. Returns provider registration details:
+Read-only. Returns provider registration details (public mapping auto-getter):
 ```solidity
-struct ServiceInfo {
+struct Service {
     string  url;
     address teeSignerAddress;
-    uint256 computePricePerMin;
+    uint256 pricePerCPUPerMin;
     uint256 createFee;
     uint256 signerVersion;
+    uint256 pricePerMemGBPerMin;
 }
 ```
 
@@ -706,13 +712,15 @@ Called by the provider's settler. Users do not call this directly.
 
 ```json
 {
-  "address":               "0x...",
-  "url":                   "https://...",
-  "tee_signer":            "0x...",
-  "compute_price_per_min": "1000020",
-  "compute_price_per_sec": "16667",
-  "create_fee":            "5000000",
-  "signer_version":        "1"
+  "address":                 "0x...",
+  "url":                     "https://...",
+  "tee_signer":              "0x...",
+  "price_per_cpu_per_min":   "1000000000000000",
+  "price_per_cpu_per_sec":   "16666666666666",
+  "price_per_mem_gb_per_min":"500000000000000",
+  "price_per_mem_gb_per_sec":"8333333333333",
+  "create_fee":              "60000000000000000",
+  "signer_version":          "1"
 }
 ```
 
@@ -857,7 +865,7 @@ SandboxVoucher {
 | Field | Description |
 |-------|-------------|
 | `user` | The wallet address being charged |
-| `provider` | The provider's wallet address (must equal `msg.sender` on settlement) |
+| `provider` | The provider's wallet address (identified from voucher, not checked against `msg.sender`) |
 | `usageHash` | Opaque usage fingerprint: `keccak256(sandboxID ‖ periodStart ‖ periodEnd ‖ elapsedSec)` |
 | `nonce` | Strictly increasing per `(user, provider)` pair; seeded from chain on startup |
 | `totalFee` | `elapsedSec × COMPUTE_PRICE_PER_SEC` for compute vouchers; `CREATE_FEE` for create vouchers |

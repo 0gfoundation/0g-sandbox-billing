@@ -13,20 +13,21 @@ Private keys can be passed via `--key` flag or environment variable (`PROVIDER_K
 
 ## `cmd/provider` — Provider Operations
 
-### `init-service`
+### `register` / `init-service`
 
 Register a new service, or update an existing one, on the settlement contract.
-Must be called by the provider address (the key that will sign settlement transactions).
+(`init-service` is an alias for `register`.)
 
 ```bash
-PROVIDER_KEY=0x<hex> go run ./cmd/provider/ init-service \
-  --tee-signer <TEE-signer-address> \
-  --url        <0g-sandbox-url> \
-  [--price     <neuron-per-minute>] \
-  [--fee       <create-fee-neuron>] \
-  [--rpc       <rpc-url>] \
-  [--chain-id  <chain-id>] \
-  [--contract  <proxy-address>]
+PROVIDER_KEY=0x<hex> go run ./cmd/provider/ register \
+  --tee-signer  <TEE-signer-address> \
+  --url         <0g-sandbox-url> \
+  [--price-per-cpu <neuron-per-cpu-per-minute>] \
+  [--price-per-mem <neuron-per-gb-per-minute>] \
+  [--fee        <create-fee-neuron>] \
+  [--rpc        <rpc-url>] \
+  [--chain-id   <chain-id>] \
+  [--contract   <proxy-address>]
 ```
 
 **Flags**
@@ -34,13 +35,16 @@ PROVIDER_KEY=0x<hex> go run ./cmd/provider/ init-service \
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--key` | `PROVIDER_KEY` env | Provider private key (hex) |
-| `--tee-signer` | (required) | Address derived from the TEE key (`tapp-cli get-app-key --app-id 0g-sandbox`) |
+| `--tee-signer` | (provider address) | TEE signer address (`tapp-cli get-app-key --app-id 0g-sandbox`); defaults to provider address in dev mode |
 | `--url` | (required) | Public URL of the billing proxy (e.g. `http://1.2.3.4:8080`) |
-| `--price` | `1000020` | Compute price in neuron/minute |
-| `--fee` | `5000000` | Flat fee in neuron per sandbox creation |
+| `--price-per-cpu` | `1000000000000000` | Price per CPU core per minute (neuron) |
+| `--price-per-mem` | `500000000000000` | Price per GB memory per minute (neuron) |
+| `--fee` | `60000000000000000` | Flat fee per sandbox creation (neuron) |
 | `--rpc` | `https://evmrpc-testnet.0g.ai` | EVM RPC endpoint |
 | `--chain-id` | `16602` | Chain ID |
-| `--contract` | `0x24cD979...` | Settlement contract (BeaconProxy) address |
+| `--contract` | deployed testnet addr | Settlement contract (BeaconProxy) address |
+
+On first registration the required provider stake is read from the contract and attached automatically as `msg.value`.
 
 **Example — testnet**
 
@@ -49,31 +53,122 @@ PROVIDER_KEY=0x<hex> go run ./cmd/provider/ init-service \
 tapp-cli -s http://<server>:50051 get-app-key --app-id 0g-sandbox
 # → Ethereum Address: 0x61beb835...
 
-PROVIDER_KEY=0x859c3bd1... go run ./cmd/provider/ init-service \
-  --tee-signer 0x61BEb835D1935Eec8cC04efa2f4e2B3cC8B8B6E3 \
-  --url        http://47.236.111.154:8080 \
-  --price      1000020 \
-  --fee        5000000
+PROVIDER_KEY=0x859c3bd1... go run ./cmd/provider/ register \
+  --tee-signer   0x61BEb835D1935Eec8cC04efa2f4e2B3cC8B8B6E3 \
+  --url          http://47.236.111.154:8080 \
+  --price-per-cpu 1000000000000000 \
+  --price-per-mem 500000000000000 \
+  --fee          60000000000000000
 ```
 
 **Output**
 
 ```
-Provider:    0xB831371eb2703305f1d9F8542163633D0675CEd7
-TEE signer:  0x61BEb835D1935Eec8cC04efa2f4e2B3cC8B8B6E3
-Contract:    0x24cD979DBd0Ae924a3f0c832a724CF4C58E5C210
-Service URL: http://47.236.111.154:8080
-Price/min:   1000020 neuron
-Create fee:  5000000 neuron
+Provider:       0xB831371eb2703305f1d9F8542163633D0675CEd7
+TEE signer:     0x61BEb835D1935Eec8cC04efa2f4e2B3cC8B8B6E3
+Contract:       0xd7e0CD227e602FedBb93c36B1F5bf415398508a4
+Service URL:    http://47.236.111.154:8080
+CPU price/min:  1000000000000000 neuron
+Mem price/min:  500000000000000 neuron/GB
+Create fee:     60000000000000000 neuron
+Stake:          100000000000000000000 neuron (first registration, attached automatically)
 
 [1/1] AddOrUpdateService...
       tx: 0x...
       confirmed ✓
 
-Done. Set PROVIDER_ADDRESS=0xB831371eb2703305f1d9F8542163633D0675CEd7 in your .env.
+Done. Provider address: 0xB831371eb2703305f1d9F8542163633D0675CEd7
 ```
 
-> **After calling `init-service`**: set `PROVIDER_ADDRESS` and `PROVIDER_PRIVATE_KEY` in your `.env`, then redeploy the billing service.
+> **After calling `register`**: set `PROVIDER_ADDRESS` in your `.env`, then redeploy the billing service.
+
+---
+
+### `status`
+
+Show the current on-chain registration, pricing, stake, and earnings for a provider.
+
+```bash
+PROVIDER_KEY=0x<hex> go run ./cmd/provider/ status \
+  [--address  <provider-address>] \
+  [--rpc      <rpc-url>] \
+  [--contract <proxy-address>]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--key` | `PROVIDER_KEY` env | Provider private key (address derived from it) |
+| `--address` | — | Provider address (alternative to `--key`) |
+
+**Example**
+
+```bash
+PROVIDER_KEY=0x<hex> go run ./cmd/provider/ status
+```
+
+```
+Provider:       0xB831371eb2703305f1d9F8542163633D0675CEd7
+Contract:       0xd7e0CD227e602FedBb93c36B1F5bf415398508a4
+Registered:     true
+Required stake: 100000000000000000000 neuron
+
+Service:
+  URL:              http://47.236.111.154:8080
+  TEE signer:       0x61BEb835D1935Eec8cC04efa2f4e2B3cC8B8B6E3
+  CPU price/min:    1000000000000000 neuron
+  Mem price/min:    500000000000000 neuron/GB
+  Create fee:       60000000000000000 neuron
+  Signer ver:       4
+  My stake:         100000000000000000000 neuron
+  Earnings:         5000000000000000000 neuron
+```
+
+---
+
+### `withdraw`
+
+Withdraw all accumulated earnings from the settlement contract to the provider wallet.
+
+```bash
+PROVIDER_KEY=0x<hex> go run ./cmd/provider/ withdraw \
+  [--rpc      <rpc-url>] \
+  [--chain-id <chain-id>] \
+  [--contract <proxy-address>]
+```
+
+**Example**
+
+```bash
+PROVIDER_KEY=0x<hex> go run ./cmd/provider/ withdraw
+```
+
+```
+Provider:  0xB831371eb2703305f1d9F8542163633D0675CEd7
+Earnings:  5000000000000000000 neuron
+
+Withdrawing earnings...
+  tx: 0x...
+  confirmed ✓  (5000000000000000000 neuron withdrawn)
+```
+
+---
+
+### `set-stake`
+
+(Contract owner only) Update the required provider stake amount.
+
+```bash
+OWNER_KEY=0x<hex> go run ./cmd/provider/ set-stake \
+  --stake    <neuron> \
+  [--rpc     <rpc-url>] \
+  [--chain-id <chain-id>] \
+  [--contract <proxy-address>]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--key` | `OWNER_KEY` env | Contract owner private key |
+| `--stake` | (required) | New provider stake value in neuron |
 
 ---
 
