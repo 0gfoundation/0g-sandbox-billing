@@ -212,11 +212,15 @@ Server configuration and pricing.
   "chain_id":             16602,
   "rpc_url":              "https://evmrpc-testnet.0g.ai",
   "create_fee":           "60000000000000000",
-  "compute_price_per_sec":"16667",
-  "voucher_interval_sec": 3600,
-  "min_balance":          "65001200"
+  "compute_price_per_sec":"0",
+  "voucher_interval_sec": 60,
+  "min_balance":          "60000000000000000"
 }
 ```
+
+> `compute_price_per_sec` is the flat-rate fallback; it is `"0"` when per-resource pricing
+> (`price_per_cpu_per_min` / `price_per_mem_gb_per_min`) is configured on-chain.
+> `min_balance` = `create_fee + compute_price_per_sec × voucher_interval_sec`.
 
 #### `GET /api/providers`
 On-chain service data for all known providers.
@@ -509,25 +513,29 @@ USER_KEY=0x<key> go run ./cmd/user/ acknowledge \
 
 ### API Subcommands
 
-All API subcommands require `--api <0g-sandbox-url>`. Most require `USER_KEY` env var except `providers`.
+Most API subcommands require `--api <0g-sandbox-url>` and `USER_KEY` env var. Exception: `providers` reads directly from the chain.
 
 #### `providers` — List available providers
 
-No authentication required.
+Reads on-chain service registrations directly — **no `--api` flag**, no authentication required.
 
 ```bash
-go run ./cmd/user/ providers --api http://<proxy>:8080
+go run ./cmd/user/ providers \
+  [--rpc      <rpc-url>] \
+  [--chain-id <chain-id>] \
+  [--contract <proxy-address>]
 ```
 
 Output:
 ```
-Found 1 provider(s):
+Found 2 provider(s) on-chain:
 
 [1] 0xB831371eb2703305f1d9F8542163633D0675CEd7
-    URL:          http://47.236.111.154:8080
-    Create fee:   0.0600 0G
-    Compute:      0.001000 0G/sec  (0.0600 0G/min)
-    TEE signer:   0x61BEb835D1935Eec8cC04efa2f4e2B3cC8B8B6E3 (v4)
+    URL:         http://47.236.111.154:8080
+    Create fee:  0.0600 0G
+    CPU price:   0.000017 0G/CPU/sec  (0.0010 0G/CPU/min)
+    Mem price:   0.000008 0G/GB/sec   (0.0005 0G/GB/min)
+    TEE signer:  0x3Dc1A35f37FBfDb82900A00d209b4f3a2124E99d (v5)
 ```
 
 Use the provider address shown here for `balance`, `acknowledge`, and `deposit`.

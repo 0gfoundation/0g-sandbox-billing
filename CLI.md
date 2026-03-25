@@ -597,6 +597,11 @@ go run ./cmd/user/ snapshots \
 
 ---
 
+> **Note on `providers`:** This subcommand reads directly from the chain (not the billing proxy),
+> so it takes `--rpc` / `--contract` / `--chain-id` instead of `--api`.
+
+---
+
 ## Onboarding Flow
 
 Complete flow for a new user to start using sandboxes:
