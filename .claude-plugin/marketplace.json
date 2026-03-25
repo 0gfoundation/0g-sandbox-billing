@@ -1,0 +1,23 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "0g-sandbox",
+  "metadata": {
+    "description": "Skills for 0G Private Sandbox — create and manage TEE-isolated sandboxes for vibe coding, and operate provider infrastructure."
+  },
+  "owner": {
+    "name": "0G Foundation"
+  },
+  "plugins": [
+    {
+      "name": "0g-private-sandbox",
+      "description": "Create and manage 0G Private Sandboxes from Claude Code",
+      "version": "1.0.0",
+      "author": {
+        "name": "0G Foundation"
+      },
+      "source": "./",
+      "category": "tools",
+      "tags": ["sandbox", "tee", "0g", "vibe-coding", "web3"]
+    }
+  ]
+}
