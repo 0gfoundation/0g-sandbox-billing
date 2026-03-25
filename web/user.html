@@ -511,7 +511,14 @@ body.v-market .view-market{display:block}
           <div class="skill-steps">
             <div class="skill-step">
               <div class="skill-step-n">01</div>
-              <div class="skill-step-t">Enable the <strong>0g-private-sandbox</strong> skill in Claude Code</div>
+              <div class="skill-step-t">
+                Install the <strong>0g-private-sandbox</strong> skill — run these three commands inside Claude Code:
+                <div style="margin-top:8px;background:var(--pbg);border-radius:var(--r-sm);padding:8px 12px;display:flex;flex-direction:column;gap:4px">
+                  <code style="font-family:var(--mono);font-size:11px;color:var(--p);display:block">/plugin marketplace add 0gfoundation/0g-sandbox</code>
+                  <code style="font-family:var(--mono);font-size:11px;color:var(--p);display:block">/plugin install 0g-private-sandbox@0g-sandbox</code>
+                  <code style="font-family:var(--mono);font-size:11px;color:var(--p);display:block">/reload-plugins</code>
+                </div>
+              </div>
             </div>
             <div class="skill-step">
               <div class="skill-step-n">02</div>
@@ -530,17 +537,20 @@ body.v-market .view-market{display:block}
         <div class="skill-conv">
           <div class="skill-conv-bar">
             <div class="skill-conv-dot"></div>
-            <div class="skill-conv-title">sandbox — connected</div>
+            <div class="skill-conv-title">claude — 0g-private-sandbox</div>
           </div>
-          <span class="sk-d">  &gt; write a program that prints Hello from 0G Sandbox</span><br>
+          <span class="sk-s">  /plugin marketplace add 0gfoundation/0g-sandbox</span><br>
+          <span class="sk-ok">  ✓</span><span class="sk-d"> added: 0g-sandbox</span><br>
           <span class="sk-d">&nbsp;</span><br>
-          <span class="sk-ok">  ✓</span><span class="sk-d"> creating sandbox...</span><br>
-          <span class="sk-ok">  ✓</span><span class="sk-d"> sandbox ready</span><br>
-          <span class="sk-ok">  ✓</span><span class="sk-d"> writing hello.py</span><br>
-          <span class="sk-ok">  ✓</span><span class="sk-d"> rsync → </span><span class="sk-v">sandbox-a1b2c3</span><br>
+          <span class="sk-s">  /plugin install 0g-private-sandbox@0g-sandbox</span><br>
+          <span class="sk-ok">  ✓</span><span class="sk-d"> skill installed: 0g-private-sandbox</span><br>
           <span class="sk-d">&nbsp;</span><br>
-          <span class="sk-d">  0g@sandbox-a1b2c3:~$ </span><span class="sk-c">python hello.py</span><br>
-          <span class="sk-v">  Hello from 0G Sandbox</span><span class="sk-ok"> ·</span><span style="animation:blink 1.1s step-end infinite;color:var(--green)"> ▊</span>
+          <span class="sk-s">  /reload-plugins</span><br>
+          <span class="sk-ok">  ✓</span><span class="sk-d"> plugins reloaded</span><br>
+          <span class="sk-d">&nbsp;</span><br>
+          <span class="sk-d">  &gt; </span><span class="sk-u">I want a private sandbox on 0G</span><br>
+          <span class="sk-ok">  ✓</span><span class="sk-d"> provider discovered · deposit confirmed</span><br>
+          <span class="sk-ok">  ✓</span><span class="sk-d"> sandbox ready — </span><span class="sk-v">sandbox-a1b2c3</span><span style="animation:blink 1.1s step-end infinite;color:var(--green)"> ▊</span>
         </div>
       </div>
     </div>

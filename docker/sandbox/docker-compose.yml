@@ -3,7 +3,7 @@ services:
   # ── Sandbox proxy (this repo) ──────────────────────────────────────────────
   sandbox:
     image: eliza-registry-vpc.ap-southeast-1.cr.aliyuncs.com/eliza/0g-sandbox:sandbox
-    pull_policy: if_not_present
+    pull_policy: always
     ports:
       - "${PORT:-8080}:8080"
     environment:
