@@ -58,6 +58,11 @@ internal/
   daytona/    Daytona HTTP client (create/stop/list sandboxes)
   events/     event log (audit trail for billing actions)
   proxy/      gin handler: proxies Daytona, enforces sandbox ownership
+    seal.go             InjectSeal, stripSealKey — sealed container attestation
+    sealdebug_off.go    production: sealed → blocks SSH/toolbox
+    sealdebug_on.go     sealdebug build: sealed → attestation injected, SSH/toolbox open
+  registry/
+    digest.go           GetDigest — resolves image ref to sha256 content digest
   settler/    reads voucher queue from Redis, submits batch settlements
   tee/        TEE key retrieval (TDX gRPC in production, MOCK_TEE in dev)
   voucher/    EIP-712 signing + Redis queue (RPUSH/BLPOP) helpers
@@ -107,6 +112,50 @@ Signed by the TEE key. Nonce is per `(user, provider)` pair; must be strictly in
 | `stop:sandbox:<sandboxID>` | Pending stop signal (value = reason string) |
 | `auth:nonce:<nonce>` | Seen request nonces (replay protection, TTL-based) |
 
+### Sealed Containers (`sealed: true`)
+
+When a sandbox create request includes `"sealed": true`, the proxy:
+
+1. Resolves the image/snapshot reference to its content digest via `registry.GetDigest`
+   (uses `crane.Digest`; insecure mode for `registry:` or `localhost:` hosts)
+2. Generates an ephemeral secp256k1 keypair for the container's signing identity
+3. Builds a TEE-signed attestation over `{sealId, pubkey, imageHash, ts}`:
+   ```
+   message = keccak256("ImageAttestation:" + sealId + ":" + pubkey + ":" + imageHash + ":" + ts)
+   ```
+   Signature V is normalised to 27/28 (Ethereum `ecrecover` convention)
+4. Injects two env vars into the container:
+   - `SANDBOX_SEAL_KEY` — hex private key; the container's signing identity.
+     Never returned through the API; stripped from the create response.
+   - `SANDBOX_SEAL_ATTESTATION` — JSON: `{seal_id, pubkey, image_hash, signature, ts}`
+5. Sets label `0g-sealed: "true"` → blocks SSH and toolbox access for the sandbox lifetime
+6. Sets label `0g-seal-id: <32-char hex>` → operators can correlate sandbox ↔ attestation
+
+Sealing requires the image to be present in the internal registry (needed to resolve the
+content digest). A non-resolvable image reference is a hard failure; the create request is
+rejected.
+
+**sealdebug build tag** — for development/inspection of sealed containers:
+- Default (production) build: `sealed: true` → blocks SSH and toolbox
+- `go build -tags sealdebug`: `sealed: true` → TEE attestation injected but SSH/toolbox remain open
+- Dockerfile: `--build-arg BUILD_TAGS=sealdebug`
+
+### `public: true` for All Sandboxes
+
+`InjectOwner` always injects `"public": true` into every sandbox create request. Daytona OIDC
+is not used in 0G — sandbox management is controlled via EIP-191 (billing proxy). With
+`public: true`, user-defined service ports (e.g. 8080, 9090) are accessible via the Daytona
+proxy URL without an OIDC session. System ports (22222/TERMINAL, 2280/TOOLBOX, 33333/RECORDING)
+remain protected by Daytona regardless of this flag.
+
+**Proxy URL format:** `http://<port>-<sandboxId>.<PROXY_DOMAIN>/<path>`
+
+The `PROXY_DOMAIN` env var controls the URL format. Examples:
+- nip.io (no real domain): `PROXY_DOMAIN=<your-ip>.nip.io:4000`
+  → `http://8080-<sandboxId>.<your-ip>.nip.io:4000/result`
+- Real domain with nginx: `PROXY_DOMAIN=sandbox.yourdomain.com`
+  (nginx listens on 80, proxies to Daytona port 4000 with `proxy_set_header Host $host`)
+
 ### Contract Upgrade Pattern (Beacon Proxy)
 - `BeaconProxy` (stable address) stores all state; delegatecalls to impl via `UpgradeableBeacon`
 - To upgrade: deploy new `SandboxServing` impl → call `beacon.upgradeTo(newImpl)`
@@ -140,6 +189,10 @@ go test ./cmd/billing/ -v -run TestComponent
 # E2E tests — real chain + Redis + Daytona
 MOCK_TEE=true MOCK_APP_PRIVATE_KEY=0x<key> \
 go test -v -tags e2e ./cmd/billing/ -run TestE2E -timeout 10m
+
+# sealdebug build — attestation injected but SSH/toolbox remain open (dev/inspection)
+go build -tags sealdebug ./...
+go test -tags sealdebug ./...
 ```
 
 See `TESTING.md` for full test documentation.
@@ -157,8 +210,13 @@ DAYTONA_ADMIN_KEY=<key> \
 SETTLEMENT_CONTRACT=0x<proxy-addr> \
 RPC_URL=https://evmrpc-testnet.0g.ai \
 CHAIN_ID=16602 \
+PROXY_DOMAIN=<your-ip>.nip.io:4000 \
 go run ./cmd/billing/
 ```
+
+`PROXY_DOMAIN` controls the URL format for accessing user-defined service ports inside the
+sandbox. Format: `http://<port>-<sandboxId>.<PROXY_DOMAIN>/<path>`. The Daytona proxy listens
+on port 4000. With a real domain and nginx fronting port 80, omit the port suffix.
 
 The server starts on port 8080 (`PORT` env var) and exposes:
 
@@ -270,9 +328,14 @@ tapp-cli -s $TAPP_SERVER start-app -f docker-compose.yml --app-id 0g-sandbox
 ### Redeploy after code changes
 
 ```bash
-# 1. Build and push
+# 1. Build and push (production — sealed sandboxes block SSH/toolbox)
 docker build --target sandbox -t <registry>/<image>:latest .
 docker push <registry>/<image>:latest
+
+# 1a. Debug build — sealed sandboxes get attestation but SSH/toolbox remain open
+docker build --target sandbox --build-arg BUILD_TAGS=sealdebug \
+  -t <registry>/<image>:sealdebug .
+docker push <registry>/<image>:sealdebug
 
 # 2. Redeploy
 tapp-cli -s $TAPP_SERVER stop-app --app-id 0g-sandbox

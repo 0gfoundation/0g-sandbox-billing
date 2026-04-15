@@ -251,9 +251,24 @@ All monetary amounts are in **neuron** (1 0G = 10¹⁸ neuron).
 
 **Body:**
 ```json
-{ "image": "ubuntu:22.04" }
+{
+  "image":   "ubuntu:22.04",
+  "sealed":  false
+}
 ```
-`image` is optional.
+All fields are optional.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `image` | string | Docker image or snapshot name to use |
+| `sealed` | bool | If `true`, creates a sealed sandbox (see below) |
+
+**Sealed sandboxes** (`"sealed": true`):
+- Resolves the image to its content digest via the internal registry (hard failure if unresolvable)
+- Generates an ephemeral secp256k1 keypair as the container's signing identity
+- Injects two env vars into the container: `SANDBOX_SEAL_KEY` (private key; stripped from response) and `SANDBOX_SEAL_ATTESTATION` (JSON with `seal_id`, `pubkey`, `image_hash`, TEE `signature`, `ts`)
+- Sets labels `0g-sealed: "true"` and `0g-seal-id: <32-char hex>`
+- **Blocks SSH and toolbox access** for the sandbox's lifetime
 
 **Response `200`:** Sandbox object (see [Data Types](#data-types--objects))
 
@@ -341,6 +356,7 @@ Also available as `GET /api/sandbox/paginated` with the same semantics.
   "token":      "<short-lived-token>"
 }
 ```
+**Response `403`:** Sandbox is sealed (`"sealed": true` at create time) — SSH access is permanently blocked.
 
 ---
 
@@ -427,6 +443,8 @@ Caller must match `PROVIDER_ADDRESS`. Deletes regardless of owner.
 
 The toolbox proxy forwards requests to the Daytona toolbox inside a sandbox, with ownership
 verification. Path format: `/api/toolbox/{sandboxId}/toolbox/{action}`.
+
+**Note:** Returns `403 Forbidden` for sealed sandboxes (`0g-sealed: "true"`).
 
 **Auth headers:** action = `"toolbox"`, resource_id = `"{sandboxId}"`
 
@@ -531,7 +549,7 @@ Output:
 Found 2 provider(s) on-chain:
 
 [1] 0xB831371eb2703305f1d9F8542163633D0675CEd7
-    URL:         http://47.236.111.154:8080
+    URL:         http://<provider-host>:8080
     Create fee:  0.0600 0G
     CPU price:   0.000017 0G/CPU/sec  (0.0010 0G/CPU/min)
     Mem price:   0.000008 0G/GB/sec   (0.0005 0G/GB/min)
@@ -708,7 +726,9 @@ Called by the provider's settler. Users do not call this directly.
   "id":    "6f3a1b2c-...",
   "state": "started",
   "labels": {
-    "daytona-owner": "0x1234...abcd"
+    "daytona-owner": "0x1234...abcd",
+    "0g-sealed":     "true",
+    "0g-seal-id":    "a3f8c2d1e4b706951234567890abcdef"
   }
 }
 ```
@@ -718,6 +738,26 @@ Called by the provider's settler. Users do not call this directly.
 | `id` | string | UUID |
 | `state` | string | `started`, `stopped`, `starting`, `stopping`, `archived`, `error` |
 | `labels["daytona-owner"]` | string | Owner wallet address (hex) |
+| `labels["0g-sealed"]` | string | `"true"` if the sandbox was created with `sealed: true`; absent otherwise |
+| `labels["0g-seal-id"]` | string | 32-char hex identifier correlating the sandbox to its TEE attestation; absent for non-sealed sandboxes |
+
+The `SANDBOX_SEAL_KEY` env var injected at create time is **stripped from all API responses** — it is only ever visible inside the container itself.
+
+### Proxy URL
+
+User-defined service ports inside a sandbox (e.g. 8080, 9090) are accessible via the Daytona
+proxy URL when the server is configured with `PROXY_DOMAIN`:
+
+```
+http://<port>-<sandboxId>.<PROXY_DOMAIN>/<path>
+```
+
+Examples:
+- `PROXY_DOMAIN=<your-ip>.nip.io:4000` → `http://8080-<id>.<your-ip>.nip.io:4000/`
+- `PROXY_DOMAIN=sandbox.yourdomain.com` → `http://8080-<id>.sandbox.yourdomain.com/`
+
+System ports (22222/TERMINAL, 2280/TOOLBOX, 33333/RECORDING) are not accessible via this URL
+regardless of the `public` flag.
 
 ---
 

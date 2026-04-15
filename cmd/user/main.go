@@ -24,16 +24,16 @@
 //	go run ./cmd/user/ acknowledge --provider 0xB831...
 //
 //	# Create a sandbox
-//	go run ./cmd/user/ create --api http://47.236.111.154:8080
+//	go run ./cmd/user/ create --api http://<provider-host>:8080
 //
 //	# List sandboxes
-//	go run ./cmd/user/ list --api http://47.236.111.154:8080
+//	go run ./cmd/user/ list --api http://<provider-host>:8080
 //
 //	# Stop a sandbox
-//	go run ./cmd/user/ stop --api http://47.236.111.154:8080 --id <sandbox-id>
+//	go run ./cmd/user/ stop --api http://<provider-host>:8080 --id <sandbox-id>
 //
 //	# Delete a sandbox
-//	go run ./cmd/user/ delete --api http://47.236.111.154:8080 --id <sandbox-id>
+//	go run ./cmd/user/ delete --api http://<provider-host>:8080 --id <sandbox-id>
 package main
 
 import (
@@ -383,6 +383,7 @@ func runCreate(args []string) {
 	cpu      := fs.Int("cpu",         0,                      "CPU cores (optional, overrides class)")
 	memory   := fs.Int("memory",      0,                      "Memory in GB (optional, overrides class)")
 	disk     := fs.Int("disk",        0,                      "Disk in GB (optional, overrides class)")
+	sealed   := fs.Bool("sealed",     false,                  "Create a sealed sandbox (blocks SSH and toolbox access)")
 	_ = fs.Parse(args)
 
 	if *class != "" && *class != "small" && *class != "medium" && *class != "large" {
@@ -409,6 +410,9 @@ func runCreate(args []string) {
 	}
 	if *disk > 0 {
 		body["disk"] = *disk
+	}
+	if *sealed {
+		body["sealed"] = true
 	}
 	payloadBytes, _ := json.Marshal(body)
 

@@ -6,6 +6,7 @@
 /verify
 /setup
 /user
+test/sealed/verify
 
 # Contract build artifacts (reproducible via make build-contracts)
 contracts/out/

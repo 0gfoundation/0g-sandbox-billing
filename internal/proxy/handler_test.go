@@ -342,6 +342,72 @@ func TestHandleLabels_StripsOwnerLabel(t *testing.T) {
 	}
 }
 
+// ── Sealed container ──────────────────────────────────────────────────────────
+
+// mockDaytonaWithSSH extends mockDaytona to also handle the ssh-access endpoint.
+func mockDaytonaWithSSH(t *testing.T, sandboxes []daytona.Sandbox) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("GET /api/sandbox/", func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Path[len("/api/sandbox/"):]
+		for _, s := range sandboxes {
+			if s.ID == id {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(s)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	mux.HandleFunc("/api/sandbox/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+
+func TestSealedSandbox_StopAllowed(t *testing.T) {
+	sealedSB := daytona.Sandbox{
+		ID:     "sb-sealed",
+		Labels: map[string]string{ownerLabel: "0xOWNER", sealedLabel: "true"},
+	}
+	srv, _ := mockDaytona(t, []daytona.Sandbox{sealedSB})
+	dtona := daytona.NewClient(srv.URL, "key")
+	r := newTestEngine(dtona, &mockBilling{}, "0xOWNER")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sandbox/sb-sealed/stop", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("sealed sandbox stop: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUnsealedSandbox_SSHAllowed(t *testing.T) {
+	normalSB := daytona.Sandbox{
+		ID:     "sb-normal",
+		Labels: map[string]string{ownerLabel: "0xOWNER"},
+	}
+	srv := mockDaytonaWithSSH(t, []daytona.Sandbox{normalSB})
+	dtona := daytona.NewClient(srv.URL, "key")
+	r := newTestEngine(dtona, &mockBilling{}, "0xOWNER")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sandbox/sb-normal/ssh-access", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	// Mock returns 200 for all /api/sandbox/* requests, so not 403 means sealed check passed
+	if w.Code == http.StatusForbidden {
+		t.Errorf("normal sandbox SSH should not be blocked: got 403")
+	}
+}
+
 // ── extractID ─────────────────────────────────────────────────────────────────
 
 func TestExtractID(t *testing.T) {

@@ -124,6 +124,8 @@ go run ./cmd/billing/
 | `COMPUTE_PRICE_PER_SEC` | `16667` | 计算费用 fallback（链上 Provider 注册后以链上值为准）|
 | `CREATE_FEE` | `5000000` | 创建沙盒固定费用 fallback（链上注册后以链上值为准）|
 | `VOUCHER_INTERVAL_SEC` | `60` | voucher 刷新间隔（秒）|
+| `SSH_GATEWAY_HOST` | — | SSH 命令中重写的网关主机（如 `<provider-ip>`）；未设置时退回到浏览器 hostname |
+| `PROXY_DOMAIN` | — | 沙盒服务端口 URL 的域名模板：`http://<port>-<id>.<PROXY_DOMAIN>/<path>`。可用 `<your-ip>.nip.io:4000`（nip.io）或 `sandbox.yourdomain.com`（配合 nginx 的真实域名）。|
 | `PORT` | `8080` | HTTP 服务端口 |
 | `MOCK_TEE` | — | 设为 `true` 用于本地开发（使用 `MOCK_APP_PRIVATE_KEY` 代替 TDX gRPC）|
 | `MOCK_APP_PRIVATE_KEY` | — | `MOCK_TEE=true` 时使用的十六进制私钥 |

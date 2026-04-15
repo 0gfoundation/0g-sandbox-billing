@@ -55,7 +55,7 @@ tapp-cli -s http://<server>:50051 get-app-key --app-id 0g-sandbox
 
 PROVIDER_KEY=0x859c3bd1... go run ./cmd/provider/ register \
   --tee-signer   0x61BEb835D1935Eec8cC04efa2f4e2B3cC8B8B6E3 \
-  --url          http://47.236.111.154:8080 \
+  --url          http://<provider-host>:8080 \
   --price-per-cpu 1000000000000000 \
   --price-per-mem 500000000000000 \
   --fee          60000000000000000
@@ -67,7 +67,7 @@ PROVIDER_KEY=0x859c3bd1... go run ./cmd/provider/ register \
 Provider:       0xB831371eb2703305f1d9F8542163633D0675CEd7
 TEE signer:     0x61BEb835D1935Eec8cC04efa2f4e2B3cC8B8B6E3
 Contract:       0xd7e0CD227e602FedBb93c36B1F5bf415398508a4
-Service URL:    http://47.236.111.154:8080
+Service URL:    http://<provider-host>:8080
 CPU price/min:  1000000000000000 neuron
 Mem price/min:  500000000000000 neuron/GB
 Create fee:     60000000000000000 neuron
@@ -113,7 +113,7 @@ Registered:     true
 Required stake: 100000000000000000000 neuron
 
 Service:
-  URL:              http://47.236.111.154:8080
+  URL:              http://<provider-host>:8080
   TEE signer:       0x61BEb835D1935Eec8cC04efa2f4e2B3cC8B8B6E3
   CPU price/min:    1000000000000000 neuron
   Mem price/min:    500000000000000 neuron/GB
@@ -229,7 +229,7 @@ and fill in:
 **Via HTTP API** (provider-only, EIP-191 auth required):
 
 ```bash
-curl -X POST http://47.236.111.154:8080/api/registry/pull \
+curl -X POST http://<provider-host>:8080/api/registry/pull \
   -H "Content-Type: application/json" \
   -H "X-Wallet-Address: 0x<provider-address>" \
   -H "X-Signed-Message: <base64-signed-msg>" \
@@ -280,7 +280,7 @@ PROVIDER_KEY=0x<hex> go run ./cmd/provider/ snapshot \
 
 ```bash
 PROVIDER_KEY=0x<hex> go run ./cmd/provider/ snapshot \
-  --api    http://47.236.111.154:8080 \
+  --api    http://<provider-host>:8080 \
   --image  registry:6000/daytona/rust-sandbox:1.0.0 \
   --name   rust-sandbox \
   --cpu    2 \
@@ -292,7 +292,7 @@ PROVIDER_KEY=0x<hex> go run ./cmd/provider/ snapshot \
 
 ```bash
 PROVIDER_KEY=0x<hex> go run ./cmd/provider/ snapshot \
-  --api   http://47.236.111.154:8080 \
+  --api   http://<provider-host>:8080 \
   --image registry:6000/daytona/rust-sandbox:1.0.0 \
   --name  rust-sandbox \
   --tiers
@@ -303,7 +303,7 @@ Wait for `state: active` (Daytona pulls the image), then users can create sandbo
 
 ```bash
 USER_KEY=0x<hex> go run ./cmd/user/ create \
-  --api      http://47.236.111.154:8080 \
+  --api      http://<provider-host>:8080 \
   --snapshot rust-sandbox
 ```
 
@@ -330,7 +330,7 @@ PROVIDER_KEY=0x<hex> go run ./cmd/provider/ delete-snapshot \
 
 ```bash
 PROVIDER_KEY=0x<hex> go run ./cmd/provider/ delete-snapshot \
-  --api http://47.236.111.154:8080 \
+  --api http://<provider-host>:8080 \
   --id  a1b2c3d4-e5f6-7890-abcd-ef1234567890
 ```
 
@@ -516,11 +516,16 @@ go run ./cmd/user/ create \
 | `--cpu` | — | CPU cores (overrides `--class`) |
 | `--memory` | — | Memory in GB (overrides `--class`) |
 | `--disk` | — | Disk in GB (overrides `--class`) |
+| `--sealed` | `false` | Create a sealed sandbox: injects TEE attestation, blocks SSH and toolbox access |
 
 **Example**
 
 ```bash
-USER_KEY=0x<hex> go run ./cmd/user/ create --api http://47.236.111.154:8080
+# Standard sandbox
+USER_KEY=0x<hex> go run ./cmd/user/ create --api http://<provider>:8080
+
+# Sealed sandbox (SSH/toolbox blocked; TEE attestation injected)
+USER_KEY=0x<hex> go run ./cmd/user/ create --api http://<provider>:8080 --sealed
 ```
 
 ---
@@ -538,7 +543,7 @@ go run ./cmd/user/ list \
 **Example**
 
 ```bash
-USER_KEY=0x<hex> go run ./cmd/user/ list --api http://47.236.111.154:8080
+USER_KEY=0x<hex> go run ./cmd/user/ list --api http://<provider-host>:8080
 ```
 
 ```json
@@ -566,7 +571,7 @@ go run ./cmd/user/ stop \
 
 ```bash
 USER_KEY=0x<hex> go run ./cmd/user/ stop \
-  --api http://47.236.111.154:8080 \
+  --api http://<provider-host>:8080 \
   --id  9c1d0f45-d7da-485d-8c70-e7f928491c00
 ```
 

@@ -152,7 +152,8 @@ go run ./cmd/billing/
 | `COMPUTE_PRICE_PER_SEC` | `16667` | neuron/sec fallback (used only when per-resource on-chain pricing is not set) |
 | `CREATE_FEE` | `5000000` | neuron flat fee fallback (on-chain value takes priority after provider registration) |
 | `VOUCHER_INTERVAL_SEC` | `60` | voucher flush interval (seconds) |
-| `SSH_GATEWAY_HOST` | — | SSH gateway host rewritten in SSH commands (e.g. `43.106.147.28`); falls back to browser hostname if unset |
+| `SSH_GATEWAY_HOST` | — | SSH gateway host rewritten in SSH commands (e.g. `<provider-ip>`); falls back to browser hostname if unset |
+| `PROXY_DOMAIN` | — | Domain template for sandbox service-port URLs: `http://<port>-<id>.<PROXY_DOMAIN>/<path>`. Use `<your-ip>.nip.io:4000` (nip.io) or `sandbox.yourdomain.com` (real domain with nginx). |
 | `PORT` | `8080` | HTTP server port |
 | `MOCK_TEE` | — | Set to `true` for local dev (uses `MOCK_APP_PRIVATE_KEY` instead of TDX gRPC) |
 | `MOCK_APP_PRIVATE_KEY` | — | Hex private key used when `MOCK_TEE=true` |

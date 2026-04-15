@@ -1,10 +1,12 @@
 # Build stage
+# Pass --build-arg BUILD_TAGS=sealdebug to enable debug mode (sealed sandboxes keep SSH open).
 FROM golang:1.25-alpine AS builder
+ARG BUILD_TAGS=""
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o billing ./cmd/billing/
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath ${BUILD_TAGS:+-tags $BUILD_TAGS} -o billing ./cmd/billing/
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o broker  ./cmd/broker/
 
 # ── sandbox ────────────────────────────────────────────────────────────────────

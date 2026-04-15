@@ -144,7 +144,7 @@ The command scans the chain and prints available providers with their URL, prici
 
 ```
 [1] 0xB831371eb2703305f1d9F8542163633D0675CEd7
-    URL:        http://47.236.111.154:8080
+    URL:        http://<provider-host>:8080
     Create fee: 0.0600 0G
     CPU price:  0.001000 0G/CPU/sec
     Mem price:  0.000500 0G/GB/sec
@@ -239,6 +239,9 @@ $USER_CLIcreate --api $API --name <friendly-name>
 
 # With snapshot
 $USER_CLIcreate --api $API --name <friendly-name> --snapshot <name>
+
+# Sealed sandbox — TEE attestation injected, SSH and toolbox permanently blocked
+$USER_CLIcreate --api $API --name <friendly-name> --sealed
 ```
 
 Copy the returned sandbox ID:
@@ -248,6 +251,20 @@ export SANDBOX_ID=<returned-id>
 
 Billing starts immediately. **Do NOT wait for the sandbox to be ready** — start the mode discussion while it starts up. If user chose **openclaw** → skip to **OpenClaw Mode**.
 
+### Step 6b — Accessing sandbox service ports
+
+If the provider has `PROXY_DOMAIN` configured, user-defined service ports are reachable at:
+```
+http://<port>-<sandboxId>.<PROXY_DOMAIN>/<path>
+```
+For example, if a process listens on port 8080 inside the sandbox:
+```
+http://8080-<sandboxId>.sandbox.example.com/
+```
+The provider's `/info` endpoint lists `proxy_domain` when configured.
+
+> **Note:** Sealed sandboxes (`--sealed`) block SSH and toolbox access — use the proxy URL to reach services running inside them.
+
 ### Step 7 — Recommend vibe coding mode
 
 | User's goal | Recommendation |
@@ -256,6 +273,7 @@ Billing starts immediately. **Do NOT wait for the sandbox to be ready** — star
 | Modifying an existing local project | **Mode A** — local code + remote execution |
 | Running an existing GitHub project | **Mode B** — git clone into sandbox and run directly |
 | Quick one-off command | **Mode B** — remote exec directly |
+| Sealed execution environment | **Mode B** + proxy URL — no SSH/toolbox; services via proxy URL |
 
 Present the recommendation and wait for confirmation, then proceed.
 
@@ -309,8 +327,8 @@ PORT=$(echo "$SSH_LINE" | grep -o '\-p [0-9]*' | awk '{print $2}')
 USER_HOST=$(echo "$SSH_LINE" | awk '{print $NF}')
 TOKEN=$(echo "$SSH_OUTPUT" | grep '^Password:' | awk '{print $2}')
 
-# ⚠️ Known issue: SSH via domain may hang. Replace domain with direct IP if needed:
-# USER_HOST=$(echo "$USER_HOST" | sed 's/private-sandbox-testnet.0g.ai/43.106.147.28/')
+# ⚠️ Known issue: SSH via domain may hang. Replace domain with the provider's direct IP if needed:
+# USER_HOST=$(echo "$USER_HOST" | sed 's/<provider-domain>/<provider-ip>/')
 
 # Test rsync protocol — create a tiny test file and try to sync it
 echo "test" > /tmp/_rsync_test.txt
@@ -466,7 +484,7 @@ ssh -N -L 13284:localhost:3284 -p 2222 -o StrictHostKeyChecking=no '<SSH_TOKEN>@
 
 > ⚠️ Use port **13284** (not 3284) — local 3284 may already be in use.
 > ⚠️ zsh users: wrap SSH token in **single quotes** — `!` triggers history expansion.
-> ⚠️ Known issue: SSH via domain hangs on port 2222. Replace HOST with `43.106.147.28` if it hangs.
+> ⚠️ Known issue: SSH via domain hangs on port 2222. Replace HOST with the provider's direct IP if it hangs.
 
 **Step 4 — Open in browser**
 

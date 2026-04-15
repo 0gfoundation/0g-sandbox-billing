@@ -30,6 +30,36 @@ func TestInjectOwner_EmptyBody(t *testing.T) {
 	if m["autoArchiveInterval"] != float64(60) {
 		t.Errorf("autoArchiveInterval: got %v want 60", m["autoArchiveInterval"])
 	}
+	if m["public"] != true {
+		t.Errorf("public: got %v want true", m["public"])
+	}
+}
+
+func TestInjectOwner_AlwaysPublic(t *testing.T) {
+	// All sandboxes must be public=true: Daytona OIDC is not used in 0G;
+	// user-defined service ports must be reachable via proxy URL.
+	cases := []struct {
+		name string
+		body []byte
+	}{
+		{"empty body", nil},
+		{"with image", []byte(`{"image":"ubuntu:22.04"}`)},
+		{"sealed sandbox", []byte(`{"image":"my-img","sealed":true}`)},
+		{"user explicitly sets false", []byte(`{"public":false}`)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := InjectOwner(tc.body, "0xW")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var m map[string]any
+			json.Unmarshal(out, &m) //nolint:errcheck
+			if m["public"] != true {
+				t.Errorf("public should always be true, got %v", m["public"])
+			}
+		})
+	}
 }
 
 func TestInjectOwner_OverwritesExistingOwner(t *testing.T) {
@@ -149,3 +179,95 @@ func TestStripOwnerLabel_EmptyObject(t *testing.T) {
 		t.Errorf("unexpected output: %s", out)
 	}
 }
+
+// ── Sealed container ──────────────────────────────────────────────────────────
+
+func TestInjectOwner_SealedTrue_InjectsLabel(t *testing.T) {
+	body := []byte(`{"image":"ubuntu:22.04","sealed":true}`)
+	out, err := InjectOwner(body, "0xW")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var m map[string]any
+	json.Unmarshal(out, &m) //nolint:errcheck
+
+	labels := m["labels"].(map[string]any)
+	if labels[sealedLabel] != "true" {
+		t.Errorf("0g-sealed label not set: labels=%v", labels)
+	}
+	// sealed field must be stripped from body before forwarding to Daytona
+	if _, exists := m["sealed"]; exists {
+		t.Error("sealed field must be removed from forwarded body")
+	}
+}
+
+func TestInjectOwner_SealedFalse_NoLabel(t *testing.T) {
+	body := []byte(`{"image":"ubuntu:22.04","sealed":false}`)
+	out, err := InjectOwner(body, "0xW")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var m map[string]any
+	json.Unmarshal(out, &m) //nolint:errcheck
+
+	labels := m["labels"].(map[string]any)
+	if labels[sealedLabel] == "true" {
+		t.Error("0g-sealed should not be set when sealed=false")
+	}
+	if _, exists := m["sealed"]; exists {
+		t.Error("sealed field must be removed from forwarded body")
+	}
+}
+
+func TestInjectOwner_RecordsImageLabel(t *testing.T) {
+	body := []byte(`{"image":"ubuntu:22.04"}`)
+	out, err := InjectOwner(body, "0xW")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var m map[string]any
+	json.Unmarshal(out, &m) //nolint:errcheck
+
+	labels := m["labels"].(map[string]any)
+	if labels[imageLabel] != "ubuntu:22.04" {
+		t.Errorf("0g-image label: got %v want ubuntu:22.04", labels[imageLabel])
+	}
+}
+
+func TestInjectOwner_RecordsSnapshotLabel(t *testing.T) {
+	body := []byte(`{"snapshot":"snap-abc"}`)
+	out, err := InjectOwner(body, "0xW")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var m map[string]any
+	json.Unmarshal(out, &m) //nolint:errcheck
+
+	labels := m["labels"].(map[string]any)
+	if labels[imageLabel] != "snapshot:snap-abc" {
+		t.Errorf("0g-image label: got %v want snapshot:snap-abc", labels[imageLabel])
+	}
+}
+
+func TestStripOwnerLabel_AlsoStripsSealed(t *testing.T) {
+	body := []byte(`{"daytona-owner":"0xHACKER","0g-sealed":"true","env":"prod"}`)
+	out, err := StripOwnerLabel(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var m map[string]any
+	json.Unmarshal(out, &m) //nolint:errcheck
+
+	if _, exists := m[sealedLabel]; exists {
+		t.Error("0g-sealed should have been stripped (immutable once set)")
+	}
+	if m["env"] != "prod" {
+		t.Error("other keys should be preserved")
+	}
+}
+

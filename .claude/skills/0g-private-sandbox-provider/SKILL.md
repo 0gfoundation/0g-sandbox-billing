@@ -71,7 +71,7 @@ Use the **0g-tapp-cli skill** to deploy. Invoke it now if the user hasn't deploy
 > Key points for 0G Sandbox deployment:
 > - App ID: `0g-sandbox` (must match `BACKEND_APP_NAME` in `.env`)
 > - Docker Compose file: `docker-compose.yml` in the repo root
-> - Server: provider's Tapp TEE server (e.g. `47.236.111.154:50051`)
+> - Server: provider's Tapp TEE server (e.g. `<provider-host>:50051`)
 > - Fill `.env` from `.env.testnet` or `.env.mainnet` before deploying
 > - After deploy: note the task ID, wait for it to complete
 
@@ -101,7 +101,7 @@ Open `http://<billing-proxy-host>:8080/dashboard` in a browser.
 Connect your provider wallet → Service Registration card → click "Register / Update".
 
 Fill in:
-- **Service URL** — public URL of the billing proxy (e.g. `http://47.236.111.154:8080`)
+- **Service URL** — public URL of the billing proxy (e.g. `http://<provider-host>:8080`)
 - **TEE Signer Address** — from Step 2
 - **CPU Price / min** — default `1000000000000000` neuron (= 0.001 0G/CPU/min)
 - **Mem Price / GB / min** — default `500000000000000` neuron (= 0.0005 0G/GB/min)

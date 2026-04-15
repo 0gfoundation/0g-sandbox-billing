@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math/big"
 	"net/http"
@@ -23,6 +24,7 @@ import (
 	"github.com/0gfoundation/0g-sandbox/internal/billing"
 	"github.com/0gfoundation/0g-sandbox/internal/chain"
 	"github.com/0gfoundation/0g-sandbox/internal/daytona"
+	"github.com/0gfoundation/0g-sandbox/internal/registry"
 )
 
 // BillingHooks is satisfied by billing.EventHandler.
@@ -72,7 +74,8 @@ type Handler struct {
 	sshGatewayHost      string // if set, replaces localhost in SSH commands
 	computePricePerSec  *big.Int
 	rdb                 *redis.Client
-	broker              *brokerClient // nil = broker integration disabled
+	teeKey              *ecdsa.PrivateKey // TEE signing key; nil = sealed containers disabled
+	broker              *brokerClient     // nil = broker integration disabled
 	log                 *zap.Logger
 }
 
@@ -104,7 +107,7 @@ func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker,
 	if brokerURL != "" && teeKey != nil {
 		broker = newBrokerClient(brokerURL, teeKey, providerAddress, voucherIntervalSec, log)
 	}
-	return &Handler{dtona: dtona, billing: bh, rp: rp, balCheck: balCheck, ackCheck: ackCheck, eventFetcher: eventFetcher, createFee: createFee, pricePerCPUPerSec: pricePerCPUPerSec, pricePerMemGBPerSec: pricePerMemGBPerSec, voucherIntervalSec: voucherIntervalSec, computePricePerSec: computePricePerSec, providerAddress: providerAddress, sshGatewayHost: sshGatewayHost, rdb: rdb, broker: broker, log: log}
+	return &Handler{dtona: dtona, billing: bh, rp: rp, balCheck: balCheck, ackCheck: ackCheck, eventFetcher: eventFetcher, createFee: createFee, pricePerCPUPerSec: pricePerCPUPerSec, pricePerMemGBPerSec: pricePerMemGBPerSec, voucherIntervalSec: voucherIntervalSec, computePricePerSec: computePricePerSec, providerAddress: providerAddress, sshGatewayHost: sshGatewayHost, rdb: rdb, teeKey: teeKey, broker: broker, log: log}
 }
 
 // BrokerDeregister removes a sandbox from broker monitoring. No-op if broker is disabled.
@@ -146,8 +149,8 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	// ── GET /sandbox/:id (no wildcard suffix) ─────────────────────────────
 	rg.GET("/sandbox/:id", h.withOwner(h.forward))
 
-	// ── Toolbox API (/api/toolbox/:id/*) — owner check + transparent forward
-	rg.Any("/toolbox/:id/*action", h.withOwner(h.forward))
+	// ── Toolbox API (/api/toolbox/:id/*) — owner check + sealed check + transparent forward
+	rg.Any("/toolbox/:id/*action", h.withOwnerNotSealed(h.forward))
 
 	// ── Provider-only: archive all running sandboxes (pre-deploy) ──────────
 	rg.POST("/archive-all", h.handleArchiveAll)
@@ -245,10 +248,43 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		}
 	}
 
+	// Sealed containers: resolve image hash and inject TEE attestation + keypair
+	// before forwarding to Daytona.
+	sealed := extractSealed(body)
+	if sealed && h.teeKey == nil {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "sealed containers not available: TEE key not configured"})
+		return
+	}
+	var imageHash string
+	if sealed {
+		imageRef, err := h.resolveImageRef(c.Request.Context(), body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "sealed containers require an image or snapshot: " + err.Error()})
+			return
+		}
+		imageHash, err = registry.GetDigest(c.Request.Context(), imageRef)
+		if err != nil {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{
+				"error":  "sealed containers require the image to be present in the registry",
+				"detail": err.Error(),
+			})
+			return
+		}
+	}
+
 	modified, err := InjectOwner(body, wallet)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
+	}
+
+	if sealed {
+		modified, err = InjectSeal(modified, h.teeKey, imageHash)
+		if err != nil {
+			h.log.Error("InjectSeal failed", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "seal initialization failed"})
+			return
+		}
 	}
 
 	c.Request.Body = io.NopCloser(bytes.NewReader(modified))
@@ -267,7 +303,9 @@ func (h *Handler) handleCreate(c *gin.Context) {
 	upstream := httptest.NewRecorder()
 	h.rp.ServeHTTP(upstream, detachedReq)
 
-	// Copy recorded response → real writer
+	// Copy recorded response → real writer.
+	// For sealed containers, strip SANDBOX_SEAL_KEY from the response body before
+	// returning to the caller — the private key must never leave the enclave.
 	result := upstream.Result()
 	for k, vs := range result.Header {
 		for _, v := range vs {
@@ -275,7 +313,16 @@ func (h *Handler) handleCreate(c *gin.Context) {
 		}
 	}
 	c.Writer.WriteHeader(result.StatusCode)
-	io.Copy(c.Writer, result.Body) //nolint:errcheck
+	if sealed && result.StatusCode >= 200 && result.StatusCode < 300 {
+		respBytes := upstream.Body.Bytes()
+		if stripped, err := stripSealKey(respBytes); err == nil {
+			c.Writer.Write(stripped) //nolint:errcheck
+		} else {
+			c.Writer.Write(respBytes) //nolint:errcheck
+		}
+	} else {
+		io.Copy(c.Writer, result.Body) //nolint:errcheck
+	}
 
 	if result.StatusCode >= 200 && result.StatusCode < 300 {
 		if id := extractID(upstream.Body.Bytes()); id != "" {
@@ -446,8 +493,22 @@ func (h *Handler) handleEnsureBilling(c *gin.Context) {
 
 // handleSSHAccess creates a temporary SSH access token for a sandbox and
 // returns the sshCommand with the gateway host rewritten if configured.
+// Sealed sandboxes are rejected — SSH is an external access channel.
 func (h *Handler) handleSSHAccess(c *gin.Context) {
 	id := c.Param("id")
+
+	// Check sealed status. withOwner already confirmed ownership, so we only
+	// need the label here; the extra GetSandbox call is acceptable on this path.
+	sb, err := h.dtona.GetSandbox(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "ssh access failed"})
+		return
+	}
+	if sealBlocksAccess(sb) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "sealed sandbox: SSH access not allowed"})
+		return
+	}
+
 	access, err := h.dtona.CreateSSHAccess(c.Request.Context(), id)
 	if err != nil {
 		h.log.Warn("ssh-access failed", zap.String("id", id), zap.Error(err))
@@ -807,6 +868,30 @@ func (h *Handler) withOwner(next gin.HandlerFunc) gin.HandlerFunc {
 	}
 }
 
+// withOwnerNotSealed wraps a handler with ownership + sealed checks.
+// Used for toolbox routes: sealed sandboxes block all remote access channels.
+func (h *Handler) withOwnerNotSealed(next gin.HandlerFunc) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("id")
+		wallet := c.GetString("wallet_address")
+		sb, err := h.dtona.GetSandbox(c.Request.Context(), id)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
+		owner := sb.Labels[ownerLabel]
+		if !strings.EqualFold(owner, wallet) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
+		if sealBlocksAccess(sb) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "sealed sandbox: external access not allowed"})
+			return
+		}
+		next(c)
+	}
+}
+
 // forward passes the request to Daytona as-is.
 func (h *Handler) forward(c *gin.Context) {
 	h.rp.ServeHTTP(safeWriter{c.Writer}, c.Request)
@@ -876,4 +961,40 @@ func extractSnapshotName(body []byte) string {
 	}
 	json.NewDecoder(bytes.NewReader(body)).Decode(&m) //nolint:errcheck
 	return m.Snapshot
+}
+
+// extractSealed parses the "sealed" boolean from a sandbox create request body.
+func extractSealed(body []byte) bool {
+	var m struct {
+		Sealed bool `json:"sealed"`
+	}
+	json.NewDecoder(bytes.NewReader(body)).Decode(&m) //nolint:errcheck
+	return m.Sealed
+}
+
+// resolveImageRef extracts the image reference from a create request body and,
+// for snapshot-based sandboxes, resolves the snapshot name to its ImageName.
+func (h *Handler) resolveImageRef(ctx context.Context, body []byte) (string, error) {
+	var m struct {
+		Image    string `json:"image"`
+		Snapshot string `json:"snapshot"`
+	}
+	json.NewDecoder(bytes.NewReader(body)).Decode(&m) //nolint:errcheck
+
+	if m.Image != "" {
+		return m.Image, nil
+	}
+	if m.Snapshot != "" {
+		snaps, err := h.dtona.ListSnapshots(ctx)
+		if err != nil {
+			return "", fmt.Errorf("list snapshots: %w", err)
+		}
+		for _, s := range snaps {
+			if s.Name == m.Snapshot {
+				return s.ImageName, nil
+			}
+		}
+		return "", fmt.Errorf("snapshot %q not found", m.Snapshot)
+	}
+	return "", fmt.Errorf("no image or snapshot specified")
 }
