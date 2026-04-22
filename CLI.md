@@ -608,6 +608,39 @@ go run ./cmd/user/ delete \
 
 ---
 
+#### `upload`
+
+Upload one local file to a sandbox through the toolbox API.
+
+```bash
+go run ./cmd/user/ upload \
+  --api  <0g-sandbox-url> \
+  --id   <sandbox-id> \
+  --src  <local-file> \
+  --dst  <remote-file> \
+  [--key <hex>] \
+  [--json]
+```
+
+---
+
+#### `download`
+
+Download one sandbox file through the toolbox API. Existing local files are not
+overwritten unless `--overwrite` is passed.
+
+```bash
+go run ./cmd/user/ download \
+  --api  <0g-sandbox-url> \
+  --id   <sandbox-id> \
+  --src  <remote-file> \
+  --dst  <local-file> \
+  [--key <hex>] \
+  [--overwrite] [--json]
+```
+
+---
+
 #### `snapshots`
 
 List snapshots available for use when creating sandboxes.
