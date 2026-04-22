@@ -385,6 +385,9 @@ func runCreate(args []string) {
 	disk     := fs.Int("disk",        0,                      "Disk in GB (optional, overrides class)")
 	sealed   := fs.Bool("sealed",     false,                  "Create a sealed sandbox (blocks SSH and toolbox access)")
 	sealID   := fs.String("seal-id",  "",                     "Optional caller-chosen seal_id (64 hex chars); random if unset")
+	wait     := fs.Bool("wait",       false,                  "Wait until the sandbox reaches state=started")
+	timeout  := fs.Int("timeout",     120,                    "Wait timeout in seconds (used with --wait)")
+	jsonOut  := fs.Bool("json",       false,                  "Print machine-readable JSON")
 	var envArgs multiString
 	fs.Var(&envArgs, "env",                                   "Env var KEY=VAL injected into container; repeatable")
 	_ = fs.Parse(args)
@@ -460,6 +463,28 @@ func runCreate(args []string) {
 
 	var result map[string]any
 	json.Unmarshal(respBody, &result) //nolint:errcheck
+	if *wait {
+		id, ok := stringField(result, "id")
+		if !ok {
+			fatalf("create response did not include sandbox id")
+		}
+		if *timeout <= 0 {
+			fatalf("--timeout must be greater than zero")
+		}
+		if !*jsonOut {
+			fmt.Printf("Created sandbox: %s\n", prettyJSON(result))
+			fmt.Printf("Waiting for sandbox %s to reach state=started...\n", id)
+		}
+		result = waitForSandboxStarted(privKey, *apiURL, id, time.Duration(*timeout)*time.Second)
+	}
+	if *jsonOut {
+		fmt.Println(prettyJSON(result))
+		return
+	}
+	if *wait {
+		fmt.Printf("Sandbox ready: %s\n", prettyJSON(result))
+		return
+	}
 	fmt.Printf("Created sandbox: %s\n", prettyJSON(result))
 }
 
@@ -469,6 +494,7 @@ func runList(args []string) {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 	apiURL  := fs.String("api", "http://localhost:8080", "Billing proxy URL")
 	keyHex  := fs.String("key", "",                     "User private key (hex); or set USER_KEY env")
+	jsonOut := fs.Bool("json", false, "Print machine-readable JSON")
 	_ = fs.Parse(args)
 
 	privKey := mustLoadKey(*keyHex)
@@ -496,6 +522,10 @@ func runList(args []string) {
 	var result []any
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		fmt.Println(string(respBody))
+		return
+	}
+	if *jsonOut {
+		fmt.Println(prettyJSON(result))
 		return
 	}
 	if len(result) == 0 {
@@ -589,6 +619,8 @@ func runExec(args []string) {
 	id      := fs.String("id",      "",                     "Sandbox ID (required)")
 	command := fs.String("cmd",     "",                     "Shell command to run (required)")
 	timeout := fs.Int("timeout",    30,                     "Timeout in seconds")
+	rawOut  := fs.Bool("raw",       false,                  "Print command output without ANSI framing")
+	jsonOut := fs.Bool("json",      false,                  "Print machine-readable JSON")
 	_ = fs.Parse(args)
 
 	if *id == "" {
@@ -596,6 +628,9 @@ func runExec(args []string) {
 	}
 	if *command == "" {
 		fatalf("--cmd is required")
+	}
+	if *rawOut && *jsonOut {
+		fatalf("--raw and --json are mutually exclusive")
 	}
 
 	privKey := mustLoadKey(*keyHex)
@@ -631,7 +666,13 @@ func runExec(args []string) {
 		fmt.Print(string(respBody))
 		return
 	}
-	printSandboxOutput(*id, *command, result.Result, result.ExitCode)
+	if *jsonOut {
+		fmt.Println(prettyJSON(result))
+	} else if *rawOut {
+		fmt.Print(result.Result)
+	} else {
+		printSandboxOutput(*id, *command, result.Result, result.ExitCode)
+	}
 	if result.ExitCode != 0 {
 		os.Exit(result.ExitCode)
 	}
@@ -780,7 +821,8 @@ func runSSHAccess(args []string) {
 	fs := flag.NewFlagSet("ssh-access", flag.ExitOnError)
 	apiURL := fs.String("api", "http://localhost:8080", "Billing proxy URL")
 	keyHex := fs.String("key", "", "User private key (hex); or set USER_KEY env")
-	id     := fs.String("id",  "", "Sandbox ID (required)")
+	id      := fs.String("id",  "", "Sandbox ID (required)")
+	jsonOut := fs.Bool("json", false, "Print machine-readable JSON")
 	_ = fs.Parse(args)
 
 	if *id == "" {
@@ -823,6 +865,12 @@ func runSSHAccess(args []string) {
 	apiHost := strings.TrimPrefix(strings.TrimPrefix(*apiURL, "https://"), "http://")
 	apiHost = strings.Split(apiHost, ":")[0]
 	sshCmd := strings.ReplaceAll(result.SSHCommand, "localhost", apiHost)
+	result.SSHCommand = sshCmd
+
+	if *jsonOut {
+		fmt.Println(prettyJSON(result))
+		return
+	}
 
 	fmt.Println(sshCmd)
 	if result.ExpiresAt != "" {
@@ -872,6 +920,67 @@ func runListSnapshots(args []string) {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+var sandboxWaitPollInterval = 2 * time.Second
+
+func waitForSandboxStarted(privKey *ecdsa.PrivateKey, apiURL, id string, timeout time.Duration) map[string]any {
+	deadline := time.Now().Add(timeout)
+	lastState := ""
+	for {
+		sb := getSandbox(privKey, apiURL, id)
+		if state, ok := stringField(sb, "state"); ok {
+			lastState = state
+			stateLower := strings.ToLower(state)
+			if stateLower == "started" {
+				return sb
+			}
+			if strings.Contains(stateLower, "error") || strings.Contains(stateLower, "fail") {
+				fatalf("sandbox %s entered terminal state %q", id, state)
+			}
+		}
+		if time.Now().After(deadline) {
+			if lastState == "" {
+				lastState = "unknown"
+			}
+			fatalf("timed out waiting for sandbox %s to reach state=started (last state: %s)", id, lastState)
+		}
+		time.Sleep(sandboxWaitPollInterval)
+	}
+}
+
+func getSandbox(privKey *ecdsa.PrivateKey, apiURL, id string) map[string]any {
+	msg, sig, walletAddr := signRequest(privKey, "list", id, json.RawMessage(`{}`))
+
+	req, err := http.NewRequest(http.MethodGet, apiURL+"/api/sandbox/"+id, nil)
+	if err != nil {
+		fatalf("build request: %v", err)
+	}
+	req.Header.Set("X-Wallet-Address", walletAddr)
+	req.Header.Set("X-Signed-Message", msg)
+	req.Header.Set("X-Wallet-Signature", sig)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fatalf("get sandbox: %v", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		fatalf("get sandbox: HTTP %d: %s", resp.StatusCode, respBody)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		fatalf("parse sandbox response: %v", err)
+	}
+	return result
+}
+
+func stringField(m map[string]any, key string) (string, bool) {
+	v, ok := m[key].(string)
+	return v, ok && v != ""
+}
 
 // signRequest builds the three auth headers required by the billing proxy.
 // Returns (X-Signed-Message value, X-Wallet-Signature value, X-Wallet-Address value).

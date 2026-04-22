@@ -577,14 +577,21 @@ USER_KEY=0x<key> go run ./cmd/user/ create \
   [--class    small|medium|large] \
   [--cpu      <cores>] \
   [--memory   <gb>] \
-  [--disk     <gb>]
+  [--disk     <gb>] \
+  [--wait] [--timeout 120] [--json]
 ```
+
+Use `--wait` for automation that needs the sandbox to be ready before the next
+`exec` call. With `--json`, the command prints only the sandbox JSON object.
 
 #### `list` — List sandboxes
 
 ```bash
-USER_KEY=0x<key> go run ./cmd/user/ list --api http://<proxy>:8080
+USER_KEY=0x<key> go run ./cmd/user/ list --api http://<proxy>:8080 [--json]
 ```
+
+Without `--json`, the CLI keeps the human-readable output. With `--json`, it
+prints one JSON array.
 
 #### `start` — Start a stopped sandbox
 
@@ -617,10 +624,13 @@ USER_KEY=0x<key> go run ./cmd/user/ exec \
   --api http://<proxy>:8080 \
   --id <sandbox-id> \
   --cmd "python3 -c \"print('hello')\"" \
-  [--timeout 30]                    # seconds, default 30
+  [--timeout 30] \                  # seconds, default 30
+  [--raw | --json]
 ```
 
-Output: stdout/stderr of the command. Exits with the command's exit code.
+Default output is a human-readable ANSI frame. Use `--raw` to print only the
+command result, or `--json` to print the toolbox response as JSON. The CLI exits
+with the command's exit code in all modes.
 
 For shell features such as `&&`, pipes, redirects, globs, or environment
 expansion, wrap the command explicitly:
@@ -665,10 +675,14 @@ automation, because it may contain shell metacharacters.
 ```bash
 USER_KEY=0x<key> go run ./cmd/user/ ssh-access \
   --api http://<proxy>:8080 \
-  --id <sandbox-id>
+  --id <sandbox-id> \
+  [--json]
 # stdout: ssh -p 2222 <user>@<host>
 # stderr: Password: <token>
 ```
+
+Use `--json` when a script needs explicit `sshCommand`, `token`, and `expiresAt`
+fields without parsing stdout and stderr.
 
 Use for direct SSH or rsync sync:
 ```bash
