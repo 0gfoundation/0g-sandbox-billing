@@ -735,9 +735,9 @@ sshpass -p "$TOKEN" rsync -avz --delete -e "ssh -p $PORT -o StrictHostKeyCheckin
   ./my-project/ "${USER_HOST}:/home/daytona/project/"
 ```
 
-If rsync closes the connection or hangs, use the toolbox `files/upload` endpoint
-or `cmd/user exec` with a verified archive upload until first-class CLI upload
-support is available.
+If rsync closes the connection or hangs, use `cmd/user upload` and
+`cmd/user download`, which call the toolbox file APIs without relying on SSH
+file-transfer protocol support.
 
 ---
 

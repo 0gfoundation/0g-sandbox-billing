@@ -710,33 +710,71 @@ func runUpload(args []string) {
 		fatalf("--dst is required")
 	}
 
-	data, err := os.ReadFile(*src)
+	file, err := os.Open(*src)
 	if err != nil {
-		fatalf("read %s: %v", *src, err)
+		fatalf("open %s: %v", *src, err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		fatalf("stat %s: %v", *src, err)
+	}
+	if info.IsDir() {
+		_ = file.Close()
+		fatalf("%s is a directory", *src)
 	}
 
 	privKey := mustLoadKey(*keyHex)
-	var bodyBuf bytes.Buffer
-	writer := multipart.NewWriter(&bodyBuf)
-	part, err := writer.CreateFormFile("file", filepath.Base(*src))
-	if err != nil {
-		fatalf("create multipart file: %v", err)
-	}
-	if _, err := part.Write(data); err != nil {
-		fatalf("write multipart file: %v", err)
-	}
-	if err := writer.Close(); err != nil {
-		fatalf("close multipart writer: %v", err)
-	}
+	bodyReader, bodyWriter := io.Pipe()
+	writer := multipart.NewWriter(bodyWriter)
+	uploadDone := make(chan error, 1)
+	go func() {
+		defer file.Close()
+		var err error
+		defer func() {
+			if err != nil {
+				_ = bodyWriter.CloseWithError(err)
+			} else {
+				_ = bodyWriter.Close()
+			}
+			uploadDone <- err
+		}()
+		part, err := writer.CreateFormFile("file", filepath.Base(*src))
+		if err != nil {
+			return
+		}
+		if _, err = io.Copy(part, file); err != nil {
+			return
+		}
+		err = writer.Close()
+	}()
 
 	action := "files/upload?path=" + url.QueryEscape(*dst)
-	respBody, _ := signedToolboxRequest(privKey, *apiURL, *id, http.MethodPost, action, bodyBuf.Bytes(), writer.FormDataContentType())
+	resp, err := signedToolboxHTTPResponse(privKey, *apiURL, *id, http.MethodPost, action, bodyReader, writer.FormDataContentType())
+	if err != nil {
+		_ = bodyReader.CloseWithError(err)
+		fatalf("%v", err)
+	}
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		_ = resp.Body.Close()
+		fatalf("read upload response: %v", err)
+	}
+	if err := resp.Body.Close(); err != nil {
+		fatalf("close upload response: %v", err)
+	}
+	if err := <-uploadDone; err != nil {
+		fatalf("upload %s: %v", *src, err)
+	}
 
 	if *jsonOut {
-		fmt.Println(prettyJSON(json.RawMessage(respBody)))
+		fmt.Println(prettyJSON(map[string]any{
+			"src":   *src,
+			"dst":   *dst,
+			"bytes": info.Size(),
+		}))
 		return
 	}
-	fmt.Printf("Uploaded %s to %s (%d bytes)\n", *src, *dst, len(data))
+	fmt.Printf("Uploaded %s to %s (%d bytes)\n", *src, *dst, info.Size())
 }
 
 // ── download ─────────────────────────────────────────────────────────────────
@@ -761,41 +799,82 @@ func runDownload(args []string) {
 	if *dst == "" {
 		fatalf("--dst is required")
 	}
-	if _, err := os.Stat(*dst); err == nil && !*overwrite {
-		fatalf("%s already exists; pass --overwrite to replace it", *dst)
-	} else if err != nil && !os.IsNotExist(err) {
-		fatalf("stat %s: %v", *dst, err)
-	}
-
 	privKey := mustLoadKey(*keyHex)
+
 	action := "files/download?path=" + url.QueryEscape(*src)
-	respBody, contentType := signedToolboxRequest(privKey, *apiURL, *id, http.MethodGet, action, nil, "")
-	data := respBody
-	if strings.Contains(strings.ToLower(contentType), "application/json") {
-		var err error
-		data, err = downloadedFileContent(respBody)
+	resp, err := signedToolboxHTTPResponse(privKey, *apiURL, *id, http.MethodGet, action, nil, "")
+	if err != nil {
+		fatalf("%v", err)
+	}
+	defer resp.Body.Close()
+
+	var written int64
+	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "application/json") {
+		respBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			fatalf("read download response: %v", err)
+		}
+		data, err := downloadedFileContent(respBody)
 		if err != nil {
 			fatalf("parse download response: %v", err)
 		}
-	}
-	if dir := filepath.Dir(*dst); dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			fatalf("create destination directory: %v", err)
+		out := openDownloadDestination(*dst, *overwrite)
+		n, err := out.Write(data)
+		if err != nil {
+			_ = out.Close()
+			fatalf("write %s: %v", *dst, err)
 		}
-	}
-	if err := os.WriteFile(*dst, data, 0644); err != nil {
-		fatalf("write %s: %v", *dst, err)
+		if n != len(data) {
+			_ = out.Close()
+			fatalf("write %s: short write", *dst)
+		}
+		if err := out.Close(); err != nil {
+			fatalf("write %s: %v", *dst, err)
+		}
+		written = int64(n)
+	} else {
+		out := openDownloadDestination(*dst, *overwrite)
+		written, err = io.Copy(out, resp.Body)
+		if err != nil {
+			_ = out.Close()
+			fatalf("write %s: %v", *dst, err)
+		}
+		if err := out.Close(); err != nil {
+			fatalf("write %s: %v", *dst, err)
+		}
 	}
 
 	if *jsonOut {
 		fmt.Println(prettyJSON(map[string]any{
 			"src":   *src,
 			"dst":   *dst,
-			"bytes": len(data),
+			"bytes": written,
 		}))
 		return
 	}
-	fmt.Printf("Downloaded %s to %s (%d bytes)\n", *src, *dst, len(data))
+	fmt.Printf("Downloaded %s to %s (%d bytes)\n", *src, *dst, written)
+}
+
+func openDownloadDestination(dst string, overwrite bool) *os.File {
+	if dir := filepath.Dir(dst); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			fatalf("create destination directory: %v", err)
+		}
+	}
+	flags := os.O_WRONLY | os.O_CREATE
+	if overwrite {
+		flags |= os.O_TRUNC
+	} else {
+		flags |= os.O_EXCL
+	}
+	out, err := os.OpenFile(dst, flags, 0644)
+	if os.IsExist(err) && !overwrite {
+		fatalf("%s already exists; pass --overwrite to replace it", dst)
+	}
+	if err != nil {
+		fatalf("open %s: %v", dst, err)
+	}
+	return out
 }
 
 // printSandboxOutput renders sandbox output in a bordered box with ANSI colors.
@@ -1123,17 +1202,13 @@ func stringField(m map[string]any, key string) (string, bool) {
 	return v, ok && v != ""
 }
 
-func signedToolboxRequest(privKey *ecdsa.PrivateKey, apiURL, id, method, action string, body []byte, contentType string) ([]byte, string) {
+func signedToolboxHTTPResponse(privKey *ecdsa.PrivateKey, apiURL, id, method, action string, body io.Reader, contentType string) (*http.Response, error) {
 	msg, sig, walletAddr := signRequest(privKey, "toolbox", id, json.RawMessage(`{}`))
 
 	url := apiURL + "/api/toolbox/" + id + "/toolbox/" + strings.TrimPrefix(action, "/")
-	var bodyReader io.Reader
-	if body != nil {
-		bodyReader = bytes.NewReader(body)
-	}
-	req, err := http.NewRequest(method, url, bodyReader)
+	req, err := http.NewRequest(method, url, body)
 	if err != nil {
-		fatalf("build request: %v", err)
+		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("X-Wallet-Address", walletAddr)
 	req.Header.Set("X-Signed-Message", msg)
@@ -1147,14 +1222,29 @@ func signedToolboxRequest(privKey *ecdsa.PrivateKey, apiURL, id, method, action 
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		fatalf("toolbox: %v", err)
+		return nil, fmt.Errorf("toolbox: %w", err)
+	}
+
+	if resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("toolbox: HTTP %d: %s", resp.StatusCode, respBody)
+	}
+	return resp, nil
+}
+
+func signedToolboxRequest(privKey *ecdsa.PrivateKey, apiURL, id, method, action string, body []byte, contentType string) ([]byte, string) {
+	var bodyReader io.Reader
+	if body != nil {
+		bodyReader = bytes.NewReader(body)
+	}
+	resp, err := signedToolboxHTTPResponse(privKey, apiURL, id, method, action, bodyReader, contentType)
+	if err != nil {
+		fatalf("%v", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 300 {
-		fatalf("toolbox: HTTP %d: %s", resp.StatusCode, respBody)
-	}
 	return respBody, resp.Header.Get("Content-Type")
 }
 
