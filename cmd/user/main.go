@@ -392,6 +392,9 @@ func runCreate(args []string) {
 	fs.Var(&envArgs, "env",                                   "Env var KEY=VAL injected into container; repeatable")
 	_ = fs.Parse(args)
 
+	if *wait && *timeout <= 0 {
+		fatalf("--timeout must be greater than zero")
+	}
 	if *class != "" && *class != "small" && *class != "medium" && *class != "large" {
 		fatalf("--class must be one of: small, medium, large")
 	}
@@ -467,9 +470,6 @@ func runCreate(args []string) {
 		id, ok := stringField(result, "id")
 		if !ok {
 			fatalf("create response did not include sandbox id")
-		}
-		if *timeout <= 0 {
-			fatalf("--timeout must be greater than zero")
 		}
 		if !*jsonOut {
 			fmt.Printf("Created sandbox: %s\n", prettyJSON(result))
@@ -927,10 +927,20 @@ func runListSnapshots(args []string) {
 var sandboxWaitPollInterval = 2 * time.Second
 
 func waitForSandboxStarted(privKey *ecdsa.PrivateKey, apiURL, id string, timeout time.Duration) map[string]any {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
 	deadline := time.Now().Add(timeout)
 	lastState := ""
+waitLoop:
 	for {
-		sb := getSandbox(privKey, apiURL, id)
+		sb, err := getSandbox(ctx, privKey, apiURL, id)
+		if err != nil {
+			if ctx.Err() != nil {
+				break
+			}
+			fatalf("get sandbox: %v", err)
+		}
 		if state, ok := stringField(sb, "state"); ok {
 			lastState = state
 			stateLower := strings.ToLower(state)
@@ -941,22 +951,33 @@ func waitForSandboxStarted(privKey *ecdsa.PrivateKey, apiURL, id string, timeout
 				fatalf("sandbox %s entered terminal state %q", id, state)
 			}
 		}
-		if time.Now().After(deadline) {
-			if lastState == "" {
-				lastState = "unknown"
-			}
-			fatalf("timed out waiting for sandbox %s to reach state=started (last state: %s)", id, lastState)
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break
 		}
-		time.Sleep(sandboxWaitPollInterval)
+		sleep := sandboxWaitPollInterval
+		if remaining < sleep {
+			sleep = remaining
+		}
+		select {
+		case <-ctx.Done():
+			break waitLoop
+		case <-time.After(sleep):
+		}
 	}
+	if lastState == "" {
+		lastState = "unknown"
+	}
+	fatalf("timed out waiting for sandbox %s to reach state=started (last state: %s)", id, lastState)
+	return nil
 }
 
-func getSandbox(privKey *ecdsa.PrivateKey, apiURL, id string) map[string]any {
+func getSandbox(ctx context.Context, privKey *ecdsa.PrivateKey, apiURL, id string) (map[string]any, error) {
 	msg, sig, walletAddr := signRequest(privKey, "list", id, json.RawMessage(`{}`))
 
-	req, err := http.NewRequest(http.MethodGet, apiURL+"/api/sandbox/"+id, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL+"/api/sandbox/"+id, nil)
 	if err != nil {
-		fatalf("build request: %v", err)
+		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("X-Wallet-Address", walletAddr)
 	req.Header.Set("X-Signed-Message", msg)
@@ -964,20 +985,20 @@ func getSandbox(privKey *ecdsa.PrivateKey, apiURL, id string) map[string]any {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		fatalf("get sandbox: %v", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
-		fatalf("get sandbox: HTTP %d: %s", resp.StatusCode, respBody)
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, respBody)
 	}
 
 	var result map[string]any
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		fatalf("parse sandbox response: %v", err)
+		return nil, fmt.Errorf("parse sandbox response: %w", err)
 	}
-	return result
+	return result, nil
 }
 
 func stringField(m map[string]any, key string) (string, bool) {
