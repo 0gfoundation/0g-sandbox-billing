@@ -11,7 +11,10 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
-const sealIDLabel = "0g-seal-id"
+const (
+	sealIDLabel = "0g-seal-id"
+	sealIDBytes = 32 // hex-encoded length = 64
+)
 
 // InjectSeal wires the sealed-container identity material into a sandbox create
 // request body that has already been processed by InjectOwner.
@@ -28,12 +31,30 @@ const sealIDLabel = "0g-seal-id"
 // The sealId is also written to label "0g-seal-id" so operators can correlate
 // a running sandbox with the attestation that was issued for it.
 func InjectSeal(body []byte, teeKey *ecdsa.PrivateKey, imageHash string) ([]byte, error) {
-	// Generate sealId: 16 cryptographically random bytes encoded as hex.
-	var raw [16]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return nil, fmt.Errorf("generate seal id: %w", err)
+	// Parse body once up front so we can both read a caller-provided seal_id
+	// and patch env/labels on the same map before re-marshalling.
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, fmt.Errorf("unmarshal body: %w", err)
 	}
-	sealID := hex.EncodeToString(raw[:])
+
+	// sealId: accept a caller-provided value (32 hex chars = 16 bytes) so
+	// verifiers can pre-register an expected id; fall back to a fresh random
+	// value. Reject malformed input rather than silently overwriting it.
+	var sealID string
+	if v, ok := m["seal_id"].(string); ok && v != "" {
+		if _, err := hex.DecodeString(v); err != nil || len(v) != sealIDBytes*2 {
+			return nil, fmt.Errorf("seal_id must be %d hex chars", sealIDBytes*2)
+		}
+		sealID = v
+	} else {
+		var raw [sealIDBytes]byte
+		if _, err := rand.Read(raw[:]); err != nil {
+			return nil, fmt.Errorf("generate seal id: %w", err)
+		}
+		sealID = hex.EncodeToString(raw[:])
+	}
+	delete(m, "seal_id") // not a Daytona field; strip before forwarding
 
 	// Generate ephemeral container identity keypair.
 	privKey, err := crypto.GenerateKey()
@@ -41,7 +62,10 @@ func InjectSeal(body []byte, teeKey *ecdsa.PrivateKey, imageHash string) ([]byte
 		return nil, fmt.Errorf("generate seal keypair: %w", err)
 	}
 
-	pubKey := crypto.PubkeyToAddress(privKey.PublicKey).Hex()
+	// pubKey is the 33-byte compressed secp256k1 public key, hex-encoded with
+	// 0x prefix. Compressed form so consumers can do ECIES/ECDH directly without
+	// reconstructing the point from an address.
+	pubKey := "0x" + hex.EncodeToString(crypto.CompressPubkey(&privKey.PublicKey))
 	privHex := "0x" + hex.EncodeToString(crypto.FromECDSA(privKey))
 	ts := time.Now().Unix()
 
@@ -65,12 +89,6 @@ func InjectSeal(body []byte, teeKey *ecdsa.PrivateKey, imageHash string) ([]byte
 	attestationJSON, err := json.Marshal(attestation)
 	if err != nil {
 		return nil, fmt.Errorf("marshal attestation: %w", err)
-	}
-
-	// Patch the body.
-	var m map[string]any
-	if err := json.Unmarshal(body, &m); err != nil {
-		return nil, fmt.Errorf("unmarshal body: %w", err)
 	}
 
 	// Write sealId to label so operators can correlate sandbox ↔ attestation.

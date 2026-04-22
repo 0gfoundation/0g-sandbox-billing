@@ -46,6 +46,50 @@ func TestInjectSeal_EnvVarsInjected(t *testing.T) {
 	}
 }
 
+func TestInjectSeal_CallerProvidedSealID(t *testing.T) {
+	teeKey, _ := crypto.GenerateKey()
+	want := "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
+	body := []byte(fmt.Sprintf(`{"seal_id":%q,"labels":{}}`, want))
+
+	out, err := InjectSeal(body, teeKey, "sha256:abc")
+	if err != nil {
+		t.Fatalf("InjectSeal error: %v", err)
+	}
+	var m map[string]any
+	json.Unmarshal(out, &m) //nolint:errcheck
+
+	labels := m["labels"].(map[string]any)
+	if got := labels["0g-seal-id"]; got != want {
+		t.Errorf("label 0g-seal-id = %v, want %s", got, want)
+	}
+	if _, ok := m["seal_id"]; ok {
+		t.Error("seal_id should be stripped from body")
+	}
+
+	env := m["env"].(map[string]any)
+	var attest map[string]any
+	json.Unmarshal([]byte(env["SANDBOX_SEAL_ATTESTATION"].(string)), &attest) //nolint:errcheck
+	if attest["seal_id"] != want {
+		t.Errorf("attestation seal_id = %v, want %s", attest["seal_id"], want)
+	}
+}
+
+func TestInjectSeal_InvalidCallerSealID(t *testing.T) {
+	teeKey, _ := crypto.GenerateKey()
+	cases := []string{
+		`"not-hex-!!"`,
+		`"deadbeef"`,                                                     // too short
+		`"aabbccddeeff00112233445566778899"`,                             // 32 chars (old size), too short now
+		`"aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899ff"`, // too long
+	}
+	for _, v := range cases {
+		body := []byte(fmt.Sprintf(`{"seal_id":%s,"labels":{}}`, v))
+		if _, err := InjectSeal(body, teeKey, "sha256:abc"); err == nil {
+			t.Errorf("expected error for seal_id=%s", v)
+		}
+	}
+}
+
 func TestInjectSeal_AttestationFields(t *testing.T) {
 	teeKey, _ := crypto.GenerateKey()
 	imageHash := "sha256:deadbeef"
@@ -95,8 +139,8 @@ func TestInjectSeal_SealIDInLabel(t *testing.T) {
 
 	labels := m["labels"].(map[string]any)
 	sealID, _ := labels[sealIDLabel].(string)
-	if len(sealID) != 32 { // 16 bytes = 32 hex chars
-		t.Errorf("0g-seal-id label: got len %d want 32, value=%q", len(sealID), sealID)
+	if len(sealID) != 64 { // 32 bytes = 64 hex chars
+		t.Errorf("0g-seal-id label: got len %d want 64, value=%q", len(sealID), sealID)
 	}
 	// Must be valid hex
 	if _, err := hex.DecodeString(sealID); err != nil {

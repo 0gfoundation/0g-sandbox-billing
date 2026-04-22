@@ -14,13 +14,17 @@
 package main
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
+	eciesgo "github.com/ecies/go/v2"
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
@@ -54,10 +58,66 @@ func flush() {
 	os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0644) //nolint:errcheck
 }
 
+// provisionFromAttestor POSTs the attestation to the attestor's /provision
+// endpoint and ECIES-decrypts the returned `encrypted_agent_seal_priv` with
+// the container's SANDBOX_SEAL_KEY. All outcomes (success or failure) are
+// appended to the verification log.
+func provisionFromAttestor(attestorURL string, sealKeyBytes []byte, a attestation) {
+	imageHashHex := strings.TrimPrefix(a.ImageHash, "sha256:")
+	reqBody, _ := json.Marshal(map[string]any{
+		"seal_id":           "0x" + a.SealID,
+		"container_pubkey":  a.Pubkey, // already 0x-prefixed compressed
+		"image_hash":        "0x" + imageHashHex,
+		"issued_at":         a.Ts,
+		"sandbox_signature": a.Signature,
+	})
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Post(attestorURL+"/provision", "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		logf("FAIL provision: POST error: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		logf("FAIL provision: HTTP %d: %s", resp.StatusCode, string(body))
+		return
+	}
+
+	var out struct {
+		EncryptedAgentSealPriv string `json:"encrypted_agent_seal_priv"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		logf("FAIL provision: decode response: %v", err)
+		return
+	}
+	if out.EncryptedAgentSealPriv == "" {
+		logf("FAIL provision: empty encrypted_agent_seal_priv")
+		return
+	}
+
+	ctBytes, err := hex.DecodeString(strings.TrimPrefix(out.EncryptedAgentSealPriv, "0x"))
+	if err != nil {
+		logf("FAIL provision: decode ciphertext hex: %v", err)
+		return
+	}
+	privKey := eciesgo.NewPrivateKeyFromBytes(sealKeyBytes)
+	plaintext, err := eciesgo.Decrypt(privKey, ctBytes)
+	if err != nil {
+		logf("FAIL provision: ECIES decrypt: %v", err)
+		return
+	}
+
+	logf("OK   provisioned agent_seal_priv: 0x%s", hex.EncodeToString(plaintext))
+}
+
 func main() {
 	sealKey   := os.Getenv("SANDBOX_SEAL_KEY")
 	attestRaw := os.Getenv("SANDBOX_SEAL_ATTESTATION")
 	teeSigner := os.Getenv("TEE_SIGNER_ADDRESS")
+	apiKey    := os.Getenv("API_KEY")
 
 	if sealKey == ""   { fail("SANDBOX_SEAL_KEY not set") }
 	if attestRaw == "" { fail("SANDBOX_SEAL_ATTESTATION not set") }
@@ -88,7 +148,7 @@ func main() {
 	if err != nil {
 		fail("parse SANDBOX_SEAL_KEY: %v", err)
 	}
-	derived := crypto.PubkeyToAddress(privKey.PublicKey).Hex()
+	derived := "0x" + hex.EncodeToString(crypto.CompressPubkey(&privKey.PublicKey))
 	if !strings.EqualFold(derived, a.Pubkey) {
 		fail("keypair mismatch\n  derived : %s\n  pubkey  : %s", derived, a.Pubkey)
 	}
@@ -118,6 +178,19 @@ func main() {
 			fail("TEE signer mismatch\n  recovered: %s\n  expected : %s", recovered, teeSigner)
 		}
 		logf("OK   TEE signer matches TEE_SIGNER_ADDRESS: %s", teeSigner)
+	}
+
+	logf("")
+	if apiKey != "" {
+		logf("API_KEY (from env): %s", apiKey)
+	} else {
+		logf("API_KEY (from env): <unset>")
+	}
+	// ── Optional: call attestor /provision and decrypt agent seal priv ───────
+	if attestorURL := os.Getenv("ATTESTOR_URL"); attestorURL != "" {
+		logf("")
+		logf("--- Provisioning from attestor: %s ---", attestorURL)
+		provisionFromAttestor(attestorURL, keyBytes, a)
 	}
 
 	logf("")

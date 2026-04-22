@@ -384,6 +384,9 @@ func runCreate(args []string) {
 	memory   := fs.Int("memory",      0,                      "Memory in GB (optional, overrides class)")
 	disk     := fs.Int("disk",        0,                      "Disk in GB (optional, overrides class)")
 	sealed   := fs.Bool("sealed",     false,                  "Create a sealed sandbox (blocks SSH and toolbox access)")
+	sealID   := fs.String("seal-id",  "",                     "Optional caller-chosen seal_id (64 hex chars); random if unset")
+	var envArgs multiString
+	fs.Var(&envArgs, "env",                                   "Env var KEY=VAL injected into container; repeatable")
 	_ = fs.Parse(args)
 
 	if *class != "" && *class != "small" && *class != "medium" && *class != "large" {
@@ -413,6 +416,20 @@ func runCreate(args []string) {
 	}
 	if *sealed {
 		body["sealed"] = true
+	}
+	if *sealID != "" {
+		body["seal_id"] = *sealID
+	}
+	if len(envArgs) > 0 {
+		env := map[string]string{}
+		for _, kv := range envArgs {
+			i := strings.IndexByte(kv, '=')
+			if i <= 0 {
+				fatalf("--env must be KEY=VAL, got %q", kv)
+			}
+			env[kv[:i]] = kv[i+1:]
+		}
+		body["env"] = env
 	}
 	payloadBytes, _ := json.Marshal(body)
 
@@ -953,6 +970,11 @@ func prettyJSON(v any) string {
 	}
 	return string(b)
 }
+
+type multiString []string
+
+func (m *multiString) String() string     { return strings.Join(*m, ",") }
+func (m *multiString) Set(v string) error { *m = append(*m, v); return nil }
 
 func fatalf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "error: "+format+"\n", args...)

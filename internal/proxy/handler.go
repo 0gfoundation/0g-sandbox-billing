@@ -281,6 +281,10 @@ func (h *Handler) handleCreate(c *gin.Context) {
 	if sealed {
 		modified, err = InjectSeal(modified, h.teeKey, imageHash)
 		if err != nil {
+			if strings.HasPrefix(err.Error(), "seal_id must be") {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 			h.log.Error("InjectSeal failed", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "seal initialization failed"})
 			return
@@ -303,26 +307,28 @@ func (h *Handler) handleCreate(c *gin.Context) {
 	upstream := httptest.NewRecorder()
 	h.rp.ServeHTTP(upstream, detachedReq)
 
-	// Copy recorded response → real writer.
-	// For sealed containers, strip SANDBOX_SEAL_KEY from the response body before
-	// returning to the caller — the private key must never leave the enclave.
+	// Compute the final response body first so we can set Content-Length to match.
+	// For sealed containers, strip SANDBOX_SEAL_KEY — the private key must never
+	// leave the enclave, and stripping shortens the body so the upstream
+	// Content-Length header must not be forwarded verbatim.
 	result := upstream.Result()
+	respBytes := upstream.Body.Bytes()
+	if sealed && result.StatusCode >= 200 && result.StatusCode < 300 {
+		if stripped, err := stripSealKey(respBytes); err == nil {
+			respBytes = stripped
+		}
+	}
 	for k, vs := range result.Header {
+		if strings.EqualFold(k, "Content-Length") {
+			continue // recomputed below from actual body length
+		}
 		for _, v := range vs {
 			c.Writer.Header().Add(k, v)
 		}
 	}
+	c.Writer.Header().Set("Content-Length", strconv.Itoa(len(respBytes)))
 	c.Writer.WriteHeader(result.StatusCode)
-	if sealed && result.StatusCode >= 200 && result.StatusCode < 300 {
-		respBytes := upstream.Body.Bytes()
-		if stripped, err := stripSealKey(respBytes); err == nil {
-			c.Writer.Write(stripped) //nolint:errcheck
-		} else {
-			c.Writer.Write(respBytes) //nolint:errcheck
-		}
-	} else {
-		io.Copy(c.Writer, result.Body) //nolint:errcheck
-	}
+	c.Writer.Write(respBytes) //nolint:errcheck
 
 	if result.StatusCode >= 200 && result.StatusCode < 300 {
 		if id := extractID(upstream.Body.Bytes()); id != "" {
