@@ -514,7 +514,8 @@ go run ./cmd/user/ create \
   [--class     small|medium|large] \
   [--cpu       <cores>] \
   [--memory    <gb>] \
-  [--disk      <gb>]
+  [--disk      <gb>] \
+  [--wait] [--timeout <seconds>] [--json]
 ```
 
 | Flag | Default | Description |
@@ -528,6 +529,9 @@ go run ./cmd/user/ create \
 | `--memory` | — | Memory in GB (overrides `--class`) |
 | `--disk` | — | Disk in GB (overrides `--class`) |
 | `--sealed` | `false` | Create a sealed sandbox: injects TEE attestation, blocks SSH and toolbox access |
+| `--wait` | `false` | Wait until the sandbox reaches `state=started` |
+| `--timeout` | `120` | Wait timeout in seconds, used with `--wait` |
+| `--json` | `false` | Print machine-readable JSON |
 
 **Example**
 
@@ -548,7 +552,8 @@ List your sandboxes (filtered by owner — you only see your own).
 ```bash
 go run ./cmd/user/ list \
   --api  <0g-sandbox-url> \
-  [--key <hex>]
+  [--key <hex>] \
+  [--json]
 ```
 
 **Example**
@@ -556,6 +561,8 @@ go run ./cmd/user/ list \
 ```bash
 USER_KEY=0x<hex> go run ./cmd/user/ list --api http://<provider-host>:8080
 ```
+
+Use `--json` to print one JSON array for automation.
 
 ```json
 {
