@@ -531,6 +531,9 @@ func runList(args []string) {
 		fmt.Println(string(respBody))
 		return
 	}
+	if result == nil {
+		result = []any{}
+	}
 	if *jsonOut {
 		fmt.Println(prettyJSON(result))
 		return
