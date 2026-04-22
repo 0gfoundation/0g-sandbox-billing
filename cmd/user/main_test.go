@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -69,5 +70,34 @@ func TestWaitForSandboxStartedPollsUntilStarted(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("calls = %d; want 2", calls)
+	}
+}
+
+func TestDownloadedFileContent(t *testing.T) {
+	t.Parallel()
+
+	encoded := base64.StdEncoding.EncodeToString([]byte("hello\n"))
+	got, err := downloadedFileContent([]byte(`{"content":"` + encoded + `"}`))
+	if err != nil {
+		t.Fatalf("downloadedFileContent base64: %v", err)
+	}
+	if string(got) != "hello\n" {
+		t.Fatalf("base64 content = %q; want hello newline", got)
+	}
+
+	got, err = downloadedFileContent([]byte(`{"content":"plain text","encoding":"utf-8"}`))
+	if err != nil {
+		t.Fatalf("downloadedFileContent text: %v", err)
+	}
+	if string(got) != "plain text" {
+		t.Fatalf("text content = %q; want plain text", got)
+	}
+
+	got, err = downloadedFileContent([]byte("raw bytes"))
+	if err != nil {
+		t.Fatalf("downloadedFileContent raw: %v", err)
+	}
+	if string(got) != "raw bytes" {
+		t.Fatalf("raw content = %q; want raw bytes", got)
 	}
 }

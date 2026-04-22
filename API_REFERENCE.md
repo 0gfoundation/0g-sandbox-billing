@@ -642,6 +642,36 @@ USER_KEY=0x<key> go run ./cmd/user/ exec \
   --cmd "sh -lc 'mkdir -p /tmp/demo && ls -ld /tmp/demo'"
 ```
 
+#### `upload` — Upload a local file
+
+Uploads one local file through the toolbox `files/upload` endpoint. The CLI
+sends a `multipart/form-data` request and passes the remote path as the toolbox
+`path` query parameter.
+
+```bash
+USER_KEY=0x<key> go run ./cmd/user/ upload \
+  --api http://<proxy>:8080 \
+  --id <sandbox-id> \
+  --src ./local-file.txt \
+  --dst /home/daytona/project/local-file.txt \
+  [--json]
+```
+
+#### `download` — Download a remote file
+
+Downloads one file through the toolbox `files/download` endpoint. The response
+body is written as raw file bytes. The local destination is not overwritten
+unless `--overwrite` is passed.
+
+```bash
+USER_KEY=0x<key> go run ./cmd/user/ download \
+  --api http://<proxy>:8080 \
+  --id <sandbox-id> \
+  --src /home/daytona/project/result.txt \
+  --dst ./result.txt \
+  [--overwrite] [--json]
+```
+
 #### `toolbox` — Arbitrary toolbox API call
 
 ```bash

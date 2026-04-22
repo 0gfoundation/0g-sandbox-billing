@@ -48,8 +48,11 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -85,6 +88,10 @@ func main() {
 		runDelete(os.Args[2:])
 	case "exec":
 		runExec(os.Args[2:])
+	case "upload":
+		runUpload(os.Args[2:])
+	case "download":
+		runDownload(os.Args[2:])
 	case "toolbox":
 		runToolbox(os.Args[2:])
 	case "start":
@@ -105,7 +112,7 @@ func main() {
 func printUsage() {
 	fmt.Fprintln(os.Stderr, "usage: user <subcommand> [flags]")
 	fmt.Fprintln(os.Stderr, "  chain:  balance | deposit | acknowledge")
-	fmt.Fprintln(os.Stderr, "  api:    providers | create | list | start | stop | delete | exec | toolbox | ssh-access | snapshots")
+	fmt.Fprintln(os.Stderr, "  api:    providers | create | list | start | stop | delete | exec | upload | download | toolbox | ssh-access | snapshots")
 }
 
 // ── Shared chain flags ───────────────────────────────────────────────────────
@@ -678,6 +685,116 @@ func runExec(args []string) {
 	}
 }
 
+// ── upload ───────────────────────────────────────────────────────────────────
+
+func runUpload(args []string) {
+	fs := flag.NewFlagSet("upload", flag.ExitOnError)
+	apiURL  := fs.String("api",  "http://localhost:8080", "Billing proxy URL")
+	keyHex  := fs.String("key",  "",                     "User private key (hex); or set USER_KEY env")
+	id      := fs.String("id",   "",                     "Sandbox ID (required)")
+	src     := fs.String("src",  "",                     "Local file path (required)")
+	dst     := fs.String("dst",  "",                     "Remote sandbox path (required)")
+	jsonOut := fs.Bool("json",   false,                  "Print machine-readable JSON")
+	_ = fs.Parse(args)
+
+	if *id == "" {
+		fatalf("--id is required")
+	}
+	if *src == "" {
+		fatalf("--src is required")
+	}
+	if *dst == "" {
+		fatalf("--dst is required")
+	}
+
+	data, err := os.ReadFile(*src)
+	if err != nil {
+		fatalf("read %s: %v", *src, err)
+	}
+
+	privKey := mustLoadKey(*keyHex)
+	var bodyBuf bytes.Buffer
+	writer := multipart.NewWriter(&bodyBuf)
+	part, err := writer.CreateFormFile("file", filepath.Base(*src))
+	if err != nil {
+		fatalf("create multipart file: %v", err)
+	}
+	if _, err := part.Write(data); err != nil {
+		fatalf("write multipart file: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		fatalf("close multipart writer: %v", err)
+	}
+
+	action := "files/upload?path=" + url.QueryEscape(*dst)
+	respBody, _ := signedToolboxRequest(privKey, *apiURL, *id, http.MethodPost, action, bodyBuf.Bytes(), writer.FormDataContentType())
+
+	if *jsonOut {
+		fmt.Println(prettyJSON(json.RawMessage(respBody)))
+		return
+	}
+	fmt.Printf("Uploaded %s to %s (%d bytes)\n", *src, *dst, len(data))
+}
+
+// ── download ─────────────────────────────────────────────────────────────────
+
+func runDownload(args []string) {
+	fs := flag.NewFlagSet("download", flag.ExitOnError)
+	apiURL    := fs.String("api",  "http://localhost:8080", "Billing proxy URL")
+	keyHex    := fs.String("key",  "",                     "User private key (hex); or set USER_KEY env")
+	id        := fs.String("id",   "",                     "Sandbox ID (required)")
+	src       := fs.String("src",  "",                     "Remote sandbox path (required)")
+	dst       := fs.String("dst",  "",                     "Local file path (required)")
+	overwrite := fs.Bool("overwrite", false,               "Overwrite local destination if it exists")
+	jsonOut   := fs.Bool("json", false,                    "Print machine-readable JSON metadata")
+	_ = fs.Parse(args)
+
+	if *id == "" {
+		fatalf("--id is required")
+	}
+	if *src == "" {
+		fatalf("--src is required")
+	}
+	if *dst == "" {
+		fatalf("--dst is required")
+	}
+	if _, err := os.Stat(*dst); err == nil && !*overwrite {
+		fatalf("%s already exists; pass --overwrite to replace it", *dst)
+	} else if err != nil && !os.IsNotExist(err) {
+		fatalf("stat %s: %v", *dst, err)
+	}
+
+	privKey := mustLoadKey(*keyHex)
+	action := "files/download?path=" + url.QueryEscape(*src)
+	respBody, contentType := signedToolboxRequest(privKey, *apiURL, *id, http.MethodGet, action, nil, "")
+	data := respBody
+	if strings.Contains(strings.ToLower(contentType), "application/json") {
+		var err error
+		data, err = downloadedFileContent(respBody)
+		if err != nil {
+			fatalf("parse download response: %v", err)
+		}
+	}
+	if dir := filepath.Dir(*dst); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			fatalf("create destination directory: %v", err)
+		}
+	}
+	if err := os.WriteFile(*dst, data, 0644); err != nil {
+		fatalf("write %s: %v", *dst, err)
+	}
+
+	if *jsonOut {
+		fmt.Println(prettyJSON(map[string]any{
+			"src":   *src,
+			"dst":   *dst,
+			"bytes": len(data),
+		}))
+		return
+	}
+	fmt.Printf("Downloaded %s to %s (%d bytes)\n", *src, *dst, len(data))
+}
+
 // printSandboxOutput renders sandbox output in a bordered box with ANSI colors.
 func printSandboxOutput(id, command, output string, exitCode int) {
 	const (
@@ -980,6 +1097,70 @@ func getSandbox(privKey *ecdsa.PrivateKey, apiURL, id string) map[string]any {
 func stringField(m map[string]any, key string) (string, bool) {
 	v, ok := m[key].(string)
 	return v, ok && v != ""
+}
+
+func signedToolboxRequest(privKey *ecdsa.PrivateKey, apiURL, id, method, action string, body []byte, contentType string) ([]byte, string) {
+	msg, sig, walletAddr := signRequest(privKey, "toolbox", id, json.RawMessage(`{}`))
+
+	url := apiURL + "/api/toolbox/" + id + "/toolbox/" + strings.TrimPrefix(action, "/")
+	var bodyReader io.Reader
+	if body != nil {
+		bodyReader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequest(method, url, bodyReader)
+	if err != nil {
+		fatalf("build request: %v", err)
+	}
+	req.Header.Set("X-Wallet-Address", walletAddr)
+	req.Header.Set("X-Signed-Message", msg)
+	req.Header.Set("X-Wallet-Signature", sig)
+	if body != nil {
+		if contentType == "" {
+			contentType = "application/json"
+		}
+		req.Header.Set("Content-Type", contentType)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fatalf("toolbox: %v", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		fatalf("toolbox: HTTP %d: %s", resp.StatusCode, respBody)
+	}
+	return respBody, resp.Header.Get("Content-Type")
+}
+
+func downloadedFileContent(respBody []byte) ([]byte, error) {
+	var result struct {
+		Content  *string `json:"content"`
+		Data     *string `json:"data"`
+		Encoding string  `json:"encoding"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return respBody, nil
+	}
+
+	content := result.Content
+	if content == nil {
+		content = result.Data
+	}
+	if content == nil {
+		return respBody, nil
+	}
+	if result.Encoding == "" || strings.EqualFold(result.Encoding, "base64") {
+		decoded, err := base64.StdEncoding.DecodeString(*content)
+		if err == nil {
+			return decoded, nil
+		}
+		if strings.EqualFold(result.Encoding, "base64") {
+			return nil, err
+		}
+	}
+	return []byte(*content), nil
 }
 
 // signRequest builds the three auth headers required by the billing proxy.
