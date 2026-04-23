@@ -768,12 +768,62 @@ func (h *Handler) handleListSnapshots(c *gin.Context) {
 
 // handleSnapshotCreate registers a Docker image as a named Daytona snapshot.
 // Provider-only: accepts {name, imageName}, forwards to Daytona internally.
+//
+// Before forwarding, the caller-supplied imageName is resolved to its content
+// digest and rewritten to a derived tag "<repo>:d-<shortdigest>" (created in
+// the registry alongside the original tag). This freezes the snapshot to one
+// specific image revision: if the caller later re-pushes the same base tag
+// with different content, they must delete and recreate the snapshot to pick
+// it up. That delete+create cycle produces a new derived tag, which in turn
+// generates a fresh Daytona-side cache key on the runner — otherwise stale
+// wrapped images keyed on the old imageName get reused and the new sandbox
+// silently runs old content.
+//
+// We use a derived tag rather than "<repo>@sha256:..." because Daytona
+// rejects digest-form imageNames as "invalid reference format".
 func (h *Handler) handleSnapshotCreate(c *gin.Context) {
 	wallet := c.GetString("wallet_address")
 	if !strings.EqualFold(wallet, h.providerAddress) {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "provider only"})
 		return
 	}
+
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "read body"})
+		return
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+		return
+	}
+
+	imageName, _ := m["imageName"].(string)
+	if imageName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "imageName required"})
+		return
+	}
+
+	pinned, err := registry.TagByDigest(c.Request.Context(), imageName)
+	if err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"error":  "resolve image digest failed",
+			"detail": err.Error(),
+		})
+		return
+	}
+	m["imageName"] = pinned
+
+	newBody, err := json.Marshal(m)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "marshal body"})
+		return
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(newBody))
+	c.Request.ContentLength = int64(len(newBody))
+
 	h.forward(c)
 }
 
