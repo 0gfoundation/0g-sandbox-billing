@@ -60,9 +60,10 @@ func flush() {
 
 // provisionFromAttestor POSTs the attestation to the attestor's /provision
 // endpoint and ECIES-decrypts the returned `encrypted_agent_seal_priv` with
-// the container's SANDBOX_SEAL_KEY. All outcomes (success or failure) are
-// appended to the verification log.
-func provisionFromAttestor(attestorURL string, sealKeyBytes []byte, a attestation) {
+// the container's SANDBOX_SEAL_KEY. On success returns the 32-byte agent
+// seal private key (for use with /status reporting); on failure returns nil
+// and appends the error to the verification log.
+func provisionFromAttestor(attestorURL string, sealKeyBytes []byte, a attestation) []byte {
 	imageHashHex := strings.TrimPrefix(a.ImageHash, "sha256:")
 	reqBody, _ := json.Marshal(map[string]any{
 		"seal_id":           "0x" + a.SealID,
@@ -76,14 +77,14 @@ func provisionFromAttestor(attestorURL string, sealKeyBytes []byte, a attestatio
 	resp, err := client.Post(attestorURL+"/provision", "application/json", bytes.NewReader(reqBody))
 	if err != nil {
 		logf("FAIL provision: POST error: %v", err)
-		return
+		return nil
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		logf("FAIL provision: HTTP %d: %s", resp.StatusCode, string(body))
-		return
+		return nil
 	}
 
 	var out struct {
@@ -91,26 +92,70 @@ func provisionFromAttestor(attestorURL string, sealKeyBytes []byte, a attestatio
 	}
 	if err := json.Unmarshal(body, &out); err != nil {
 		logf("FAIL provision: decode response: %v", err)
-		return
+		return nil
 	}
 	if out.EncryptedAgentSealPriv == "" {
 		logf("FAIL provision: empty encrypted_agent_seal_priv")
-		return
+		return nil
 	}
 
 	ctBytes, err := hex.DecodeString(strings.TrimPrefix(out.EncryptedAgentSealPriv, "0x"))
 	if err != nil {
 		logf("FAIL provision: decode ciphertext hex: %v", err)
-		return
+		return nil
 	}
 	privKey := eciesgo.NewPrivateKeyFromBytes(sealKeyBytes)
 	plaintext, err := eciesgo.Decrypt(privKey, ctBytes)
 	if err != nil {
 		logf("FAIL provision: ECIES decrypt: %v", err)
-		return
+		return nil
 	}
 
 	logf("OK   provisioned agent_seal_priv: 0x%s", hex.EncodeToString(plaintext))
+	return plaintext
+}
+
+// reportStatus POSTs a status update to the attestor's /status endpoint,
+// signed with the provisioned agent_seal_priv. Canonical message format is
+// "StatusReport:<seal_id_0x>:<status>:<error_detail>" hashed with raw
+// keccak256 (no EIP-191 prefix), matching the attestation signature scheme.
+func reportStatus(attestorURL string, agentSealPriv []byte, sealID, status, errorDetail string) {
+	msg := fmt.Sprintf("StatusReport:0x%s:%s:%s", sealID, status, errorDetail)
+	hash := crypto.Keccak256([]byte(msg))
+
+	priv, err := crypto.ToECDSA(agentSealPriv)
+	if err != nil {
+		logf("FAIL status: parse agent priv: %v", err)
+		return
+	}
+	sig, err := crypto.Sign(hash, priv)
+	if err != nil {
+		logf("FAIL status: sign: %v", err)
+		return
+	}
+	sig[64] += 27 // normalise V to 27/28
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"seal_id":              "0x" + sealID,
+		"status":               status,
+		"error_detail":         errorDetail,
+		"agent_seal_signature": "0x" + hex.EncodeToString(sig),
+	})
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Post(attestorURL+"/status", "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		logf("FAIL status: POST error: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		logf("FAIL status: HTTP %d: %s", resp.StatusCode, string(respBody))
+		return
+	}
+	logf("OK   status reported: %s", status)
 }
 
 func main() {
@@ -152,7 +197,7 @@ func main() {
 	if !strings.EqualFold(derived, a.Pubkey) {
 		fail("keypair mismatch\n  derived : %s\n  pubkey  : %s", derived, a.Pubkey)
 	}
-	logf("OK   keypair match: SANDBOX_SEAL_KEY → %s", derived)
+	logf("OK   keypair match: SANDBOX_SEAL_KEY -> %s", derived)
 
 	// ── Check 2: TEE attestation signature ───────────────────────────────────
 	msg  := fmt.Sprintf("ImageAttestation:%s:%s:%s:%d", a.SealID, a.Pubkey, a.ImageHash, a.Ts)
@@ -190,7 +235,10 @@ func main() {
 	if attestorURL := os.Getenv("ATTESTOR_URL"); attestorURL != "" {
 		logf("")
 		logf("--- Provisioning from attestor: %s ---", attestorURL)
-		provisionFromAttestor(attestorURL, keyBytes, a)
+		if agentSealPriv := provisionFromAttestor(attestorURL, keyBytes, a); agentSealPriv != nil {
+			reportStatus(attestorURL, agentSealPriv, a.SealID, "running", "")
+		}
+		logf("--- Attestor flow complete ---")
 	}
 
 	logf("")
@@ -200,7 +248,7 @@ func main() {
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	result := strings.Join(lines, "\n") + "\n"
 	http.HandleFunc("/result", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fmt.Fprint(w, result)
 	})
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
