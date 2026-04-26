@@ -52,13 +52,11 @@ import (
 )
 
 const (
-	logPath              = "/tmp/seal-bootstrap.log"
-	defaultAgenticIDAddr = "0xf952e7dd046779f34c0ca0c058e1d940b7b9d525"
-	defaultChainRPCURL   = "https://evmrpc-testnet.0g.ai"
-	transferScanChunk    = 5000 // ITransferred backward scan chunk size
-	bootstrapTimeout     = 10 * time.Minute
-	mintPollEvery        = 5 * time.Second
-	downloadAttempts     = 10
+	logPath           = "/tmp/seal-bootstrap.log"
+	transferScanChunk = 5000 // ITransferred backward scan chunk size
+	bootstrapTimeout  = 10 * time.Minute
+	mintPollEvery     = 5 * time.Second
+	downloadAttempts  = 10
 )
 
 // Minimal ABI subset we use against AgenticID. Full ABI is at
@@ -212,25 +210,25 @@ func main() {
 	// Phase 1+2: provision + bootstrap, only report running on full success.
 	attestorURL := os.Getenv("ATTESTOR_URL")
 	chainRPC := os.Getenv("CHAIN_RPC_URL")
-	if chainRPC == "" {
-		chainRPC = defaultChainRPCURL
-	}
-	contractAddr := os.Getenv("ATTESTOR_AGENTIC_ID_ADDR")
-	if contractAddr == "" {
-		contractAddr = defaultAgenticIDAddr
-	}
+	contractAddr := os.Getenv("AGENTIC_ID_ADDR")
+	fallbackIndexer := os.Getenv("INDEXER_URL")
 
 	if attestorURL == "" {
 		logf("")
 		logf("ATTESTOR_URL unset -- skipping provision / bootstrap / status")
+	} else if chainRPC == "" || contractAddr == "" || fallbackIndexer == "" {
+		logf("")
+		logf("missing required env (CHAIN_RPC_URL=%q AGENTIC_ID_ADDR=%q INDEXER_URL=%q) -- skipping provision / bootstrap / status",
+			chainRPC, contractAddr, fallbackIndexer)
 	} else {
 		logf("")
 		logf("--- Provisioning from attestor: %s ---", attestorURL)
 		agentSealPriv := provisionFromAttestor(attestorURL, keyBytes, a)
 		if agentSealPriv != nil {
 			logf("")
-			logf("--- Bootstrap from AgenticID %s (rpc %s) ---", contractAddr, chainRPC)
-			if bootstrap(chainRPC, contractAddr, a.SealID, agentSealPriv) {
+			logf("--- Bootstrap from AgenticID %s (rpc %s, fallback indexer %s) ---",
+				contractAddr, chainRPC, fallbackIndexer)
+			if bootstrap(chainRPC, contractAddr, a.SealID, agentSealPriv, fallbackIndexer) {
 				reportStatus(attestorURL, agentSealPriv, a.SealID, "running", "")
 			} else {
 				logf("bootstrap failed -- not reporting status=running")
@@ -361,7 +359,10 @@ func reportStatus(attestorURL string, agentSealPriv []byte, sealID, status, erro
 // bootstrap returns true only when every phase succeeds (mint observed,
 // i_data list fetched, every entry downloaded AND decrypted). Any failure
 // returns false; details are logged.
-func bootstrap(rpcURL, contractHex, sealIDHex string, agentSealPriv []byte) bool {
+//
+// fallbackIndexer is used when an i_data's dataDescription does not contain
+// storage_ptr.indexer. Empty string disables the fallback.
+func bootstrap(rpcURL, contractHex, sealIDHex string, agentSealPriv []byte, fallbackIndexer string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), bootstrapTimeout)
 	defer cancel()
 
@@ -421,7 +422,7 @@ func bootstrap(rpcURL, contractHex, sealIDHex string, agentSealPriv []byte) bool
 			allOK = false
 			continue
 		}
-		if !processIntelligentData(ctx, i, d, sealed, agentSealPriv) {
+		if !processIntelligentData(ctx, i, d, sealed, agentSealPriv, fallbackIndexer) {
 			allOK = false
 		}
 	}
@@ -627,7 +628,7 @@ func intelligentDatasOf(ctx context.Context, client *ethclient.Client, parsedABI
 	return arr, nil
 }
 
-func processIntelligentData(ctx context.Context, idx int, d intelligentData, sealedKey, agentSealPriv []byte) bool {
+func processIntelligentData(ctx context.Context, idx int, d intelligentData, sealedKey, agentSealPriv []byte, fallbackIndexer string) bool {
 	tag := fmt.Sprintf("[%d]", idx)
 	dataHashHex := "0x" + hex.EncodeToString(d.DataHash[:])
 
@@ -636,14 +637,18 @@ func processIntelligentData(ctx context.Context, idx int, d intelligentData, sea
 		logf("FAIL bootstrap%s parse dataDescription: %v", tag, err)
 		return false
 	}
-	if desc.StoragePtr.Indexer == "" {
-		logf("FAIL bootstrap%s dataDescription has no storage_ptr.indexer", tag)
+	indexer := desc.StoragePtr.Indexer
+	if indexer == "" {
+		indexer = fallbackIndexer
+	}
+	if indexer == "" {
+		logf("FAIL bootstrap%s no indexer (description.storage_ptr.indexer empty and no fallback)", tag)
 		return false
 	}
-	logf("bootstrap%s data=%s role=%q indexer=%s", tag, dataHashHex, desc.Role, desc.StoragePtr.Indexer)
+	logf("bootstrap%s data=%s role=%q indexer=%s", tag, dataHashHex, desc.Role, indexer)
 
 	outPath := fmt.Sprintf("/tmp/idata-%s.bin", hex.EncodeToString(d.DataHash[:]))
-	if err := downloadWithRetry(ctx, dataHashHex, desc.StoragePtr.Indexer, outPath); err != nil {
+	if err := downloadWithRetry(ctx, dataHashHex, indexer, outPath); err != nil {
 		logf("FAIL bootstrap%s download: %v", tag, err)
 		return false
 	}
