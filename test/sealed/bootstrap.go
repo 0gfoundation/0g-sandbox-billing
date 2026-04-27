@@ -22,7 +22,7 @@
 //   4. Status report — only if BOTH provision AND bootstrap succeed,
 //      POST /status with status="running" signed by agent_seal_priv.
 //
-// HTTP server on :8080 exposes the full log at /result and /healthz.
+// HTTP server on :8080 exposes /dashboard (log), /healthz, and /hello (A2A).
 
 package main
 
@@ -203,7 +203,7 @@ func main() {
 		logf("API_KEY (from env): <unset>")
 	}
 
-	// Start the HTTP server early so /result is reachable while bootstrap is
+	// Start the HTTP server early so /dashboard is reachable while bootstrap is
 	// still running (provision + waitForMint + scan can take minutes).
 	startHTTPServer()
 
@@ -244,20 +244,28 @@ func main() {
 	select {}
 }
 
-// startHTTPServer launches a goroutine serving /result and /healthz on :8080.
-// /result reads the current accumulated log on every request, so callers can
-// poll it while bootstrap is in progress.
+// startHTTPServer launches a goroutine serving the container's HTTP surface
+// on :8080.
+//
+//	GET /dashboard — owner-facing log / instruction surface (reads the
+//	                 accumulated log; reachable while bootstrap runs).
+//	GET /healthz   — liveness probe.
+//	GET /hello     — A2A placeholder; logs the call and replies "hello".
 func startHTTPServer() {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/result", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/dashboard", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		fmt.Fprint(w, currentLog())
 	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "ok")
 	})
+	mux.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
+		logf("/hello called from %s", r.RemoteAddr)
+		fmt.Fprintln(w, "hello")
+	})
 	go func() {
-		fmt.Println("Listening on :8080  GET /result")
+		fmt.Println("Listening on :8080  GET /dashboard | /healthz | /hello")
 		_ = http.ListenAndServe(":8080", mux)
 	}()
 }
@@ -704,6 +712,9 @@ func downloadWithRetry(ctx context.Context, root, indexer, outPath string) error
 			case <-time.After(time.Duration(delay) * time.Second):
 			}
 		}
+		// 0g-storage-client refuses to overwrite; remove leftover from a
+		// previous partial / failed download (or container restart) first.
+		_ = os.Remove(outPath)
 		cmd := exec.CommandContext(ctx, "0g-storage-client", "download",
 			"--root", root, "--file", outPath, "--indexer", indexer)
 		out, err := cmd.CombinedOutput()
