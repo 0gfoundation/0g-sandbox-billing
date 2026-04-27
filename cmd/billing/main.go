@@ -396,6 +396,70 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"image": dst})
 	})
 
+	// Provider-only: garbage-collect orphan derived tags. Lists every ":d-<hex>"
+	// tag in the registry, removes those no longer referenced by any Daytona
+	// snapshot. Pre-fix snapshots that were deleted before the snapshot-delete
+	// hook existed left their derived tags behind — this drains that backlog.
+	// Pass ?dry_run=true to preview without deleting.
+	api.POST("/registry/gc", func(c *gin.Context) {
+		wallet := c.GetString("wallet_address")
+		if !strings.EqualFold(wallet, cfg.Chain.ProviderAddress) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "provider only"})
+			return
+		}
+		dryRun := c.Query("dry_run") == "true"
+
+		candidates, err := registry.ListDerivedTags(c.Request.Context(), cfg.Daytona.RegistryURL)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		snaps, err := dtona.ListSnapshots(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		inUse := make(map[string]bool, len(snaps))
+		for _, s := range snaps {
+			if s.ImageName != "" {
+				inUse[s.ImageName] = true
+			}
+		}
+
+		deleted := []string{}
+		kept := []string{}
+		skipped := []map[string]string{}
+		failed := []map[string]string{}
+		for _, ref := range candidates {
+			if inUse[ref] {
+				kept = append(kept, ref)
+				continue
+			}
+			if dryRun {
+				deleted = append(deleted, ref)
+				continue
+			}
+			if err := registry.DeleteTag(c.Request.Context(), ref); err != nil {
+				if errors.Is(err, registry.ErrTagSharesManifest) {
+					skipped = append(skipped, map[string]string{"tag": ref, "reason": err.Error()})
+					continue
+				}
+				failed = append(failed, map[string]string{"tag": ref, "error": err.Error()})
+				continue
+			}
+			deleted = append(deleted, ref)
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"dry_run":    dryRun,
+			"candidates": len(candidates),
+			"deleted":    deleted,
+			"kept":       kept,
+			"skipped":    skipped,
+			"failed":     failed,
+		})
+	})
+
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler: r,

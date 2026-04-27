@@ -62,7 +62,7 @@ const (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: provider <subcommand> [flags]")
-		fmt.Fprintln(os.Stderr, "  subcommands: register | status | withdraw | set-stake | push-image | snapshot | snapshots | delete-snapshot")
+		fmt.Fprintln(os.Stderr, "  subcommands: register | status | withdraw | set-stake | push-image | snapshot | snapshots | delete-snapshot | gc-images")
 		os.Exit(1)
 	}
 
@@ -83,9 +83,11 @@ func main() {
 		runListSnapshots(os.Args[2:])
 	case "delete-snapshot":
 		runDeleteSnapshot(os.Args[2:])
+	case "gc-images":
+		runGCImages(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
-		fmt.Fprintln(os.Stderr, "  subcommands: register | status | withdraw | set-stake | push-image | snapshot | snapshots | delete-snapshot")
+		fmt.Fprintln(os.Stderr, "  subcommands: register | status | withdraw | set-stake | push-image | snapshot | snapshots | delete-snapshot | gc-images")
 		os.Exit(1)
 	}
 }
@@ -588,6 +590,77 @@ func runDeleteSnapshot(args []string) {
 		fatalf("delete-snapshot: HTTP %d: %s", resp.StatusCode, respBody)
 	}
 	fmt.Printf("Deleted snapshot %s\n", *id)
+}
+
+// runGCImages calls POST /api/registry/gc to clean up orphan derived (":d-*")
+// tags in the internal registry. Use --dry-run to preview without deleting.
+func runGCImages(args []string) {
+	fs := flag.NewFlagSet("gc-images", flag.ExitOnError)
+	apiURL := fs.String("api", "http://localhost:8080", "0G Sandbox service URL")
+	keyHex := fs.String("key", "", "Provider private key (hex); or set PROVIDER_KEY env")
+	dryRun := fs.Bool("dry-run", false, "Preview deletions without actually removing tags")
+	_ = fs.Parse(args)
+
+	privKey := resolveKey(*keyHex, "PROVIDER_KEY")
+	msg, sig, walletAddr := signRequest(privKey, "gc-images", "", json.RawMessage(`{}`))
+
+	url := *apiURL + "/api/registry/gc"
+	if *dryRun {
+		url += "?dry_run=true"
+	}
+	req, err := http.NewRequest(http.MethodPost, url, nil)
+	if err != nil {
+		fatalf("build request: %v", err)
+	}
+	req.Header.Set("X-Wallet-Address", walletAddr)
+	req.Header.Set("X-Signed-Message", msg)
+	req.Header.Set("X-Wallet-Signature", sig)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fatalf("gc-images: %v", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		fatalf("gc-images: HTTP %d: %s", resp.StatusCode, respBody)
+	}
+
+	var result struct {
+		DryRun     bool                `json:"dry_run"`
+		Candidates int                 `json:"candidates"`
+		Deleted    []string            `json:"deleted"`
+		Kept       []string            `json:"kept"`
+		Skipped    []map[string]string `json:"skipped"`
+		Failed     []map[string]string `json:"failed"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		fmt.Println(string(respBody))
+		return
+	}
+
+	verb := "deleted"
+	if result.DryRun {
+		verb = "would delete"
+	}
+	fmt.Printf("Scanned %d derived tag(s)\n", result.Candidates)
+	fmt.Printf("  kept (still in use): %d\n", len(result.Kept))
+	fmt.Printf("  %s: %d\n", verb, len(result.Deleted))
+	if len(result.Skipped) > 0 {
+		fmt.Printf("  skipped (shares manifest): %d\n", len(result.Skipped))
+	}
+	if len(result.Failed) > 0 {
+		fmt.Printf("  failed: %d\n", len(result.Failed))
+	}
+	for _, ref := range result.Deleted {
+		fmt.Printf("    - %s\n", ref)
+	}
+	for _, s := range result.Skipped {
+		fmt.Printf("    ~ %s\n", s["tag"])
+	}
+	for _, f := range result.Failed {
+		fmt.Printf("    ! %s: %s\n", f["tag"], f["error"])
+	}
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

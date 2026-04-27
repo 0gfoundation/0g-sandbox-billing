@@ -833,6 +833,11 @@ func (h *Handler) handleSnapshotCreate(c *gin.Context) {
 // because the admin key carries no actorId in the request context, causing a
 // spurious 500. We detect this case: if Daytona returns 500, we verify the
 // snapshot is actually gone and return 200 if so.
+//
+// On successful delete, the derived "<repo>:d-<shortdigest>" tag that
+// handleSnapshotCreate planted in the registry is removed too — otherwise
+// those tags accumulate indefinitely. Caller-supplied tags and tags still
+// referenced by other snapshots are left alone.
 func (h *Handler) handleSnapshotDelete(c *gin.Context) {
 	wallet := c.GetString("wallet_address")
 	if !strings.EqualFold(wallet, h.providerAddress) {
@@ -840,25 +845,60 @@ func (h *Handler) handleSnapshotDelete(c *gin.Context) {
 		return
 	}
 
+	snapshotID := c.Param("id")
+
+	// Capture imageName before the delete; afterwards the snapshot is gone
+	// and we'd have nothing to clean up against.
+	var imageName string
+	if pre, err := h.dtona.GetSnapshot(c.Request.Context(), snapshotID); err == nil && pre != nil {
+		imageName = pre.ImageName
+	}
+
 	rec := httptest.NewRecorder()
 	h.rp.ServeHTTP(rec, c.Request)
 
-	if rec.Code != http.StatusInternalServerError {
+	deleted := rec.Code >= 200 && rec.Code < 300
+	if !deleted && rec.Code == http.StatusInternalServerError {
+		// Daytona audit-log bug — verify whether the delete actually went through.
+		if snap, err := h.dtona.GetSnapshot(c.Request.Context(), snapshotID); err == nil && snap == nil {
+			deleted = true
+		}
+	}
+
+	if !deleted {
 		copyRecorder(c, rec)
 		return
 	}
 
-	// 500: verify whether the snapshot was actually deleted despite the error.
-	snapshotID := c.Param("id")
-	snap, err := h.dtona.GetSnapshot(c.Request.Context(), snapshotID)
-	if err == nil && snap == nil {
-		// Snapshot is gone — the delete succeeded; audit log bug caused the 500.
-		c.Status(http.StatusOK)
+	h.cleanupDerivedTag(c.Request.Context(), snapshotID, imageName)
+	c.Status(http.StatusOK)
+}
+
+// cleanupDerivedTag removes the derived "<repo>:d-<shortdigest>" tag from the
+// internal registry, but only if no other snapshot still references it. Tag
+// deletion failure is non-fatal — we've already deleted the Daytona snapshot.
+func (h *Handler) cleanupDerivedTag(ctx context.Context, snapshotID, imageName string) {
+	if imageName == "" || !registry.IsDerivedTag(imageName) {
 		return
 	}
 
-	// Snapshot still exists or verification failed — forward the original error.
-	copyRecorder(c, rec)
+	snaps, err := h.dtona.ListSnapshots(ctx)
+	if err != nil {
+		h.log.Warn("snapshot delete: list snapshots for tag cleanup",
+			zap.String("id", snapshotID), zap.Error(err))
+		return
+	}
+	for _, s := range snaps {
+		if s.ID != snapshotID && s.ImageName == imageName {
+			// Another snapshot still uses this content-addressed tag.
+			return
+		}
+	}
+
+	if err := registry.DeleteTag(ctx, imageName); err != nil {
+		h.log.Warn("snapshot delete: registry tag cleanup failed",
+			zap.String("id", snapshotID), zap.String("tag", imageName), zap.Error(err))
+	}
 }
 
 func copyRecorder(c *gin.Context, rec *httptest.ResponseRecorder) {

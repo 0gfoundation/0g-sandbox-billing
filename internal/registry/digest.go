@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -9,6 +10,13 @@ import (
 	"github.com/google/go-containerregistry/pkg/crane"
 	"github.com/google/go-containerregistry/pkg/name"
 )
+
+// ErrTagSharesManifest signals that a DeleteTag candidate cannot be removed
+// without collateral damage: another tag in the same repo points at the same
+// manifest, and Docker Registry v2 only deletes manifests (taking every tag
+// pointing at them with it). Callers should treat this as a soft skip, not a
+// failure.
+var ErrTagSharesManifest = errors.New("tag shares manifest with another tag")
 
 // GetDigest fetches the content digest (e.g. "sha256:abc...") for imageRef.
 //
@@ -82,4 +90,77 @@ func TagByDigest(ctx context.Context, imageRef string) (string, error) {
 
 func isInternalRegistry(host string) bool {
 	return strings.HasPrefix(host, "registry:") || strings.HasPrefix(host, "localhost:")
+}
+
+// DeleteTag removes a tag from the registry. The underlying blobs remain
+// until the registry's garbage collector runs.
+//
+// Docker Registry v2 only supports DELETE by digest, not by tag — sending the
+// tag form returns DIGEST_INVALID. We resolve the tag to a digest first, then
+// DELETE by digest. Because that operation removes the whole manifest, every
+// tag pointing at it disappears, so we first verify no sibling tag in the
+// same repo shares the digest. If one does, returns ErrTagSharesManifest.
+//
+// Used by snapshot deletion to clean up the derived "<repo>:d-<shortdigest>"
+// tag that handleSnapshotCreate planted via TagByDigest.
+func DeleteTag(ctx context.Context, imageRef string) error {
+	ref, err := name.ParseReference(imageRef, name.Insecure)
+	if err != nil {
+		return fmt.Errorf("parse image ref %q: %w", imageRef, err)
+	}
+	tagged, ok := ref.(name.Tag)
+	if !ok {
+		return fmt.Errorf("ref %q is not a tag form", imageRef)
+	}
+	opts := []crane.Option{crane.WithContext(ctx), crane.WithAuth(authn.Anonymous)}
+	if isInternalRegistry(ref.Context().RegistryStr()) {
+		opts = append(opts, crane.Insecure)
+	}
+
+	targetDigest, err := crane.Digest(imageRef, opts...)
+	if err != nil {
+		return fmt.Errorf("get digest for %q: %w", imageRef, err)
+	}
+
+	repoName := tagged.Context().Name()
+	tags, err := crane.ListTags(repoName, opts...)
+	if err != nil {
+		return fmt.Errorf("list tags for %q: %w", repoName, err)
+	}
+	for _, sibling := range tags {
+		if sibling == tagged.TagStr() {
+			continue
+		}
+		siblingRef := repoName + ":" + sibling
+		siblingDigest, err := crane.Digest(siblingRef, opts...)
+		if err != nil {
+			// Conservative: if we can't probe a sibling, refuse the delete
+			// rather than risk taking down a tag we couldn't inspect.
+			return fmt.Errorf("probe sibling %q: %w", siblingRef, err)
+		}
+		if siblingDigest == targetDigest {
+			return fmt.Errorf("%w: %q == %q at %s", ErrTagSharesManifest, imageRef, siblingRef, targetDigest)
+		}
+	}
+
+	digestRef := repoName + "@" + targetDigest
+	if err := crane.Delete(digestRef, opts...); err != nil {
+		return fmt.Errorf("delete %q: %w", digestRef, err)
+	}
+	return nil
+}
+
+// IsDerivedTag reports whether imageRef ends in a ":d-<hex>" tag produced by
+// TagByDigest. Snapshot cleanup only removes derived tags — caller-supplied
+// tags are left intact in case other workloads still reference them.
+func IsDerivedTag(imageRef string) bool {
+	ref, err := name.ParseReference(imageRef, name.Insecure)
+	if err != nil {
+		return false
+	}
+	tagged, ok := ref.(name.Tag)
+	if !ok {
+		return false
+	}
+	return strings.HasPrefix(tagged.TagStr(), "d-")
 }
