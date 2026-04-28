@@ -31,6 +31,7 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -41,6 +42,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -109,8 +111,9 @@ type decryptedEntry struct {
 // the corresponding agent process.
 type agentConfig struct {
 	Framework struct {
-		Name    string `json:"name"`
-		Version string `json:"version"`
+		Name           string `json:"name"`
+		Version        string `json:"version"`         // agent config schema version
+		PackageVersion string `json:"package_version"` // optional npm version of the framework runtime (e.g. "2026.4.26"); empty → install latest
 	} `json:"framework"`
 	Inference struct {
 		Provider  string   `json:"provider"`
@@ -135,21 +138,23 @@ type agentState struct {
 	sealID        string // hex (no 0x prefix)
 	owner         string // 0x-prefixed Ethereum address of the AgenticID NFT owner
 	cfg           *agentConfig
+	authToken     string // framework-specific control-UI credential (openclaw gateway token, etc.)
 }
 
-func (s *agentState) snapshot() (priv []byte, upstream, sealID, owner string, cfg *agentConfig) {
+func (s *agentState) snapshot() (priv []byte, upstream, sealID, owner, token string, cfg *agentConfig) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.agentSealPriv, s.upstreamURL, s.sealID, s.owner, s.cfg
+	return s.agentSealPriv, s.upstreamURL, s.sealID, s.owner, s.authToken, s.cfg
 }
 
-func (s *agentState) set(priv []byte, upstream, sealID, owner string, cfg *agentConfig) {
+func (s *agentState) set(priv []byte, upstream, sealID, owner, token string, cfg *agentConfig) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.agentSealPriv = priv
 	s.upstreamURL = upstream
 	s.sealID = sealID
 	s.owner = owner
+	s.authToken = token
 	s.cfg = cfg
 }
 
@@ -341,9 +346,10 @@ func startHTTPServer() {
 		w.Write(body) //nolint:errcheck
 	})
 	mux.HandleFunc("/hello", helloHandler)
+	mux.HandleFunc("/_seal/auth", authHandler)
 	mux.HandleFunc("/", agentProxyHandler)
 	go func() {
-		fmt.Println("Listening on :8080  GET /healthz | /log | /log/openclaw | /hello (signed) | /* (agent proxy)")
+		fmt.Println("Listening on :8080  GET /healthz | /log | /log/openclaw | /hello (signed) | /_seal/auth (owner-only) | /* (agent proxy)")
 		_ = http.ListenAndServe(":8080", corsMiddleware(mux))
 	}()
 }
@@ -371,6 +377,101 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// authHandler hands the framework-specific control-UI credential (e.g. the
+// openclaw gateway token) to a verified owner. Flow:
+//
+//	X-Auth-Message:   "0GSealAuth:0x<sealID>:<unix-ts>"
+//	X-Auth-Signature: 0x<65-byte EIP-191 personal_sign over X-Auth-Message>
+//
+// Validates:
+//   - X-Auth-Message is well-formed and the embedded sealID matches ours,
+//   - the timestamp is within ±authWindow seconds of server clock (replay /
+//     fresh-mint protection),
+//   - ecrecover(message, sig) yields exactly the AgenticID NFT owner address
+//     bootstrap cached at startup.
+//
+// On success returns a signed JSON envelope with the openclaw token (raw)
+// plus a ready-to-use dashboard URL fragment. The response itself is signed
+// with agent_seal_priv so the caller can verify it came from this attested
+// instance and not from a man-in-the-middle.
+const authWindowSec = 300
+
+func authHandler(w http.ResponseWriter, r *http.Request) {
+	priv, _, sealID, owner, token, _ := agent.snapshot()
+	if priv == nil || owner == "" {
+		http.Error(w, "agent not ready", http.StatusServiceUnavailable)
+		return
+	}
+	if token == "" {
+		http.Error(w, "agent credential not provisioned", http.StatusServiceUnavailable)
+		return
+	}
+
+	msg := r.Header.Get("X-Auth-Message")
+	sigHex := r.Header.Get("X-Auth-Signature")
+	if msg == "" || sigHex == "" {
+		http.Error(w, "missing X-Auth-Message or X-Auth-Signature", http.StatusBadRequest)
+		return
+	}
+
+	parts := strings.Split(msg, ":")
+	if len(parts) != 3 || parts[0] != "0GSealAuth" {
+		http.Error(w, "X-Auth-Message must be \"0GSealAuth:0x<sealID>:<ts>\"", http.StatusBadRequest)
+		return
+	}
+	if !strings.EqualFold(parts[1], "0x"+sealID) {
+		http.Error(w, "seal_id mismatch", http.StatusUnauthorized)
+		return
+	}
+	ts, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil {
+		http.Error(w, "bad timestamp in X-Auth-Message", http.StatusBadRequest)
+		return
+	}
+	now := time.Now().Unix()
+	if ts > now+authWindowSec || ts < now-authWindowSec {
+		http.Error(w, "stale or future X-Auth-Message timestamp", http.StatusUnauthorized)
+		return
+	}
+
+	sigBytes, err := hex.DecodeString(strings.TrimPrefix(sigHex, "0x"))
+	if err != nil || len(sigBytes) != 65 {
+		http.Error(w, "X-Auth-Signature must be 65-byte hex", http.StatusBadRequest)
+		return
+	}
+	if sigBytes[64] >= 27 {
+		sigBytes[64] -= 27
+	}
+	prefix := fmt.Sprintf("\x19Ethereum Signed Message:\n%d", len(msg))
+	hash := crypto.Keccak256([]byte(prefix), []byte(msg))
+	pub, err := crypto.SigToPub(hash, sigBytes)
+	if err != nil {
+		http.Error(w, "signature recover: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	recovered := crypto.PubkeyToAddress(*pub).Hex()
+	if !strings.EqualFold(recovered, owner) {
+		http.Error(w, "signer is not the agent owner", http.StatusUnauthorized)
+		return
+	}
+
+	resp := map[string]any{
+		"token":         token,
+		"dashboard_url": fmt.Sprintf("/#token=%s", token),
+		"ts":            now,
+	}
+	bodyBytes, err := json.Marshal(resp)
+	if err != nil {
+		http.Error(w, "marshal: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := writeEIP191SignedResponse(w, priv, bodyBytes, http.StatusOK); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
 // helloHandler is the agent's signed A2A self-introduction endpoint. Returns
 // the minimal "I am the agent of <owner>" tuple and signs the JSON body with
 // agent_seal_priv via EIP-191 personal_sign. Verifier:
@@ -384,7 +485,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 //
 // Returns 503 until the agent is armed (post-bootstrap).
 func helloHandler(w http.ResponseWriter, r *http.Request) {
-	priv, _, _, owner, _ := agent.snapshot()
+	priv, _, _, owner, _, _ := agent.snapshot()
 	if priv == nil {
 		http.Error(w, "agent not ready", http.StatusServiceUnavailable)
 		return
@@ -499,11 +600,6 @@ func wsReverseProxy(upstream string) *httputil.ReverseProxy {
 			pr.Out.Header.Del("X-Forwarded-Proto")
 			pr.Out.Header.Del("X-Forwarded-Host")
 			pr.Out.Header.Del("X-Real-Ip")
-			// gateway.auth.mode=trusted-proxy: openclaw expects the user
-			// identity in this header. Any external client connecting via
-			// :8080 is treated as the same fixed agent operator — finer
-			// per-caller identity isn't relevant inside the sealed sandbox.
-			pr.Out.Header.Set("X-Sealed-Agent-User", "agent-operator")
 		},
 		ModifyResponse: func(resp *http.Response) error {
 			// corsMiddleware on :8080 already set our Allow-Origin; drop
@@ -534,7 +630,7 @@ func wsReverseProxy(upstream string) *httputil.ReverseProxy {
 //	X-Agent-Request-Hash   0x<32-byte hex>  (so verifiers don't need to recompute)
 //	X-Agent-Response-Hash  0x<32-byte hex>
 func agentProxyHandler(w http.ResponseWriter, r *http.Request) {
-	priv, upstream, _, _, _ := agent.snapshot()
+	priv, upstream, _, _, _, _ := agent.snapshot()
 	if priv == nil || upstream == "" {
 		http.Error(w, "agent not ready", http.StatusServiceUnavailable)
 		return
@@ -589,9 +685,6 @@ func agentProxyHandler(w http.ResponseWriter, r *http.Request) {
 	if upHost != "" {
 		upReq.Header.Set("Origin", "http://"+upHost)
 	}
-	// gateway.auth.mode=trusted-proxy expects the user identity in this
-	// header (see wsReverseProxy comment).
-	upReq.Header.Set("X-Sealed-Agent-User", "agent-operator")
 
 	resp, err := http.DefaultClient.Do(upReq)
 	if err != nil {
@@ -1178,12 +1271,13 @@ func tryStartAgent(entries []decryptedEntry, agentSealPriv []byte, apiKey, sealI
 
 	switch cfg.Framework.Name {
 	case "openclaw":
-		if err := startOpenclaw(cfg, apiKey); err != nil {
+		token, err := startOpenclaw(cfg, apiKey)
+		if err != nil {
 			logf("FAIL agent (openclaw): %v", err)
 			return
 		}
-		agent.set(agentSealPriv, "http://127.0.0.1:3284", sealID, owner, &cfg)
-		logf("OK   agent proxy armed -> openclaw on :3284")
+		agent.set(agentSealPriv, "http://127.0.0.1:3284", sealID, owner, token, &cfg)
+		logf("OK   agent proxy armed -> openclaw on :3284 (auth token cached)")
 	default:
 		logf("FAIL agent: unsupported framework %q", cfg.Framework.Name)
 	}
@@ -1192,13 +1286,18 @@ func tryStartAgent(entries []decryptedEntry, agentSealPriv []byte, apiKey, sealI
 // startOpenclaw translates agentConfig into ~/.openclaw/openclaw.json, sets the
 // inference provider's API key from the API_KEY env var, and spawns
 // `openclaw gateway run --bind lan --port 3284` in the background.
-func startOpenclaw(cfg agentConfig, apiKey string) error {
+// startOpenclaw returns the gateway auth token it provisioned for openclaw
+// (also written into ~/.openclaw/openclaw.json). The token is opaque from
+// bootstrap's perspective — we never use it to authenticate ourselves; it
+// only exists to satisfy openclaw's gateway.auth.mode=token requirement and
+// to be handed back to verified owners through /_seal/auth.
+func startOpenclaw(cfg agentConfig, apiKey string) (string, error) {
 	provider := cfg.Inference.Provider
 	if provider == "" {
-		return fmt.Errorf("inference.provider missing")
+		return "", fmt.Errorf("inference.provider missing")
 	}
 	if cfg.Inference.Model == "" {
-		return fmt.Errorf("inference.model missing")
+		return "", fmt.Errorf("inference.model missing")
 	}
 
 	// openclaw's schema (as of v2026.3.8) only recognises `agents.defaults.model`
@@ -1242,27 +1341,26 @@ func startOpenclaw(cfg agentConfig, apiKey string) error {
 	//   allowInsecureAuth: allow auth flows over non-HTTPS connections.
 	// External traffic is gated by the bootstrap signing layer on :8080,
 	// so loosening openclaw's own controls is acceptable here.
-	// gateway.auth.mode = "trusted-proxy": openclaw treats requests as already
-	// authenticated when they carry the configured userHeader, and the
-	// connection comes from a trusted proxy IP. The bootstrap reverse proxy
-	// on :8080 IS that trusted proxy — it sits inside the same container
-	// (loopback, always trusted) and injects the user header on every
-	// forwarded request. Combined with dangerouslyDisableDeviceAuth, this is
-	// what unblocks the control UI WebSocket handshake without browser-side
-	// device pairing (which would require HTTPS or localhost).
+	// gateway.auth.mode = "token": openclaw expects a shared bearer token on
+	// every WS connect. We generate the token here and write it into both
+	// the openclaw config (so openclaw will accept it) and agentState (so
+	// the /_seal/auth endpoint can hand it back to a verified owner).
 	//
-	// auth.mode=none was tried first but openclaw's control UI hard-requires
-	// either a real device identity, trusted-proxy auth, or sharedAuthOk
-	// (token/password). trusted-proxy is the cleanest fit for our topology.
+	// Why we own the token instead of letting openclaw generate one:
+	//   - we know the value the moment openclaw starts (no race / poll on
+	//     openclaw.json being written),
+	//   - bootstrap restart produces a fresh token on every container boot,
+	//     limiting blast radius if the value ever leaks.
+	authToken, err := randomTokenHex(32)
+	if err != nil {
+		return "", fmt.Errorf("generate openclaw auth token: %w", err)
+	}
 	occ := map[string]any{
 		"gateway": map[string]any{
 			"auth": map[string]any{
-				"mode": "trusted-proxy",
-				"trustedProxy": map[string]any{
-					"userHeader": "X-Sealed-Agent-User",
-				},
+				"mode":  "token",
+				"token": authToken,
 			},
-			"trustedProxies": []string{"127.0.0.1", "::1"},
 			"controlUi": map[string]any{
 				"dangerouslyAllowHostHeaderOriginFallback": true,
 				"dangerouslyDisableDeviceAuth":             true,
@@ -1288,13 +1386,13 @@ func startOpenclaw(cfg agentConfig, apiKey string) error {
 	}
 	occJSON, err := json.MarshalIndent(occ, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal openclaw.json: %w", err)
+		return "", fmt.Errorf("marshal openclaw.json: %w", err)
 	}
 	if err := os.MkdirAll("/root/.openclaw", 0o755); err != nil {
-		return fmt.Errorf("mkdir /root/.openclaw: %w", err)
+		return "", fmt.Errorf("mkdir /root/.openclaw: %w", err)
 	}
 	if err := os.WriteFile("/root/.openclaw/openclaw.json", occJSON, 0o600); err != nil {
-		return fmt.Errorf("write openclaw.json: %w", err)
+		return "", fmt.Errorf("write openclaw.json: %w", err)
 	}
 	logf("OK   wrote /root/.openclaw/openclaw.json (%d bytes)", len(occJSON))
 
@@ -1309,21 +1407,40 @@ func startOpenclaw(cfg agentConfig, apiKey string) error {
 		}
 		if envName != "" {
 			if err := os.Setenv(envName, apiKey); err != nil {
-				return fmt.Errorf("set %s: %w", envName, err)
+				return "", fmt.Errorf("set %s: %w", envName, err)
 			}
 			logf("OK   exported %s from API_KEY", envName)
 		}
 	}
 
+	// Install openclaw at startup so the version isn't baked into the
+	// sealed image. cfg.Framework.PackageVersion ("" → latest) controls
+	// what comes off npm. The signed agent config (delivered through
+	// AgenticID intelligent data) thus determines exactly which framework
+	// runtime version this attested instance runs — no image rebuild
+	// required for a version bump, and no risk of "click to update inside
+	// dashboard" silently mutating the runtime.
+	spec := "openclaw"
+	if v := strings.TrimSpace(cfg.Framework.PackageVersion); v != "" {
+		spec = "openclaw@" + v
+	}
+	logf("installing %s (this may take ~30s)…", spec)
+	if out, err := exec.Command("npm", "install", "-g", "--no-audit", "--no-fund", spec).CombinedOutput(); err != nil {
+		return "", fmt.Errorf("npm install %s: %v: %s", spec, err, strings.TrimSpace(string(out)))
+	}
+	if out, err := exec.Command("openclaw", "--version").Output(); err == nil {
+		logf("OK   installed: %s", strings.TrimSpace(string(out)))
+	}
+
 	// `openclaw config set gateway.mode local` (idempotent).
 	if out, err := exec.Command("openclaw", "config", "set", "gateway.mode", "local").CombinedOutput(); err != nil {
-		return fmt.Errorf("openclaw config set: %v: %s", err, strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("openclaw config set: %v: %s", err, strings.TrimSpace(string(out)))
 	}
 
 	// Spawn gateway in background, capturing stdout/stderr to /tmp/openclaw.log.
 	logFile, err := os.OpenFile("/tmp/openclaw.log", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
-		return fmt.Errorf("open openclaw.log: %w", err)
+		return "", fmt.Errorf("open openclaw.log: %w", err)
 	}
 	// --bind loopback: openclaw refuses to start on a non-loopback bind when
 	// gateway.auth.mode=none ("Refusing to bind gateway to lan without auth").
@@ -1338,7 +1455,7 @@ func startOpenclaw(cfg agentConfig, apiKey string) error {
 	cmd.Stderr = logFile
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
-		return fmt.Errorf("start openclaw gateway: %w", err)
+		return "", fmt.Errorf("start openclaw gateway: %w", err)
 	}
 	logf("OK   openclaw gateway spawned, pid=%d (log: /tmp/openclaw.log)", cmd.Process.Pid)
 
@@ -1346,14 +1463,23 @@ func startOpenclaw(cfg agentConfig, apiKey string) error {
 		err := cmd.Wait()
 		logFile.Close()
 		// Reset agent state so the proxy stops accepting requests.
-		agent.set(nil, "", "", "", nil)
+		agent.set(nil, "", "", "", "", nil)
 		if err != nil {
 			logf("openclaw gateway exited: %v", err)
 		} else {
 			logf("openclaw gateway exited cleanly")
 		}
 	}()
-	return nil
+	return authToken, nil
+}
+
+// randomTokenHex returns 2*nbytes hex characters from crypto/rand.
+func randomTokenHex(nbytes int) (string, error) {
+	buf := make([]byte, nbytes)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
 }
 
 func downloadWithRetry(ctx context.Context, root, indexer, outPath string) error {
