@@ -66,6 +66,7 @@ const (
 // IntelligentData — it is emitted in the ITransferred event (mint + transfers).
 const agenticIDABI = `[
   {"type":"function","name":"getAgentIdBySealId","stateMutability":"view","inputs":[{"name":"sealId","type":"bytes32"}],"outputs":[{"name":"","type":"uint256"}]},
+  {"type":"function","name":"ownerOf","stateMutability":"view","inputs":[{"name":"tokenId","type":"uint256"}],"outputs":[{"name":"","type":"address"}]},
   {"type":"function","name":"intelligentDatasOf","stateMutability":"view","inputs":[{"name":"tokenId","type":"uint256"}],"outputs":[{"name":"","type":"tuple[]","components":[{"name":"dataDescription","type":"string"},{"name":"dataHash","type":"bytes32"}]}]},
   {"type":"event","name":"ITransferred","anonymous":false,"inputs":[{"name":"from","type":"address","indexed":true},{"name":"to","type":"address","indexed":true},{"name":"tokenId","type":"uint256","indexed":true},{"name":"entries","type":"tuple[]","indexed":false,"components":[{"name":"dataHash","type":"bytes32"},{"name":"sealedKey","type":"bytes"}]}]}
 ]`
@@ -132,21 +133,23 @@ type agentState struct {
 	agentSealPriv []byte
 	upstreamURL   string
 	sealID        string // hex (no 0x prefix)
+	owner         string // 0x-prefixed Ethereum address of the AgenticID NFT owner
 	cfg           *agentConfig
 }
 
-func (s *agentState) snapshot() (priv []byte, upstream, sealID string, cfg *agentConfig) {
+func (s *agentState) snapshot() (priv []byte, upstream, sealID, owner string, cfg *agentConfig) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.agentSealPriv, s.upstreamURL, s.sealID, s.cfg
+	return s.agentSealPriv, s.upstreamURL, s.sealID, s.owner, s.cfg
 }
 
-func (s *agentState) set(priv []byte, upstream, sealID string, cfg *agentConfig) {
+func (s *agentState) set(priv []byte, upstream, sealID, owner string, cfg *agentConfig) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.agentSealPriv = priv
 	s.upstreamURL = upstream
 	s.sealID = sealID
+	s.owner = owner
 	s.cfg = cfg
 }
 
@@ -285,12 +288,12 @@ func main() {
 			logf("")
 			logf("--- Bootstrap from AgenticID %s (rpc %s, fallback indexer %s) ---",
 				contractAddr, chainRPC, fallbackIndexer)
-			entries := bootstrap(chainRPC, contractAddr, a.SealID, agentSealPriv, fallbackIndexer)
-			if entries != nil {
+			res := bootstrap(chainRPC, contractAddr, a.SealID, agentSealPriv, fallbackIndexer)
+			if res != nil {
 				reportStatus(attestorURL, agentSealPriv, a.SealID, "running", "")
 				logf("")
 				logf("--- Starting agent ---")
-				tryStartAgent(entries, agentSealPriv, apiKey, a.SealID)
+				tryStartAgent(res.entries, agentSealPriv, apiKey, a.SealID, res.owner)
 			} else {
 				logf("bootstrap failed -- not reporting status=running")
 			}
@@ -341,58 +344,62 @@ func startHTTPServer() {
 	mux.HandleFunc("/", agentProxyHandler)
 	go func() {
 		fmt.Println("Listening on :8080  GET /healthz | /log | /log/openclaw | /hello (signed) | /* (agent proxy)")
-		_ = http.ListenAndServe(":8080", mux)
+		_ = http.ListenAndServe(":8080", corsMiddleware(mux))
 	}()
 }
 
-// helloHandler is the agent's signed A2A self-introduction endpoint. Bootstrap
-// synthesises a JSON envelope describing the agent's on-chain identity, the
-// inference framework + model it runs, and the configured persona/skills,
-// then signs the response with agent_seal_priv via the same scheme the
-// catch-all proxy uses. A peer agent or external verifier can:
+// corsMiddleware adds the one CORS header the upstream proxy can't:
 //
-//	GET /hello            (no body)
-//	→ ecrecover the X-Agent-Signature header
-//	→ confirm the signer matches the AgenticID owner for seal_id
-//	→ trust the self-described identity
+//	Access-Control-Expose-Headers: X-Agent-Signature, X-Agent-Request-Hash,
+//	                               X-Agent-Response-Hash, X-Agent-Timestamp
 //
-// Returns 503 until the agent is armed (post-bootstrap) so callers don't
-// mistake the no-content default for a successful self-introduction.
+// The 0g-sandbox / Daytona proxy in front of us already handles the
+// credentialed CORS dance (echo Origin, Allow-Credentials: true, Vary,
+// preflight). It cannot know our app-specific X-Agent-* header names, so
+// browsers will hide them from JS unless we declare them in Expose-Headers
+// at the agent layer.
+//
+// Specifically does NOT set Access-Control-Allow-Origin: this proxy already
+// echoes Origin, and a duplicate header (especially "*" alongside
+// Allow-Credentials: true) is a browser CORS error. Same reason there's no
+// OPTIONS shortcut here — preflight is handled upstream.
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Expose-Headers",
+			"X-Agent-Signature, X-Agent-Request-Hash, X-Agent-Response-Hash, X-Agent-Timestamp")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// helloHandler is the agent's signed A2A self-introduction endpoint. Returns
+// the minimal "I am the agent of <owner>" tuple and signs the JSON body with
+// agent_seal_priv via EIP-191 personal_sign. Verifier:
+//
+//	ethers.verifyMessage(body, sig) === <agent address>
+//	body.owner   == AgenticID.ownerOf(getAgentIdBySealId(seal_id))
+//
+// Operational details (model, persona, skills, framework version, seal_id,
+// etc.) are deliberately NOT exposed: anonymous callers don't need them to
+// establish identity, and leaking them gives away the runtime's playbook.
+//
+// Returns 503 until the agent is armed (post-bootstrap).
 func helloHandler(w http.ResponseWriter, r *http.Request) {
-	priv, _, sealID, cfg := agent.snapshot()
+	priv, _, _, owner, _ := agent.snapshot()
 	if priv == nil {
 		http.Error(w, "agent not ready", http.StatusServiceUnavailable)
 		return
 	}
 
-	identity := map[string]any{
-		"seal_id": "0x" + sealID,
-	}
+	agentAddr := ""
 	if pk, err := crypto.ToECDSA(priv); err == nil {
-		identity["address"] = crypto.PubkeyToAddress(pk.PublicKey).Hex()
+		agentAddr = crypto.PubkeyToAddress(pk.PublicKey).Hex()
 	}
 
 	resp := map[string]any{
-		"hello":    "I am an attested 0G sandbox agent. Verify my responses via X-Agent-Signature.",
-		"identity": identity,
-		"ts":       time.Now().Unix(),
-	}
-	if cfg != nil {
-		agentInfo := map[string]any{
-			"framework": cfg.Framework,
-			"inference": map[string]any{
-				"provider":  cfg.Inference.Provider,
-				"model":     cfg.Inference.Model,
-				"fallbacks": cfg.Inference.Fallbacks,
-			},
-		}
-		if cfg.Persona.SystemPrompt != "" {
-			agentInfo["persona"] = cfg.Persona.SystemPrompt
-		}
-		if len(cfg.Skills) > 0 {
-			agentInfo["skills"] = cfg.Skills
-		}
-		resp["agent"] = agentInfo
+		"agent":   agentAddr,
+		"owner":   owner,
+		"message": fmt.Sprintf("I am the agent of %s, identified as %s. Services coming soon.", owner, agentAddr),
+		"ts":      time.Now().Unix(),
 	}
 
 	bodyBytes, err := json.Marshal(resp)
@@ -401,10 +408,44 @@ func helloHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if err := writeSignedResponse(w, r, priv, nil, bodyBytes, http.StatusOK); err != nil {
+	if err := writeEIP191SignedResponse(w, priv, bodyBytes, http.StatusOK); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+}
+
+// writeEIP191SignedResponse signs body with agent_seal_priv using the EIP-191
+// personal_sign envelope (\x19Ethereum Signed Message:\n<len> + body), attaches
+// the signature to X-Agent-Signature, and writes the body. Verifier side:
+//
+//	ethers.verifyMessage(body, sig) === expectedAddress
+//
+// CORS Allow-Origin is intentionally NOT set here — the upstream proxy
+// handles it. corsMiddleware sets Expose-Headers once for everything.
+//
+// No request binding, no canonical-message reconstruction — straightforward
+// "this body was signed by the agent_seal owner".
+func writeEIP191SignedResponse(w http.ResponseWriter, priv, body []byte, statusCode int) error {
+	prefix := fmt.Sprintf("\x19Ethereum Signed Message:\n%d", len(body))
+	hash := crypto.Keccak256([]byte(prefix), body)
+
+	privKey, err := crypto.ToECDSA(priv)
+	if err != nil {
+		return fmt.Errorf("agent priv: %w", err)
+	}
+	sig, err := crypto.Sign(hash, privKey)
+	if err != nil {
+		return fmt.Errorf("sign: %w", err)
+	}
+	sig[64] += 27
+
+	w.Header().Set("X-Agent-Signature", "0x"+hex.EncodeToString(sig))
+	w.Header().Del("Content-Length")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
+
+	w.WriteHeader(statusCode)
+	_, _ = w.Write(body)
+	return nil
 }
 
 // isWebSocketUpgrade reports whether r is a WebSocket upgrade request.
@@ -464,6 +505,16 @@ func wsReverseProxy(upstream string) *httputil.ReverseProxy {
 			// per-caller identity isn't relevant inside the sealed sandbox.
 			pr.Out.Header.Set("X-Sealed-Agent-User", "agent-operator")
 		},
+		ModifyResponse: func(resp *http.Response) error {
+			// corsMiddleware on :8080 already set our Allow-Origin; drop
+			// any upstream-provided value so the wire response has exactly
+			// one Access-Control-Allow-Origin (browsers reject duplicates).
+			resp.Header.Del("Access-Control-Allow-Origin")
+			resp.Header.Del("Access-Control-Allow-Methods")
+			resp.Header.Del("Access-Control-Allow-Headers")
+			resp.Header.Del("Access-Control-Expose-Headers")
+			return nil
+		},
 	}
 }
 
@@ -483,7 +534,7 @@ func wsReverseProxy(upstream string) *httputil.ReverseProxy {
 //	X-Agent-Request-Hash   0x<32-byte hex>  (so verifiers don't need to recompute)
 //	X-Agent-Response-Hash  0x<32-byte hex>
 func agentProxyHandler(w http.ResponseWriter, r *http.Request) {
-	priv, upstream, _, _ := agent.snapshot()
+	priv, upstream, _, _, _ := agent.snapshot()
 	if priv == nil || upstream == "" {
 		http.Error(w, "agent not ready", http.StatusServiceUnavailable)
 		return
@@ -556,6 +607,12 @@ func agentProxyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for k, vs := range resp.Header {
+		// Skip Access-Control-* — corsMiddleware already set ours, and
+		// duplicating Allow-Origin on the wire causes browsers to reject
+		// the response.
+		if strings.HasPrefix(k, "Access-Control-") {
+			continue
+		}
 		for _, v := range vs {
 			w.Header().Add(k, v)
 		}
@@ -709,13 +766,22 @@ func reportStatus(attestorURL string, agentSealPriv []byte, sealID, status, erro
 
 // ── Bootstrap: AgenticID watcher + storage download + decrypt ───────────────
 
-// bootstrap returns the decrypted entries (role + plaintext) only when every
-// phase succeeds (mint observed, i_data list fetched, every entry downloaded
-// AND decrypted). Any failure returns nil; details are logged.
+// bootstrapResult bundles the post-bootstrap state the agent launcher needs:
+// the decrypted intelligent-data entries plus the on-chain owner address
+// (queried once here so /hello can render it without re-touching the chain).
+type bootstrapResult struct {
+	entries []decryptedEntry
+	owner   string // 0x-prefixed Ethereum address, "" if lookup failed
+}
+
+// bootstrap returns a *bootstrapResult only when every phase succeeds (mint
+// observed, i_data list fetched, every entry downloaded AND decrypted). Any
+// failure returns nil; details are logged. owner is best-effort — failures
+// to resolve it are logged but do not fail the whole pipeline.
 //
 // fallbackIndexer is used when an i_data's dataDescription does not contain
 // storage_ptr.indexer. Empty string disables the fallback.
-func bootstrap(rpcURL, contractHex, sealIDHex string, agentSealPriv []byte, fallbackIndexer string) []decryptedEntry {
+func bootstrap(rpcURL, contractHex, sealIDHex string, agentSealPriv []byte, fallbackIndexer string) *bootstrapResult {
 	ctx, cancel := context.WithTimeout(context.Background(), bootstrapTimeout)
 	defer cancel()
 
@@ -786,8 +852,21 @@ func bootstrap(rpcURL, contractHex, sealIDHex string, agentSealPriv []byte, fall
 	if !allOK {
 		return nil
 	}
+
+	// Best-effort: resolve agent NFT owner so /hello can show "agent of X"
+	// without re-touching the chain. Failure here is non-fatal — entries
+	// are still good and we'll just emit owner="" downstream.
+	owner, err := ownerOf(ctx, client, parsedABI, contract, agentID)
+	ownerHex := ""
+	if err != nil {
+		logf("warn: ownerOf(%s) failed: %v", agentID.String(), err)
+	} else {
+		ownerHex = owner.Hex()
+		logf("OK   agent owner: %s", ownerHex)
+	}
+
 	logf("OK   bootstrap complete")
-	return entries
+	return &bootstrapResult{entries: entries, owner: ownerHex}
 }
 
 // waitForMint polls getAgentIdBySealId(sealId) until non-zero (or ctx done).
@@ -969,6 +1048,28 @@ func loadSealedKeys(ctx context.Context, client *ethclient.Client, parsedABI abi
 	}
 }
 
+// ownerOf resolves the AgenticID NFT owner of agentID via the standard ERC-721
+// ownerOf(uint256) call.
+func ownerOf(ctx context.Context, client *ethclient.Client, parsedABI abi.ABI, contract common.Address, agentID *big.Int) (common.Address, error) {
+	data, err := parsedABI.Pack("ownerOf", agentID)
+	if err != nil {
+		return common.Address{}, err
+	}
+	out, err := client.CallContract(ctx, ethereum.CallMsg{To: &contract, Data: data}, nil)
+	if err != nil {
+		return common.Address{}, err
+	}
+	res, err := parsedABI.Unpack("ownerOf", out)
+	if err != nil || len(res) == 0 {
+		return common.Address{}, fmt.Errorf("unpack ownerOf")
+	}
+	addr, ok := res[0].(common.Address)
+	if !ok {
+		return common.Address{}, fmt.Errorf("ownerOf return type")
+	}
+	return addr, nil
+}
+
 func intelligentDatasOf(ctx context.Context, client *ethclient.Client, parsedABI abi.ABI, contract common.Address, agentID *big.Int) ([]intelligentData, error) {
 	data, err := parsedABI.Pack("intelligentDatasOf", agentID)
 	if err != nil {
@@ -1055,7 +1156,7 @@ func processIntelligentData(ctx context.Context, idx int, d intelligentData, sea
 // it as the framework-agnostic agentConfig schema, and dispatches to the
 // matching adapter (openclaw, etc.). On success the catch-all reverse proxy is
 // armed by populating agentState.
-func tryStartAgent(entries []decryptedEntry, agentSealPriv []byte, apiKey, sealID string) {
+func tryStartAgent(entries []decryptedEntry, agentSealPriv []byte, apiKey, sealID, owner string) {
 	var cfgRaw []byte
 	for _, e := range entries {
 		if e.Role == "config" {
@@ -1081,7 +1182,7 @@ func tryStartAgent(entries []decryptedEntry, agentSealPriv []byte, apiKey, sealI
 			logf("FAIL agent (openclaw): %v", err)
 			return
 		}
-		agent.set(agentSealPriv, "http://127.0.0.1:3284", sealID, &cfg)
+		agent.set(agentSealPriv, "http://127.0.0.1:3284", sealID, owner, &cfg)
 		logf("OK   agent proxy armed -> openclaw on :3284")
 	default:
 		logf("FAIL agent: unsupported framework %q", cfg.Framework.Name)
@@ -1245,7 +1346,7 @@ func startOpenclaw(cfg agentConfig, apiKey string) error {
 		err := cmd.Wait()
 		logFile.Close()
 		// Reset agent state so the proxy stops accepting requests.
-		agent.set(nil, "", "", nil)
+		agent.set(nil, "", "", "", nil)
 		if err != nil {
 			logf("openclaw gateway exited: %v", err)
 		} else {
