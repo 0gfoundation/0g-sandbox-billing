@@ -101,9 +101,14 @@ type storageDescription struct {
 }
 
 // decryptedEntry is one i-data entry after AES-GCM decrypt; collected so we can
-// dispatch (e.g. role="config" -> agent config) once bootstrap is done.
+// dispatch (e.g. role="config" -> agent config) once bootstrap is done. The
+// dataHash is the on-chain hash from intelligentDatasOf and is what binds the
+// agent's runtime to a specific signed i-data revision — surfaced through
+// /hello and /_seal/auth so verifiers can correlate responses with chain
+// state.
 type decryptedEntry struct {
 	Role      string
+	DataHash  [32]byte
 	Plaintext []byte
 }
 
@@ -133,22 +138,23 @@ type agentConfig struct {
 // included in /hello so verifiers can correlate the response with on-chain
 // identity.
 type agentState struct {
-	mu            sync.RWMutex
-	agentSealPriv []byte
-	upstreamURL   string
-	sealID        string // hex (no 0x prefix)
-	owner         string // 0x-prefixed Ethereum address of the AgenticID NFT owner
-	cfg           *agentConfig
-	authToken     string // framework-specific control-UI credential (openclaw gateway token, etc.)
+	mu             sync.RWMutex
+	agentSealPriv  []byte
+	upstreamURL    string
+	sealID         string // hex (no 0x prefix)
+	owner          string // 0x-prefixed Ethereum address of the AgenticID NFT owner
+	cfg            *agentConfig
+	authToken      string // framework-specific control-UI credential (openclaw gateway token, etc.)
+	configDataHash string // hex (no 0x prefix) of the intelligent-data entry that bootstrap consumed as agent config
 }
 
-func (s *agentState) snapshot() (priv []byte, upstream, sealID, owner, token string, cfg *agentConfig) {
+func (s *agentState) snapshot() (priv []byte, upstream, sealID, owner, token, configHash string, cfg *agentConfig) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.agentSealPriv, s.upstreamURL, s.sealID, s.owner, s.authToken, s.cfg
+	return s.agentSealPriv, s.upstreamURL, s.sealID, s.owner, s.authToken, s.configDataHash, s.cfg
 }
 
-func (s *agentState) set(priv []byte, upstream, sealID, owner, token string, cfg *agentConfig) {
+func (s *agentState) set(priv []byte, upstream, sealID, owner, token, configHash string, cfg *agentConfig) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.agentSealPriv = priv
@@ -156,6 +162,7 @@ func (s *agentState) set(priv []byte, upstream, sealID, owner, token string, cfg
 	s.sealID = sealID
 	s.owner = owner
 	s.authToken = token
+	s.configDataHash = configHash
 	s.cfg = cfg
 }
 
@@ -381,7 +388,7 @@ func startHTTPServer() {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Expose-Headers",
-			"X-Agent-Signature, X-Agent-Request-Hash, X-Agent-Response-Hash, X-Agent-Timestamp")
+			"X-Agent-Signature, X-Agent-Request-Hash, X-Agent-Response-Hash, X-Agent-Timestamp, X-Agent-Config-Hash")
 		next.ServeHTTP(w, r)
 	})
 }
@@ -406,7 +413,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 const authWindowSec = 300
 
 func authHandler(w http.ResponseWriter, r *http.Request) {
-	priv, _, sealID, owner, token, _ := agent.snapshot()
+	priv, _, sealID, owner, token, _, _ := agent.snapshot()
 	if priv == nil || owner == "" {
 		http.Error(w, "agent not ready", http.StatusServiceUnavailable)
 		return
@@ -494,7 +501,7 @@ func authHandler(w http.ResponseWriter, r *http.Request) {
 //
 // Returns 503 until the agent is armed (post-bootstrap).
 func helloHandler(w http.ResponseWriter, r *http.Request) {
-	priv, _, _, owner, _, _ := agent.snapshot()
+	priv, _, _, owner, _, configHash, _ := agent.snapshot()
 	if priv == nil {
 		http.Error(w, "agent not ready", http.StatusServiceUnavailable)
 		return
@@ -509,7 +516,15 @@ func helloHandler(w http.ResponseWriter, r *http.Request) {
 		"agent":   agentAddr,
 		"owner":   owner,
 		"message": fmt.Sprintf("I am the agent of %s, identified as %s. Services coming soon.", owner, agentAddr),
-		"ts":      time.Now().Unix(),
+		// config_data_hash binds this response to a specific i-data revision
+		// on AgenticID. A verifier looks up intelligentDatasOf(agentId) and
+		// confirms this hash is present — meaning the runtime config driving
+		// the agent's behaviour was registered on chain. Without it, an
+		// attacker who somehow obtained agent_seal_priv (or compromised the
+		// instance) could swap configs silently and still produce valid
+		// signatures.
+		"config_data_hash": "0x" + configHash,
+		"ts":               time.Now().Unix(),
 	}
 
 	bodyBytes, err := json.Marshal(resp)
@@ -639,7 +654,7 @@ func wsReverseProxy(upstream string) *httputil.ReverseProxy {
 //	X-Agent-Request-Hash   0x<32-byte hex>  (so verifiers don't need to recompute)
 //	X-Agent-Response-Hash  0x<32-byte hex>
 func agentProxyHandler(w http.ResponseWriter, r *http.Request) {
-	priv, upstream, _, _, _, _ := agent.snapshot()
+	priv, upstream, _, _, _, configHash, _ := agent.snapshot()
 	if priv == nil || upstream == "" {
 		http.Error(w, "agent not ready", http.StatusServiceUnavailable)
 		return
@@ -719,18 +734,30 @@ func agentProxyHandler(w http.ResponseWriter, r *http.Request) {
 			w.Header().Add(k, v)
 		}
 	}
-	if err := writeSignedResponse(w, r, priv, reqBody, respBody, resp.StatusCode); err != nil {
+	if err := writeSignedResponse(w, r, priv, reqBody, respBody, configHash, resp.StatusCode); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 }
 
 // writeSignedResponse computes the AgentResponse signature for (reqBody, body),
-// attaches the four X-Agent-* headers to w, and writes body with statusCode.
-// Caller is responsible for any upstream-derived headers having already been
-// copied into w.Header() (this function only touches the X-Agent-* set and
+// attaches the five X-Agent-* headers to w, and writes body with statusCode.
+//
+// Canonical message format (raw keccak256, no EIP-191 prefix):
+//
+//	"AgentResponse:0x<reqHash>:0x<respHash>:0x<configHash>:<ts>"
+//
+// Including configHash binds every signed response to the on-chain
+// intelligent-data revision the agent runtime was launched with — verifiers
+// can confirm the responder is running a config that's actually registered
+// in AgenticID.intelligentDatasOf(agentId), preventing a compromised
+// instance from silently swapping its agent prompt or skill set while
+// still producing valid signatures.
+//
+// Caller is responsible for any upstream-derived headers having already
+// been copied into w.Header() (this function only touches X-Agent-* and
 // Content-Length).
-func writeSignedResponse(w http.ResponseWriter, r *http.Request, priv, reqBody, body []byte, statusCode int) error {
+func writeSignedResponse(w http.ResponseWriter, r *http.Request, priv, reqBody, body []byte, configHash string, statusCode int) error {
 	ts := time.Now().Unix()
 	reqHash := crypto.Keccak256(
 		[]byte(r.Method),
@@ -740,8 +767,8 @@ func writeSignedResponse(w http.ResponseWriter, r *http.Request, priv, reqBody, 
 		reqBody,
 	)
 	respHash := crypto.Keccak256(body)
-	canonical := fmt.Sprintf("AgentResponse:0x%s:0x%s:%d",
-		hex.EncodeToString(reqHash), hex.EncodeToString(respHash), ts)
+	canonical := fmt.Sprintf("AgentResponse:0x%s:0x%s:0x%s:%d",
+		hex.EncodeToString(reqHash), hex.EncodeToString(respHash), configHash, ts)
 	msgHash := crypto.Keccak256([]byte(canonical))
 
 	privKey, err := crypto.ToECDSA(priv)
@@ -758,6 +785,7 @@ func writeSignedResponse(w http.ResponseWriter, r *http.Request, priv, reqBody, 
 	w.Header().Set("X-Agent-Timestamp", fmt.Sprintf("%d", ts))
 	w.Header().Set("X-Agent-Request-Hash", "0x"+hex.EncodeToString(reqHash))
 	w.Header().Set("X-Agent-Response-Hash", "0x"+hex.EncodeToString(respHash))
+	w.Header().Set("X-Agent-Config-Hash", "0x"+configHash)
 	w.Header().Del("Content-Length")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
 
@@ -1249,7 +1277,7 @@ func processIntelligentData(ctx context.Context, idx int, d intelligentData, sea
 	// Don't dump plaintext — could contain API keys, prompts, or other secrets.
 	// The dispatcher (tryStartAgent) decides what's safe to surface from each role.
 	logf("OK   bootstrap%s decrypted (%d bytes, role=%q)", tag, len(plaintext), desc.Role)
-	return decryptedEntry{Role: desc.Role, Plaintext: plaintext}, true
+	return decryptedEntry{Role: desc.Role, DataHash: d.DataHash, Plaintext: plaintext}, true
 }
 
 // ── Agent launcher (config-driven adapters) ─────────────────────────────────
@@ -1264,22 +1292,23 @@ func processIntelligentData(ctx context.Context, idx int, d intelligentData, sea
 // Returning a non-nil error means the agent is not up; the caller should
 // reportStatus("error", err) instead of "running".
 func tryStartAgent(entries []decryptedEntry, agentSealPriv []byte, apiKey, sealID, owner string) error {
-	var cfgRaw []byte
-	for _, e := range entries {
-		if e.Role == "config" {
-			cfgRaw = e.Plaintext
+	var cfgEntry *decryptedEntry
+	for i := range entries {
+		if entries[i].Role == "config" {
+			cfgEntry = &entries[i]
 			break
 		}
 	}
-	if cfgRaw == nil {
+	if cfgEntry == nil {
 		return fmt.Errorf("no intelligent-data entry with role=\"config\"")
 	}
 	var cfg agentConfig
-	if err := json.Unmarshal(cfgRaw, &cfg); err != nil {
+	if err := json.Unmarshal(cfgEntry.Plaintext, &cfg); err != nil {
 		return fmt.Errorf("parse agent config: %w", err)
 	}
-	logf("agent config: framework=%s/%s inference=%s/%s",
-		cfg.Framework.Name, cfg.Framework.Version, cfg.Inference.Provider, cfg.Inference.Model)
+	configHash := hex.EncodeToString(cfgEntry.DataHash[:])
+	logf("agent config: framework=%s/%s inference=%s/%s data_hash=0x%s",
+		cfg.Framework.Name, cfg.Framework.Version, cfg.Inference.Provider, cfg.Inference.Model, configHash)
 
 	switch cfg.Framework.Name {
 	case "openclaw":
@@ -1292,7 +1321,7 @@ func tryStartAgent(entries []decryptedEntry, agentSealPriv []byte, apiKey, sealI
 		if err := waitForListen("127.0.0.1:3284", 120*time.Second); err != nil {
 			return fmt.Errorf("openclaw not listening: %w", err)
 		}
-		agent.set(agentSealPriv, "http://127.0.0.1:3284", sealID, owner, token, &cfg)
+		agent.set(agentSealPriv, "http://127.0.0.1:3284", sealID, owner, token, configHash, &cfg)
 		logf("OK   agentState armed (openclaw listening on :3284)")
 		return nil
 	default:
@@ -1502,7 +1531,7 @@ func startOpenclaw(cfg agentConfig, apiKey string) (string, error) {
 		err := cmd.Wait()
 		logFile.Close()
 		// Reset agent state so the proxy stops accepting requests.
-		agent.set(nil, "", "", "", "", nil)
+		agent.set(nil, "", "", "", "", "", nil)
 		if err != nil {
 			logf("openclaw gateway exited: %v", err)
 		} else {
