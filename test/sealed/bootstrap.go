@@ -37,6 +37,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -57,7 +58,7 @@ import (
 
 const (
 	logPath           = "/tmp/seal-bootstrap.log"
-	transferScanChunk = 5000 // ITransferred backward scan chunk size
+	transferScanChunk = 1000 // ITransferred backward scan chunk size; 0G testnet RPC rejects larger spans with "query set is too large"
 	bootstrapTimeout  = 10 * time.Minute
 	mintPollEvery     = 5 * time.Second
 	downloadAttempts  = 10
@@ -294,13 +295,21 @@ func main() {
 			logf("--- Bootstrap from AgenticID %s (rpc %s, fallback indexer %s) ---",
 				contractAddr, chainRPC, fallbackIndexer)
 			res := bootstrap(chainRPC, contractAddr, a.SealID, agentSealPriv, fallbackIndexer)
-			if res != nil {
-				reportStatus(attestorURL, agentSealPriv, a.SealID, "running", "")
+			if res == nil {
+				logf("bootstrap failed -- not reporting status")
+			} else {
 				logf("")
 				logf("--- Starting agent ---")
-				tryStartAgent(res.entries, agentSealPriv, apiKey, a.SealID, res.owner)
-			} else {
-				logf("bootstrap failed -- not reporting status=running")
+				if err := tryStartAgent(res.entries, agentSealPriv, apiKey, a.SealID, res.owner); err != nil {
+					logf("FAIL agent: %v", err)
+					reportStatus(attestorURL, agentSealPriv, a.SealID, "error", err.Error())
+				} else {
+					logf("OK   agent ready (upstream listening, agentState armed)")
+					// /hello will start returning 200 from this point — reportStatus
+					// and the A2A "ready" signal are gated on the same readiness
+					// check (TCP listen on the agent upstream port).
+					reportStatus(attestorURL, agentSealPriv, a.SealID, "running", "")
+				}
 			}
 		}
 	}
@@ -1245,11 +1254,16 @@ func processIntelligentData(ctx context.Context, idx int, d intelligentData, sea
 
 // ── Agent launcher (config-driven adapters) ─────────────────────────────────
 
-// tryStartAgent finds the entry whose dataDescription.role == "config", parses
-// it as the framework-agnostic agentConfig schema, and dispatches to the
-// matching adapter (openclaw, etc.). On success the catch-all reverse proxy is
-// armed by populating agentState.
-func tryStartAgent(entries []decryptedEntry, agentSealPriv []byte, apiKey, sealID, owner string) {
+// tryStartAgent finds the entry whose dataDescription.role == "config",
+// parses it as the framework-agnostic agentConfig schema, dispatches to the
+// matching adapter (openclaw, etc.), AND blocks until the spawned process
+// is actually accepting connections on its upstream port. Only then does it
+// arm agentState — which gates /hello and the catch-all proxy so they
+// return success exactly when the agent is ready to handle peer traffic.
+//
+// Returning a non-nil error means the agent is not up; the caller should
+// reportStatus("error", err) instead of "running".
+func tryStartAgent(entries []decryptedEntry, agentSealPriv []byte, apiKey, sealID, owner string) error {
 	var cfgRaw []byte
 	for _, e := range entries {
 		if e.Role == "config" {
@@ -1258,13 +1272,11 @@ func tryStartAgent(entries []decryptedEntry, agentSealPriv []byte, apiKey, sealI
 		}
 	}
 	if cfgRaw == nil {
-		logf("no entry with role=\"config\"; agent will not start")
-		return
+		return fmt.Errorf("no intelligent-data entry with role=\"config\"")
 	}
 	var cfg agentConfig
 	if err := json.Unmarshal(cfgRaw, &cfg); err != nil {
-		logf("FAIL agent: parse config: %v", err)
-		return
+		return fmt.Errorf("parse agent config: %w", err)
 	}
 	logf("agent config: framework=%s/%s inference=%s/%s",
 		cfg.Framework.Name, cfg.Framework.Version, cfg.Inference.Provider, cfg.Inference.Model)
@@ -1273,14 +1285,41 @@ func tryStartAgent(entries []decryptedEntry, agentSealPriv []byte, apiKey, sealI
 	case "openclaw":
 		token, err := startOpenclaw(cfg, apiKey)
 		if err != nil {
-			logf("FAIL agent (openclaw): %v", err)
-			return
+			return fmt.Errorf("openclaw: %w", err)
+		}
+		// Wait for openclaw to bind 127.0.0.1:3284. With a fresh container
+		// this blocks ~30-60s while npm install runs (gateway bundled deps).
+		if err := waitForListen("127.0.0.1:3284", 120*time.Second); err != nil {
+			return fmt.Errorf("openclaw not listening: %w", err)
 		}
 		agent.set(agentSealPriv, "http://127.0.0.1:3284", sealID, owner, token, &cfg)
-		logf("OK   agent proxy armed -> openclaw on :3284 (auth token cached)")
+		logf("OK   agentState armed (openclaw listening on :3284)")
+		return nil
 	default:
-		logf("FAIL agent: unsupported framework %q", cfg.Framework.Name)
+		return fmt.Errorf("unsupported framework %q", cfg.Framework.Name)
 	}
+}
+
+// waitForListen polls TCP-connect to addr until success or timeout. Used as
+// the "agent ready" gate so /hello and reportStatus only fire once the
+// upstream is actually serving connections.
+func waitForListen(addr string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	backoff := 200 * time.Millisecond
+	logf("waitForListen %s (up to %s)…", addr, timeout)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 1*time.Second)
+		if err == nil {
+			_ = conn.Close()
+			logf("OK   %s accepting connections", addr)
+			return nil
+		}
+		time.Sleep(backoff)
+		if backoff < 2*time.Second {
+			backoff *= 2
+		}
+	}
+	return fmt.Errorf("%s did not accept connections within %s", addr, timeout)
 }
 
 // startOpenclaw translates agentConfig into ~/.openclaw/openclaw.json, sets the
