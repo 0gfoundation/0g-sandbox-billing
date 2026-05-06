@@ -311,6 +311,25 @@ func main() {
 		logf("--- Provisioning from attestor: %s ---", attestorURL)
 		agentSealPriv := provisionFromAttestor(attestorURL, keyBytes, a)
 		if agentSealPriv != nil {
+			// Provisioning is the only step that consumes SANDBOX_SEAL_KEY
+			// (and the raw key bytes derived from it). Scrub both before
+			// we get any closer to spawning the agent runtime, so a
+			// malicious or prompt-injected agent can't recover them via
+			// `env`, `cat /proc/<bootstrap-pid>/environ`, or memory scans.
+			//
+			// Caveat: Linux exposes the *initial* environment on
+			// /proc/<pid>/environ, which Unsetenv doesn't rewrite. To
+			// fully purge we'd have to fork+exec a clean self — out of
+			// scope for v1. The real defense is the env whitelist when
+			// spawning openclaw (see startOpenclaw), this Unsetenv is
+			// defense in depth.
+			os.Unsetenv("SANDBOX_SEAL_KEY")
+			os.Unsetenv("SANDBOX_SEAL_ATTESTATION")
+			os.Unsetenv("API_KEY")
+			for i := range keyBytes {
+				keyBytes[i] = 0
+			}
+
 			logf("")
 			logf("--- Bootstrap from AgenticID %s (rpc %s, fallback indexer %s) ---",
 				contractAddr, chainRPC, fallbackIndexer)
@@ -1269,6 +1288,12 @@ func processIntelligentData(ctx context.Context, idx int, d intelligentData, sea
 		return decryptedEntry{}, false
 	}
 
+	// Encrypted blob has served its purpose — the plaintext is in memory now.
+	// Remove the file before openclaw spawns so the agent can't enumerate
+	// /tmp/idata-*.bin via shell tools and at least see which dataHashes
+	// the runtime is provisioned with.
+	_ = os.Remove(outPath)
+
 	// Don't dump plaintext — could contain API keys, prompts, or other secrets.
 	// The dispatcher (tryStartAgent) decides what's safe to surface from each role.
 	logf("OK   bootstrap%s decrypted (%d bytes, role=%q)", tag, len(plaintext), desc.Role)
@@ -1516,6 +1541,19 @@ func startOpenclaw(cfg agentConfig, apiKey string) (string, error) {
 	cmd := exec.Command("openclaw", "gateway", "run", "--allow-unconfigured", "--bind", "loopback", "--port", "3284")
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
+	// Explicit env whitelist — do NOT inherit bootstrap's env. Owners can
+	// chat with openclaw and ask it to run shell commands ("env",
+	// "cat /proc/self/environ", etc.); a leaked SANDBOX_SEAL_KEY there
+	// lets the owner replay provisioning and forge agent_seal_priv
+	// signatures. Pass only what openclaw genuinely needs to function.
+	envWhitelist := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + os.Getenv("HOME"),
+	}
+	if cfg.Inference.Provider == "anthropic" && apiKey != "" {
+		envWhitelist = append(envWhitelist, "ANTHROPIC_API_KEY="+apiKey)
+	}
+	cmd.Env = envWhitelist
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
 		return "", fmt.Errorf("start openclaw gateway: %w", err)
