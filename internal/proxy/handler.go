@@ -24,6 +24,7 @@ import (
 	"github.com/0gfoundation/0g-sandbox/internal/billing"
 	"github.com/0gfoundation/0g-sandbox/internal/chain"
 	"github.com/0gfoundation/0g-sandbox/internal/daytona"
+	"github.com/0gfoundation/0g-sandbox/internal/events"
 	"github.com/0gfoundation/0g-sandbox/internal/registry"
 )
 
@@ -70,7 +71,8 @@ type Handler struct {
 	pricePerCPUPerSec   *big.Int       // per CPU core per second
 	pricePerMemGBPerSec *big.Int       // per GB memory per second
 	voucherIntervalSec  int64
-	providerAddress     string // only this wallet may call provider-only endpoints
+	providerAddress     string // on-chain settlement identity; used by broker client and balance lookups
+	adminAddresses      []string // operator wallets allowed to call admin-only endpoints (lowercased hex)
 	sshGatewayHost      string // if set, replaces localhost in SSH commands
 	computePricePerSec  *big.Int
 	rdb                 *redis.Client
@@ -79,7 +81,7 @@ type Handler struct {
 	log                 *zap.Logger
 }
 
-func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, ackCheck AckChecker, eventFetcher EventFetcher, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec *big.Int, providerAddress, sshGatewayHost string, rdb *redis.Client, log *zap.Logger, brokerURL string, teeKey *ecdsa.PrivateKey, voucherIntervalSec int64) *Handler {
+func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker, ackCheck AckChecker, eventFetcher EventFetcher, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec *big.Int, providerAddress string, adminAddresses []string, sshGatewayHost string, rdb *redis.Client, log *zap.Logger, brokerURL string, teeKey *ecdsa.PrivateKey, voucherIntervalSec int64) *Handler {
 	target, _ := url.Parse(dtona.BaseURL())
 	rp := httputil.NewSingleHostReverseProxy(target)
 
@@ -107,7 +109,28 @@ func NewHandler(dtona *daytona.Client, bh BillingHooks, balCheck BalanceChecker,
 	if brokerURL != "" && teeKey != nil {
 		broker = newBrokerClient(brokerURL, teeKey, providerAddress, voucherIntervalSec, log)
 	}
-	return &Handler{dtona: dtona, billing: bh, rp: rp, balCheck: balCheck, ackCheck: ackCheck, eventFetcher: eventFetcher, createFee: createFee, pricePerCPUPerSec: pricePerCPUPerSec, pricePerMemGBPerSec: pricePerMemGBPerSec, voucherIntervalSec: voucherIntervalSec, computePricePerSec: computePricePerSec, providerAddress: providerAddress, sshGatewayHost: sshGatewayHost, rdb: rdb, teeKey: teeKey, broker: broker, log: log}
+	admins := make([]string, 0, len(adminAddresses))
+	for _, a := range adminAddresses {
+		a = strings.TrimSpace(a)
+		if a != "" {
+			admins = append(admins, strings.ToLower(a))
+		}
+	}
+	return &Handler{dtona: dtona, billing: bh, rp: rp, balCheck: balCheck, ackCheck: ackCheck, eventFetcher: eventFetcher, createFee: createFee, pricePerCPUPerSec: pricePerCPUPerSec, pricePerMemGBPerSec: pricePerMemGBPerSec, voucherIntervalSec: voucherIntervalSec, computePricePerSec: computePricePerSec, providerAddress: providerAddress, adminAddresses: admins, sshGatewayHost: sshGatewayHost, rdb: rdb, teeKey: teeKey, broker: broker, log: log}
+}
+
+// isAdmin reports whether wallet is configured as an admin (case-insensitive).
+func (h *Handler) isAdmin(wallet string) bool {
+	if wallet == "" {
+		return false
+	}
+	target := strings.ToLower(wallet)
+	for _, a := range h.adminAddresses {
+		if a == target {
+			return true
+		}
+	}
+	return false
 }
 
 // BrokerDeregister removes a sandbox from broker monitoring. No-op if broker is disabled.
@@ -152,11 +175,14 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	// ── Toolbox API (/api/toolbox/:id/*) — owner check + sealed check + transparent forward
 	rg.Any("/toolbox/:id/*action", h.withOwnerNotSealed(h.forward))
 
-	// ── Provider-only: archive all running sandboxes (pre-deploy) ──────────
+	// ── Admin-only: archive all running sandboxes (pre-deploy) ─────────────
 	rg.POST("/archive-all", h.handleArchiveAll)
 
-	// ── Provider-only: list all billing sessions ────────────────────────────
+	// ── Admin-only: list all billing sessions ──────────────────────────────
 	rg.GET("/sessions", h.handleSessions)
+
+	// ── Admin-only: local Redis billing audit log (created/stopped/auto_stopped/settled) ──
+	rg.GET("/audit-log", h.handleAuditLog)
 
 	// ── On-chain voucher events (public chain data, wallet auth only) ───────
 	rg.GET("/events", h.handleEvents)
@@ -531,13 +557,13 @@ func (h *Handler) handleSSHAccess(c *gin.Context) {
 }
 
 // handleArchiveAll stops then archives every started/starting sandbox.
-// Restricted to the provider address so only the operator can trigger this.
-// Daytona requires stop before archive: stop removes the container, archive
-// then backs up the filesystem to object storage so it can be restored later.
+// Admin-only. Daytona requires stop before archive: stop removes the
+// container, archive then backs up the filesystem to object storage so it can
+// be restored later.
 func (h *Handler) handleArchiveAll(c *gin.Context) {
 	wallet := c.GetString("wallet_address")
-	if !strings.EqualFold(wallet, h.providerAddress) {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "provider only"})
+	if !h.isAdmin(wallet) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin only"})
 		return
 	}
 
@@ -580,11 +606,11 @@ func (h *Handler) handleArchiveAll(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"archived": archived, "skipped": skipped, "failed": failed})
 }
 
-// handleForceDelete deletes any sandbox regardless of owner. Provider only.
+// handleForceDelete deletes any sandbox regardless of owner. Admin only.
 func (h *Handler) handleForceDelete(c *gin.Context) {
 	wallet := c.GetString("wallet_address")
-	if !strings.EqualFold(wallet, h.providerAddress) {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "provider only"})
+	if !h.isAdmin(wallet) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin only"})
 		return
 	}
 	id := c.Param("id")
@@ -595,6 +621,69 @@ func (h *Handler) handleForceDelete(c *gin.Context) {
 	if c.Writer.Status() >= 200 && c.Writer.Status() < 300 {
 		go h.billing.OnDelete(context.WithoutCancel(c.Request.Context()), id)
 	}
+}
+
+// handleForceStop stops any sandbox regardless of owner. Admin only.
+// Semantically distinct from owner-stop ("user finished work"): force-stop
+// signals an operator-induced halt, which downstream pipelines (alerts,
+// refunds, attestation revocation) may want to treat differently.
+//
+// Synchronous: blocks until Daytona reports the sandbox in stopped/archived/error
+// state. Daytona's /stop API is async — returning eagerly to the caller leaves
+// a window where a follow-up start can race the in-progress stop and push the
+// sandbox into errored state. Callers can rely on a 2xx here meaning the
+// sandbox is genuinely stopped.
+func (h *Handler) handleForceStop(c *gin.Context) {
+	wallet := c.GetString("wallet_address")
+	if !h.isAdmin(wallet) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin only"})
+		return
+	}
+	id := c.Param("id")
+	h.log.Info("admin force-stop", zap.String("admin", wallet), zap.String("sandbox", id))
+
+	if err := h.dtona.StopSandbox(c.Request.Context(), id); err != nil {
+		h.log.Warn("admin force-stop: stop call failed", zap.String("id", id), zap.Error(err))
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	waitCtx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
+	defer cancel()
+	if err := h.dtona.WaitStopped(waitCtx, id); err != nil {
+		h.log.Warn("admin force-stop: wait stopped failed", zap.String("id", id), zap.Error(err))
+		c.JSON(http.StatusGatewayTimeout, gin.H{"error": "stopped state timeout: " + err.Error()})
+		return
+	}
+
+	ctx := context.WithoutCancel(c.Request.Context())
+	h.billing.OnStop(ctx, id)
+	if h.broker != nil {
+		if berr := h.broker.deregisterSession(ctx, id); berr != nil {
+			h.log.Warn("broker deregister (force-stop)", zap.String("id", id), zap.Error(berr))
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"id": id, "state": "stopped"})
+}
+
+// handleAuditLog returns the local Redis-backed billing event log
+// (created / stopped / auto_stopped / settled). Distinct from /events,
+// which queries on-chain VoucherSettled. Admin-only because the log spans
+// all owners.
+func (h *Handler) handleAuditLog(c *gin.Context) {
+	wallet := c.GetString("wallet_address")
+	if !h.isAdmin(wallet) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin only"})
+		return
+	}
+	list, err := events.List(c.Request.Context(), h.rdb)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if list == nil {
+		list = []events.Event{}
+	}
+	c.JSON(http.StatusOK, list)
 }
 
 // handleEvents returns on-chain VoucherSettled events for this contract.
@@ -672,12 +761,12 @@ func (h *Handler) handleEvents(c *gin.Context) {
 	})
 }
 
-// handleSessions returns all sandboxes visible to the provider, enriched with
-// billing session data (accrued fees) where available. Restricted to provider.
+// handleSessions lists all sandboxes enriched with billing session data
+// (accrued fees) where available. Admin only.
 func (h *Handler) handleSessions(c *gin.Context) {
 	wallet := c.GetString("wallet_address")
-	if !strings.EqualFold(wallet, h.providerAddress) {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "provider only"})
+	if !h.isAdmin(wallet) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin only"})
 		return
 	}
 
@@ -760,14 +849,14 @@ func (h *Handler) handleListGeneric(_ string) gin.HandlerFunc {
 	}
 }
 
-// handleListSnapshots lists all Daytona snapshots. Snapshots are provider-managed
+// handleListSnapshots lists all Daytona snapshots. Snapshots are admin-managed
 // base images; any authenticated user may see and use them.
 func (h *Handler) handleListSnapshots(c *gin.Context) {
 	h.forward(c)
 }
 
 // handleSnapshotCreate registers a Docker image as a named Daytona snapshot.
-// Provider-only: accepts {name, imageName}, forwards to Daytona internally.
+// Admin-only: accepts {name, imageName}, forwards to Daytona internally.
 //
 // Before forwarding, the caller-supplied imageName is resolved to its content
 // digest and rewritten to a derived tag "<repo>:d-<shortdigest>" (created in
@@ -783,8 +872,8 @@ func (h *Handler) handleListSnapshots(c *gin.Context) {
 // rejects digest-form imageNames as "invalid reference format".
 func (h *Handler) handleSnapshotCreate(c *gin.Context) {
 	wallet := c.GetString("wallet_address")
-	if !strings.EqualFold(wallet, h.providerAddress) {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "provider only"})
+	if !h.isAdmin(wallet) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin only"})
 		return
 	}
 
@@ -827,7 +916,7 @@ func (h *Handler) handleSnapshotCreate(c *gin.Context) {
 	h.forward(c)
 }
 
-// handleSnapshotDelete deletes a snapshot by ID. Provider-only.
+// handleSnapshotDelete deletes a snapshot by ID. Admin-only.
 //
 // Daytona has a bug where DELETE succeeds but then the audit log INSERT fails
 // because the admin key carries no actorId in the request context, causing a
@@ -840,8 +929,8 @@ func (h *Handler) handleSnapshotCreate(c *gin.Context) {
 // referenced by other snapshots are left alone.
 func (h *Handler) handleSnapshotDelete(c *gin.Context) {
 	wallet := c.GetString("wallet_address")
-	if !strings.EqualFold(wallet, h.providerAddress) {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "provider only"})
+	if !h.isAdmin(wallet) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin only"})
 		return
 	}
 
@@ -940,6 +1029,8 @@ func (h *Handler) handleCatchAll(c *gin.Context) {
 		h.withOwner(h.handleSSHAccess)(c)
 	case method == http.MethodDelete && action == "/force":
 		h.handleForceDelete(c)
+	case method == http.MethodPost && action == "/force-stop":
+		h.handleForceStop(c)
 
 	// ── Label protection ───────────────────────────────────────────────────
 	case method == http.MethodPut && action == "/labels":

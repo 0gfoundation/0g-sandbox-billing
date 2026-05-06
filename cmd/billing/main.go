@@ -19,9 +19,6 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
-	"github.com/ethereum/go-ethereum/crypto"
-
-	"github.com/0gfoundation/0g-sandbox/internal/admin"
 	"github.com/0gfoundation/0g-sandbox/internal/auth"
 	"github.com/0gfoundation/0g-sandbox/internal/billing"
 	"github.com/0gfoundation/0g-sandbox/internal/chain"
@@ -64,17 +61,6 @@ func main() {
 		log.Fatal("failed to retrieve TEE signing key", zap.Error(err))
 	}
 	cfg.Chain.TEEPrivateKey = appKey.PrivateKeyHex
-
-	// Derive provider address from the TEE key if not explicitly configured.
-	if cfg.Chain.ProviderAddress == "" {
-		privKey, err := crypto.HexToECDSA(appKey.PrivateKeyHex)
-		if err != nil {
-			log.Fatal("invalid TEE private key", zap.Error(err))
-		}
-		cfg.Chain.ProviderAddress = crypto.PubkeyToAddress(privKey.PublicKey).Hex()
-		log.Info("provider address derived from TEE key",
-			zap.String("address", cfg.Chain.ProviderAddress))
-	}
 
 	// ── Chain client (TEE private key + ABI binding) ──────────────────────────
 	onchain, err := chain.NewClient(cfg)
@@ -356,20 +342,17 @@ func main() {
 		c.JSON(http.StatusOK, filtered)
 	})
 
-	adminGroup := r.Group("/admin", admin.AuthMiddleware(cfg.Daytona.AdminKey))
-	admin.New(rdb, cfg, dtona, log).Register(adminGroup)
-
 	api := r.Group("/api", auth.Middleware(rdb))
-	proxyHandler := proxy.NewHandler(dtona, billingHandler, onchain, onchain, onchain, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec, cfg.Chain.ProviderAddress, cfg.Server.SSHGatewayHost, rdb, log, cfg.Server.BrokerURL, onchain.PrivateKey(), cfg.Billing.VoucherIntervalSec)
+	proxyHandler := proxy.NewHandler(dtona, billingHandler, onchain, onchain, onchain, createFee, pricePerCPUPerSec, pricePerMemGBPerSec, computePricePerSec, cfg.Chain.ProviderAddress, cfg.Chain.AdminList(), cfg.Server.SSHGatewayHost, rdb, log, cfg.Server.BrokerURL, onchain.PrivateKey(), cfg.Billing.VoucherIntervalSec)
 	proxyHandler.Register(api)
 	go runStopHandler(ctx, stopCh, dtona, rdb, log, proxyHandler.BrokerDeregister)
 
-	// Provider-only: pull an image from an external registry into the internal registry.
+	// Admin-only: pull an image from an external registry into the internal registry.
 	// The import runs synchronously (crane.Copy) — may take minutes for large images.
 	api.POST("/registry/pull", func(c *gin.Context) {
 		wallet := c.GetString("wallet_address")
-		if !strings.EqualFold(wallet, cfg.Chain.ProviderAddress) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "provider only"})
+		if !cfg.Chain.IsAdmin(wallet) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
 			return
 		}
 		var req struct {
@@ -396,15 +379,15 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"image": dst})
 	})
 
-	// Provider-only: garbage-collect orphan derived tags. Lists every ":d-<hex>"
+	// Admin-only: garbage-collect orphan derived tags. Lists every ":d-<hex>"
 	// tag in the registry, removes those no longer referenced by any Daytona
 	// snapshot. Pre-fix snapshots that were deleted before the snapshot-delete
 	// hook existed left their derived tags behind — this drains that backlog.
 	// Pass ?dry_run=true to preview without deleting.
 	api.POST("/registry/gc", func(c *gin.Context) {
 		wallet := c.GetString("wallet_address")
-		if !strings.EqualFold(wallet, cfg.Chain.ProviderAddress) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "provider only"})
+		if !cfg.Chain.IsAdmin(wallet) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
 			return
 		}
 		dryRun := c.Query("dry_run") == "true"

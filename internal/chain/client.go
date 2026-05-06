@@ -56,7 +56,7 @@ type Client struct {
 	contractAddr common.Address
 	chainID      *big.Int
 	teeKey       *ecdsa.PrivateKey // signs vouchers (EIP-712, off-chain) and settlement txs
-	providerAddr common.Address    // registered provider address (from PROVIDER_ADDRESS or TEE key)
+	providerAddr common.Address    // registered provider address (from PROVIDER_ADDRESS)
 
 	blockTimeMu  sync.Mutex
 	blockTimeSec float64    // cached avg block time in seconds
@@ -74,13 +74,18 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		return nil, fmt.Errorf("parse tee private key: %w", err)
 	}
 
-	// Provider address: explicit config takes priority, otherwise derived from TEE key.
-	var providerAddr common.Address
-	if cfg.Chain.ProviderAddress != "" {
-		providerAddr = common.HexToAddress(cfg.Chain.ProviderAddress)
-	} else {
-		providerAddr = crypto.PubkeyToAddress(teeKey.PublicKey)
+	// Provider address must be explicitly configured. It identifies which
+	// on-chain provider this billing service represents — the value goes into
+	// voucher.provider (EIP-712), the settler queue key, and on-chain pricing
+	// lookups, all of which must match the provider registered via
+	// `cmd/provider register`. The TEE key cannot stand in for it: the contract
+	// has no reverse lookup from teeSignerAddress to provider, and using the
+	// TEE-derived address as a fallback silently produces vouchers whose
+	// provider field will fail settlement.
+	if cfg.Chain.ProviderAddress == "" {
+		return nil, fmt.Errorf("PROVIDER_ADDRESS is required")
 	}
+	providerAddr := common.HexToAddress(cfg.Chain.ProviderAddress)
 
 	addr := common.HexToAddress(cfg.Chain.ContractAddress)
 	contract, err := NewSandboxServing(addr, eth)

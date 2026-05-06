@@ -49,7 +49,51 @@ type ChainConfig struct {
 	ContractAddress string `mapstructure:"contract_address"`
 	TEEPrivateKey   string `mapstructure:"tee_private_key"`
 	ProviderAddress string `mapstructure:"provider_address"`
-	ChainID         int64  `mapstructure:"chain_id"`
+	// AdminAddresses is the comma-separated list of wallet addresses that may
+	// invoke operator-only endpoints (snapshot/registry management,
+	// archive-all, force-delete, sessions). When empty, falls back to
+	// [ProviderAddress] for backward compatibility with single-key
+	// deployments. Distinct from ProviderAddress (the on-chain settlement
+	// identity) so multiple operators can manage infrastructure without
+	// holding the provider's settlement key.
+	AdminAddresses string `mapstructure:"admin_addresses"`
+	ChainID        int64  `mapstructure:"chain_id"`
+}
+
+// AdminList returns the parsed admin wallet addresses (lowercased hex).
+// When ADMIN_ADDRESSES is unset, defaults to [ProviderAddress] so existing
+// single-key deployments keep working.
+func (c *ChainConfig) AdminList() []string {
+	raw := strings.TrimSpace(c.AdminAddresses)
+	if raw == "" {
+		if c.ProviderAddress == "" {
+			return nil
+		}
+		return []string{strings.ToLower(c.ProviderAddress)}
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, strings.ToLower(p))
+		}
+	}
+	return out
+}
+
+// IsAdmin reports whether wallet is in the admin list (case-insensitive).
+func (c *ChainConfig) IsAdmin(wallet string) bool {
+	if wallet == "" {
+		return false
+	}
+	target := strings.ToLower(wallet)
+	for _, a := range c.AdminList() {
+		if a == target {
+			return true
+		}
+	}
+	return false
 }
 
 type ServerConfig struct {
@@ -96,6 +140,7 @@ func Load() (*Config, error) {
 		"chain.rpc_url":                "RPC_URL",
 		"chain.contract_address":       "SETTLEMENT_CONTRACT",
 		"chain.provider_address":       "PROVIDER_ADDRESS",
+		"chain.admin_addresses":        "ADMIN_ADDRESSES",
 		"chain.chain_id":               "CHAIN_ID",
 		"server.port":                  "PORT",
 		"server.ssh_gateway_host":       "SSH_GATEWAY_HOST",
@@ -181,14 +226,15 @@ func (c *Config) validate() error {
 		val  string
 		name string
 	}
-	// TEEPrivateKey and PROVIDER_ADDRESS are optional here: if absent they
-	// are populated at startup by tee.Get() (gRPC call to the tapp-daemon in
-	// a real TDX environment, or MOCK_APP_PRIVATE_KEY in mock mode).
+	// TEEPrivateKey is populated at startup by tee.Get() (gRPC call to the
+	// tapp-daemon in a real TDX environment, or MOCK_APP_PRIVATE_KEY in mock
+	// mode), so it isn't checked here.
 	for _, r := range []req{
 		{c.Daytona.APIURL, "DAYTONA_API_URL"},
 		{c.Daytona.AdminKey, "DAYTONA_ADMIN_KEY"},
 		{c.Chain.RPCURL, "RPC_URL"},
 		{c.Chain.ContractAddress, "SETTLEMENT_CONTRACT"},
+		{c.Chain.ProviderAddress, "PROVIDER_ADDRESS"},
 	} {
 		if r.val == "" {
 			return fmt.Errorf("required config missing: %s", r.name)

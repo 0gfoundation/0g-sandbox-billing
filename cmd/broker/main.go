@@ -11,7 +11,6 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -51,14 +50,6 @@ func main() {
 		log.Fatal("failed to retrieve TEE signing key", zap.Error(err))
 	}
 	cfg.Chain.TEEPrivateKey = appKey.PrivateKeyHex
-
-	if cfg.Chain.ProviderAddress == "" {
-		privKey, err := crypto.HexToECDSA(appKey.PrivateKeyHex)
-		if err != nil {
-			log.Fatal("invalid TEE private key", zap.Error(err))
-		}
-		cfg.Chain.ProviderAddress = crypto.PubkeyToAddress(privKey.PublicKey).Hex()
-	}
 
 	// ── Chain client ──────────────────────────────────────────────────────────
 	onchain, err := chain.NewClient(cfg)

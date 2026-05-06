@@ -17,7 +17,11 @@ services:
       SETTLEMENT_CONTRACT:     ${SETTLEMENT_CONTRACT:-0xd7e0CD227e602FedBb93c36B1F5bf415398508a4}
       CHAIN_ID:                ${CHAIN_ID:-16602}
       RPC_URL:                 ${RPC_URL:-https://evmrpc-testnet.0g.ai}
-      PROVIDER_ADDRESS:        ${PROVIDER_ADDRESS:-}
+      PROVIDER_ADDRESS:        ${PROVIDER_ADDRESS:?PROVIDER_ADDRESS is required}
+      # Comma-separated list of operator wallets allowed to call admin-only
+      # endpoints (snapshot/registry management, archive-all, force-delete,
+      # sessions). Empty defaults to [PROVIDER_ADDRESS] for single-key setups.
+      ADMIN_ADDRESSES:         ${ADMIN_ADDRESSES:-}
       # Billing parameters (neuron; 1 0G = 10^18 neuron)
       COMPUTE_PRICE_PER_SEC:   ${COMPUTE_PRICE_PER_SEC:-16667}
       CREATE_FEE:              ${CREATE_FEE:-5000000}

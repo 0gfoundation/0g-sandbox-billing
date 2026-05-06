@@ -50,7 +50,6 @@ cmd/
   user/       user CLI: create/stop/delete sandbox, exec, balance
   checkbal/   quick balance/nonce/earnings check for a private key
 internal/
-  admin/      /admin/* endpoints (status, sandboxes, events, archive-all)
   auth/       EIP-191 signature verification, nonce replay protection
   billing/    OnCreate/OnStart/OnStop voucher handlers + periodic compute generator
   chain/      go-ethereum binding wrapper; SettleFeesWithTEE, nonce seeding from chain
@@ -236,18 +235,22 @@ The server starts on port 8080 (`PORT` env var) and exposes:
 - `GET /api/sandbox/:id` — get sandbox (403 if not owner)
 - `DELETE /api/sandbox/:id` — delete sandbox (billing: final compute voucher)
 - `GET /api/volumes` — list volumes owned by caller
-- `POST /api/snapshots` — create snapshot (provider only)
-- `DELETE /api/snapshots/:id` — delete snapshot (provider only)
-- `POST /api/registry/pull` — pull image into internal registry
-- `GET /api/sessions` — list open billing sessions
-- `GET /api/events` — event log
-- `POST /api/archive-all` — archive all stopped sandboxes
+- `GET /api/events` — on-chain VoucherSettled events
 
-**Admin (DAYTONA_ADMIN_KEY header):**
-- `GET /admin/status` — server status + stats
-- `GET /admin/sandboxes` — all sandboxes across all users
-- `GET /admin/events` — full event log
-- `POST /admin/archive-all` — force archive all
+**Admin-only (caller wallet must be in `ADMIN_ADDRESSES`):**
+- `POST /api/snapshots` — create snapshot
+- `DELETE /api/snapshots/:id` — delete snapshot
+- `POST /api/registry/pull` — pull image into internal registry
+- `POST /api/registry/gc` — garbage-collect orphan derived tags
+- `POST /api/archive-all` — archive every running sandbox + clears Redis sessions
+- `DELETE /api/sandbox/force/:id` — delete any sandbox regardless of owner
+- `GET /api/sessions` — list all open billing sessions across owners
+- `GET /api/audit-log` — local Redis billing event log (created/stopped/auto_stopped/settled)
+
+`ADMIN_ADDRESSES` is comma-separated. When unset, defaults to `[PROVIDER_ADDRESS]` for
+backward compatibility with single-key deployments. Distinct from `PROVIDER_ADDRESS`
+(the on-chain settlement identity), so multiple operators can manage infrastructure
+without holding the provider's settlement key.
 
 ### Dashboard
 
