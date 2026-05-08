@@ -81,6 +81,55 @@ func (a *Adapter) Dimensions() []string {
 	return []string{"config"}
 }
 
+// EvolutionFor returns the canonical plaintext bytes representing the agent's
+// current state for the given dimension. Watcher polls this periodically and
+// compares the sha256 against state.currentSnapshot to detect drift.
+//
+// For "config" dim today: returns agentConfig JSON with Framework.PackageVersion
+// refreshed from `openclaw --version` (so dashboard upgrade is detectable).
+// Other fields (inference / persona / skills) are taken from the in-memory cfg
+// — they don't drift in the legacy single-dim setup. Phase 5 will add proper
+// per-dim probes (skills manifest from extensions/, channels from openclaw.json,
+// memory from workspace/, etc).
+//
+// JSON output uses encoding/json's stable field ordering so identical state
+// always produces identical bytes (sha256 comparisons by watcher rely on this).
+func (a *Adapter) EvolutionFor(ctx context.Context, dim string) ([]byte, error) {
+	if dim != "config" {
+		return nil, framework.ErrUnsupportedDim
+	}
+	a.mu.RLock()
+	cfg := a.cfg
+	a.mu.RUnlock()
+	if cfg == nil {
+		return nil, fmt.Errorf("openclaw: no config restored")
+	}
+
+	// Shallow copy so we can edit Framework.PackageVersion without mutating
+	// the live cfg held by adapter / state. Skills is []any and shared by
+	// reference, but we don't modify it.
+	current := *cfg
+	if v := probeOpenclawVersion(ctx); v != "" {
+		current.Framework.PackageVersion = v
+	}
+
+	return json.Marshal(&current)
+}
+
+// probeOpenclawVersion returns just the version number from `openclaw --version`.
+// CLI output: "OpenClaw 2026.4.26 (be8c246)" -> "2026.4.26". Empty on probe error.
+func probeOpenclawVersion(ctx context.Context) string {
+	out, err := exec.CommandContext(ctx, "openclaw", "--version").Output()
+	if err != nil {
+		return ""
+	}
+	fields := strings.Fields(strings.TrimSpace(string(out)))
+	if len(fields) < 2 {
+		return ""
+	}
+	return fields[1]
+}
+
 // Restore applies a dimension's plaintext to the in-memory composed state.
 //
 // For now the only meaningful dimension is "config", whose plaintext is the

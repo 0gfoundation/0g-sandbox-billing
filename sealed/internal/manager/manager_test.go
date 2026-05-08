@@ -29,11 +29,12 @@ type fakeAdapter struct {
 	exitCB func(err error)
 }
 
-func (f *fakeAdapter) Name() string                                   { return "fake" }
-func (f *fakeAdapter) Version(ctx context.Context) (string, error)    { return "1.0", nil }
-func (f *fakeAdapter) Dimensions() []string                            { return []string{"config"} }
-func (f *fakeAdapter) Restore(ctx context.Context, dim string, p []byte) error { return nil }
-func (f *fakeAdapter) Readiness(ctx context.Context) error             { return nil }
+func (f *fakeAdapter) Name() string                                                 { return "fake" }
+func (f *fakeAdapter) Version(ctx context.Context) (string, error)                  { return "1.0", nil }
+func (f *fakeAdapter) Dimensions() []string                                          { return []string{"config"} }
+func (f *fakeAdapter) Restore(ctx context.Context, dim string, p []byte) error       { return nil }
+func (f *fakeAdapter) EvolutionFor(ctx context.Context, dim string) ([]byte, error)  { return nil, nil }
+func (f *fakeAdapter) Readiness(ctx context.Context) error                           { return nil }
 
 func (f *fakeAdapter) Start(ctx context.Context, rt framework.RuntimeContext) (framework.StartResult, error) {
 	atomic.AddInt32(&f.startCalls, 1)

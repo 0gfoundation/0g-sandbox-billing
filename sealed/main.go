@@ -33,6 +33,7 @@ import (
 	"seal-verify/internal/proxy"
 	"seal-verify/internal/report"
 	"seal-verify/internal/state"
+	"seal-verify/internal/watcher"
 )
 
 const bootstrapTimeout = 10 * time.Minute
@@ -139,6 +140,14 @@ func runMainPipeline(cfg *config.Bootstrap, agent *state.Agent, adapter *opencla
 		return
 	}
 	logger.Logf("OK   agent ready (upstream listening, agentState armed, supervisor active)")
+
+	// Start the iData watcher: polls adapter.EvolutionFor for each dim every
+	// 30s, computes sha256, updates state.currentSnapshot when drift is
+	// detected. Drift is visible in the bootstrap log via state.UpdateCurrent's
+	// own log line. No upload happens here — the evaluator (Phase 4) decides
+	// when chain push is appropriate.
+	go watcher.New(adapter, agent, watcher.Config{}).Run(context.Background())
+
 	report.Status(cfg.AttestorURL, agentSealPriv, cfg.Attestation.SealID, "running", "")
 }
 

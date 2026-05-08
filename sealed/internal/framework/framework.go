@@ -35,6 +35,18 @@ type Framework interface {
 	// commute and be idempotent (see EVOLUTION_DESIGN.md 7.2).
 	Restore(ctx context.Context, dim string, plaintext []byte) error
 
+	// EvolutionFor returns the canonical plaintext bytes representing the
+	// agent's current state for the given dimension. Used by the watcher
+	// to detect drift against state.currentSnapshot, and by the uploader
+	// to encrypt + push to chain.
+	//
+	// MUST be deterministic: same in-memory state must produce identical
+	// bytes (so sha256 comparisons work). Implementations marshal with
+	// stable field ordering.
+	//
+	// Returns ErrUnsupportedDim for dim names the adapter doesn't handle.
+	EvolutionFor(ctx context.Context, dim string) ([]byte, error)
+
 	// Start spawns the agent process based on the previously-Restored state.
 	// Returns the upstream URL the proxy should forward to, plus an opaque
 	// secret (e.g. openclaw token) for the /_seal/auth flow.
@@ -60,6 +72,10 @@ type Framework interface {
 type Reloadable interface {
 	Reload(ctx context.Context, changedDim string) error
 }
+
+// ErrUnsupportedDim is returned by EvolutionFor / Restore when an adapter
+// is asked to act on a dim label it doesn't understand.
+var ErrUnsupportedDim = fmt.Errorf("framework: dim not supported by this adapter")
 
 // RuntimeContext is the per-Start environment passed to adapters. Owners of
 // secrets (API keys etc.) populate it before calling Start.
