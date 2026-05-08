@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/ethereum/go-ethereum/crypto"
@@ -110,6 +111,16 @@ func InjectSeal(body []byte, teeKey *ecdsa.PrivateKey, imageHash string) ([]byte
 	}
 	env["SANDBOX_SEAL_KEY"] = privHex
 	env["SANDBOX_SEAL_ATTESTATION"] = string(attestationJSON)
+
+	// SANDBOX_PROXY_DOMAIN lets bootstrap inside the sealed container
+	// compose its own public URL by combining this host:port with the
+	// Daytona-injected DAYTONA_SANDBOX_ID. We don't know the UUID here
+	// (Daytona assigns it after this create call returns) but the proxy
+	// domain is static and known at this point — see EVOLUTION_DESIGN
+	// section 15.5 for the full URL assembly contract.
+	if pd := os.Getenv("PROXY_DOMAIN"); pd != "" {
+		env["SANDBOX_PROXY_DOMAIN"] = pd
+	}
 	m["env"] = env
 
 	return json.Marshal(m)

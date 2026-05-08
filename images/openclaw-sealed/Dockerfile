@@ -6,7 +6,7 @@
 # Then the same process serves :8080 as a signed reverse-proxy in front of
 # openclaw on :3284.
 #
-# Build context must be the repo root (bootstrap source is in test/sealed/):
+# Build context must be the repo root (bootstrap source is in sealed/):
 #   docker build -t openclaw-sealed:0.1.0 -f images/openclaw-sealed/Dockerfile .
 
 # Stage 1 — 0g-storage-client (used by bootstrap to download intelligent data).
@@ -17,12 +17,13 @@ RUN git clone --depth 1 https://github.com/0gfoundation/0g-storage-client.git
 WORKDIR /src/0g-storage-client
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/0g-storage-client .
 
-# Stage 2 — bootstrap binary from test/sealed/.
+# Stage 2 — bootstrap binary from sealed/.
 FROM golang:1.24-alpine AS bootstrap-builder
 WORKDIR /app
-COPY test/sealed/go.mod test/sealed/go.sum ./
+COPY sealed/go.mod sealed/go.sum ./
 RUN go mod download
-COPY test/sealed/*.go ./
+COPY sealed/main.go ./
+COPY sealed/internal/ ./internal/
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o bootstrap .
 
 # Stage 3 — runtime: openclaw image already has node + openclaw + nvm PATH set.
