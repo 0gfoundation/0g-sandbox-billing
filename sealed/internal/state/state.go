@@ -1,20 +1,31 @@
-// Package state holds the global agent state that multiple modules read from.
+// Package state holds the global agent state shared across modules:
+// identity material (agent_seal_priv, sealID, owner), runtime metadata
+// (upstreamURL, gateway authToken, agentConfig), and the iData snapshot
+// pair used by serve-proof and the evolution flow.
 //
-// In the current single-config implementation, this is just a thread-safe
-// container for the post-bootstrap identity (agent_seal_priv, upstream URL,
-// owner address, dataHashes, etc.) that the proxy and report modules
-// consume. The State enum and event channel will grow as Phase 4 (evolution)
-// and Phase 5 (manager-driven restarts) come online.
+// Two snapshots are tracked side-by-side per dimension:
+//
+//	chainSnapshot   — last state confirmed on chain. Updated only after
+//	                  uploader receives a tx receipt.
+//	currentSnapshot — agent's actual runtime state. Updated whenever a
+//	                  watcher detects an in-memory state change.
+//
+// Bootstrap seeds both snapshots from the same chain entry so they start
+// equal. Agent self-modification (e.g. dashboard upgrade) drifts current
+// ahead of chain. The evaluator periodically diffs the two snapshots and
+// decides when to push current → chain via the uploader, which then
+// re-syncs chainSnapshot. serve-proof always signs the current snapshot
+// so responses reflect the agent's truest state.
 package state
 
 import (
 	"sort"
 	"sync"
+
+	"seal-verify/internal/logger"
 )
 
-// Phase reflects where in the bootstrap/run lifecycle the agent is. Used
-// indirectly via the readiness of agentSealPriv/upstreamURL today; will gate
-// /hello, proxy serving, and reporter output once the state machine lands.
+// Phase reflects where in the bootstrap/run lifecycle the agent is.
 type Phase int
 
 const (
@@ -26,8 +37,8 @@ const (
 )
 
 // AgentConfig is the abstract config envelope decrypted from the iData entry
-// labelled "config". It is framework-agnostic; the framework adapter unpacks
-// the relevant subset (e.g. openclaw maps Inference -> agents.defaults.model).
+// labelled "config". Framework-agnostic; the framework adapter unpacks the
+// relevant subset (e.g. openclaw maps Inference -> agents.defaults.model).
 type AgentConfig struct {
 	Framework struct {
 		Name           string `json:"name"`
@@ -45,8 +56,25 @@ type AgentConfig struct {
 	Skills []any `json:"skills"`
 }
 
-// Agent is the live shared state between bootstrap, framework adapter, manager,
-// proxy, and report modules. Read via Snapshot(), written via Set() / Clear().
+// DimEntry captures a single dimension's state in either snapshot.
+//
+//   - ContentHash is sha256 of the dimension's plaintext (in-memory canonical
+//     bytes). Used by serve-proof and by the evaluator's diff.
+//   - DataHash is the 0g-storage root hash on chain. Empty in current
+//     snapshot until the dim has been uploaded; equals chain's storage root
+//     in chain snapshot.
+type DimEntry struct {
+	ContentHash string // sha256 hex of plaintext
+	DataHash    string // 0g-storage root hex (chain), "" if not yet uploaded
+}
+
+// Snapshot bundles the per-dim DimEntry map plus a sorted view used for
+// serve-proof's data_hashes field.
+type Snapshot struct {
+	PerDim map[string]DimEntry
+}
+
+// Agent is the live shared state.
 type Agent struct {
 	mu            sync.RWMutex
 	phase         Phase
@@ -55,23 +83,31 @@ type Agent struct {
 	sealID        string
 	owner         string
 	authToken     string
-	dataHashes    []string
 	cfg           *AgentConfig
+
+	// Two snapshots; see package doc.
+	chainSnapshot   Snapshot
+	currentSnapshot Snapshot
 }
 
-// New constructs an Agent in PhaseBootstrapping with no identity loaded.
+// New constructs an Agent in PhaseBootstrapping.
 func New() *Agent {
-	return &Agent{phase: PhaseBootstrapping}
+	return &Agent{
+		phase:           PhaseBootstrapping,
+		chainSnapshot:   Snapshot{PerDim: map[string]DimEntry{}},
+		currentSnapshot: Snapshot{PerDim: map[string]DimEntry{}},
+	}
 }
 
-// Snapshot returns a copy of the current agent state. Returned slices are
-// copies; mutating them does not affect the underlying state.
+// ── Identity / lifecycle accessors ──────────────────────────────────────────
+
+// Snapshot returns a copy of the agent's current identity material plus the
+// current sorted data hashes (for serve-proof). Callers cannot mutate the
+// returned slice.
 func (a *Agent) Snapshot() (priv []byte, upstream, sealID, owner, token string, dataHashes []string, cfg *AgentConfig) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	dh := make([]string, len(a.dataHashes))
-	copy(dh, a.dataHashes)
-	return a.agentSealPriv, a.upstreamURL, a.sealID, a.owner, a.authToken, dh, a.cfg
+	return a.agentSealPriv, a.upstreamURL, a.sealID, a.owner, a.authToken, a.sortedCurrentLocked(), a.cfg
 }
 
 // Phase returns the current lifecycle phase.
@@ -81,16 +117,19 @@ func (a *Agent) Phase() Phase {
 	return a.phase
 }
 
-// SetPhase updates the lifecycle phase only; identity fields are untouched.
+// SetPhase updates the lifecycle phase.
 func (a *Agent) SetPhase(p Phase) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.phase = p
 }
 
-// Set arms the agent with all post-bootstrap identity fields. dataHashes
-// are stored sorted lex-ascending. Transitions phase to PhaseRunning.
-func (a *Agent) Set(priv []byte, upstream, sealID, owner, token string, dataHashes []string, cfg *AgentConfig) {
+// Set arms identity + runtime fields (called by manager on start / restart).
+// Snapshot data is NOT touched here — bootstrap seeds via SeedSnapshots and
+// runtime watchers update via UpdateCurrent.
+//
+// Transitions phase to PhaseRunning.
+func (a *Agent) Set(priv []byte, upstream, sealID, owner, token string, cfg *AgentConfig) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.agentSealPriv = priv
@@ -98,17 +137,12 @@ func (a *Agent) Set(priv []byte, upstream, sealID, owner, token string, dataHash
 	a.sealID = sealID
 	a.owner = owner
 	a.authToken = token
-	dh := make([]string, len(dataHashes))
-	copy(dh, dataHashes)
-	sort.Strings(dh)
-	a.dataHashes = dh
 	a.cfg = cfg
 	a.phase = PhaseRunning
 }
 
-// Clear resets all identity fields back to zero values. Transitions phase
-// to PhaseBootstrapping. Used when the agent process exits and the proxy
-// must stop accepting requests.
+// Clear resets identity fields and snapshots. Used when the agent process
+// exits and the proxy must stop accepting requests. Phase -> Bootstrapping.
 func (a *Agent) Clear() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -117,7 +151,132 @@ func (a *Agent) Clear() {
 	a.sealID = ""
 	a.owner = ""
 	a.authToken = ""
-	a.dataHashes = nil
 	a.cfg = nil
+	a.chainSnapshot = Snapshot{PerDim: map[string]DimEntry{}}
+	a.currentSnapshot = Snapshot{PerDim: map[string]DimEntry{}}
 	a.phase = PhaseBootstrapping
+}
+
+// ── Snapshot management ─────────────────────────────────────────────────────
+
+// SeedSnapshots initialises both chainSnapshot and currentSnapshot for a
+// dimension. Called by bootstrap once per decrypted iData entry. Both
+// snapshots start equal so currentDataHashes initially matches what's on
+// chain.
+//
+// contentHash is sha256(plaintext). dataHash is the 0g-storage root hex
+// from the iData entry on chain.
+func (a *Agent) SeedSnapshots(dim, contentHash, dataHash string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	entry := DimEntry{ContentHash: contentHash, DataHash: dataHash}
+	a.chainSnapshot.PerDim[dim] = entry
+	a.currentSnapshot.PerDim[dim] = entry
+	logger.Logf("iData seed: dim=%s content=%s chain_root=%s",
+		dim, shortHash(contentHash), shortHash(dataHash))
+}
+
+// UpdateCurrent advances the current snapshot for a dimension. Called by
+// the watcher when adapter.EvolutionFor reveals a content hash that
+// differs from currentSnapshot's last value.
+//
+// chain snapshot is intentionally NOT touched — only RecordChainUpload
+// can move it forward, and only after a confirmed tx.
+func (a *Agent) UpdateCurrent(dim, contentHash string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	prev := a.currentSnapshot.PerDim[dim]
+	if prev.ContentHash == contentHash {
+		return // no change
+	}
+	a.currentSnapshot.PerDim[dim] = DimEntry{
+		ContentHash: contentHash,
+		// DataHash carries forward; it'll be replaced once this contentHash
+		// gets uploaded and chain confirms a new storage root.
+		DataHash: prev.DataHash,
+	}
+	logger.Logf("iData current changed: dim=%s content=%s -> %s (chain still at %s; awaiting evolution upload)",
+		dim, shortHash(prev.ContentHash), shortHash(contentHash), shortHash(prev.DataHash))
+}
+
+// RecordChainUpload syncs the chain snapshot for a dimension. Called by the
+// uploader after a sealUpdate tx receipt confirms.
+//
+// Updates BOTH snapshots: chainSnapshot reflects the new on-chain state,
+// and currentSnapshot's DataHash is also bumped (current's ContentHash
+// already matches what was uploaded; we just attach the new storage root).
+func (a *Agent) RecordChainUpload(dim, contentHash, dataHash string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	prev := a.chainSnapshot.PerDim[dim]
+	a.chainSnapshot.PerDim[dim] = DimEntry{ContentHash: contentHash, DataHash: dataHash}
+	if cur, ok := a.currentSnapshot.PerDim[dim]; ok && cur.ContentHash == contentHash {
+		a.currentSnapshot.PerDim[dim] = DimEntry{ContentHash: contentHash, DataHash: dataHash}
+	}
+	logger.Logf("iData chain uploaded: dim=%s content=%s chain_root=%s -> %s",
+		dim, shortHash(contentHash), shortHash(prev.DataHash), shortHash(dataHash))
+}
+
+// CurrentDataHashes returns the sorted hex content-hashes of the current
+// snapshot, for serve-proof's data_hashes field. Hashes reflect agent's
+// truest in-memory state at the moment of the call.
+func (a *Agent) CurrentDataHashes() []string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.sortedCurrentLocked()
+}
+
+// ChainDataHashes returns the sorted hex content-hashes that are confirmed
+// on chain. Used by the evaluator's diff and for diagnostics.
+func (a *Agent) ChainDataHashes() []string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	out := make([]string, 0, len(a.chainSnapshot.PerDim))
+	for _, e := range a.chainSnapshot.PerDim {
+		out = append(out, e.ContentHash)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// HasChanges reports whether currentSnapshot differs from chainSnapshot in
+// any dimension. Used by the evaluator as a fast pre-check before any
+// strategy evaluation.
+func (a *Agent) HasChanges() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if len(a.currentSnapshot.PerDim) != len(a.chainSnapshot.PerDim) {
+		return true
+	}
+	for dim, cur := range a.currentSnapshot.PerDim {
+		ch, ok := a.chainSnapshot.PerDim[dim]
+		if !ok || ch.ContentHash != cur.ContentHash {
+			return true
+		}
+	}
+	return false
+}
+
+// ── Internal helpers ────────────────────────────────────────────────────────
+
+// sortedCurrentLocked must be called with a.mu held (read or write).
+func (a *Agent) sortedCurrentLocked() []string {
+	out := make([]string, 0, len(a.currentSnapshot.PerDim))
+	for _, e := range a.currentSnapshot.PerDim {
+		out = append(out, e.ContentHash)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// shortHash returns the first 10 chars of a hex string (with optional 0x
+// prefix preserved) for log-friendly output. Empty input -> "(none)".
+func shortHash(h string) string {
+	if h == "" {
+		return "(none)"
+	}
+	if len(h) > 12 {
+		return h[:12] + "…"
+	}
+	return h
 }

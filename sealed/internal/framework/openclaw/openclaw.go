@@ -41,8 +41,16 @@ const (
 type Adapter struct {
 	mu        sync.RWMutex
 	cfg       *state.AgentConfig // most recently Restored "config" dimension
-	authToken string             // gateway auth token, generated at Start time
+	authToken string             // gateway auth token; generated on first Start, reused on every restart
 	cmd       *exec.Cmd          // running gateway process; nil before Start / after exit
+
+	// initialized is set after the first successful Start. Subsequent Start
+	// calls (i.e. supervisor restarts) skip the npm install + openclaw.json
+	// rewrite + token generation steps so agent self-modifications (dashboard
+	// upgrade, plugin install, config edits) are not silently overwritten.
+	// EVOLUTION_DESIGN principle: outer framework does not interfere with
+	// agent self-modification; it only keeps the agent alive.
+	initialized bool
 }
 
 // New returns a fresh Adapter and registers it as "openclaw".
@@ -102,15 +110,26 @@ func (a *Adapter) Restore(ctx context.Context, dim string, plaintext []byte) err
 	}
 }
 
-// Start writes ~/.openclaw/openclaw.json from the in-memory config, installs
-// the requested openclaw runtime, and spawns `openclaw gateway run`. Blocks
-// until the gateway accepts TCP connections on 127.0.0.1:upstreamPort.
+// Start launches `openclaw gateway run` and blocks until the gateway accepts
+// TCP connections on 127.0.0.1:upstreamPort.
 //
-// Returns the upstream URL + the gateway auth token (which /_seal/auth will
-// hand back to a verified owner).
+// Two paths:
+//
+//   - First call (initialized=false): full bootstrap — npm install the version
+//     specified by iData, write openclaw.json from cfg, generate auth token.
+//   - Subsequent calls (supervisor restart): just spawn. The version installed
+//     by agent self-modification (e.g. dashboard upgrade), the openclaw.json
+//     it edited, and the existing auth token are all preserved. The platform
+//     does not interfere with agent state across restarts.
+//
+// Returns upstream URL + gateway auth token (which /_seal/auth hands back
+// to a verified owner). Token is stable across restarts so the dashboard
+// stays signed in.
 func (a *Adapter) Start(ctx context.Context, rt framework.RuntimeContext) (framework.StartResult, error) {
 	a.mu.RLock()
 	cfg := a.cfg
+	cachedToken := a.authToken
+	initialized := a.initialized
 	a.mu.RUnlock()
 	if cfg == nil {
 		return framework.StartResult{}, fmt.Errorf("openclaw: no config restored before Start")
@@ -124,42 +143,52 @@ func (a *Adapter) Start(ctx context.Context, rt framework.RuntimeContext) (frame
 		return framework.StartResult{}, fmt.Errorf("inference.model missing")
 	}
 
-	// openclaw v2026.3.8 has no agent-wide system_prompt slot — surface in
-	// the log only.
-	if cfg.Persona.SystemPrompt != "" {
-		logger.Logf("note: persona.system_prompt provided (%d chars) but openclaw has "+
-			"no gateway-level slot for it; ignoring in openclaw.json",
-			len(cfg.Persona.SystemPrompt))
+	authToken := cachedToken
+
+	if !initialized {
+		// First Start — full bootstrap from iData.
+		if cfg.Persona.SystemPrompt != "" {
+			logger.Logf("note: persona.system_prompt provided (%d chars) but openclaw has "+
+				"no gateway-level slot for it; ignoring in openclaw.json",
+				len(cfg.Persona.SystemPrompt))
+		}
+
+		newToken, err := randomTokenHex(32)
+		if err != nil {
+			return framework.StartResult{}, fmt.Errorf("generate openclaw auth token: %w", err)
+		}
+		authToken = newToken
+
+		if err := writeOpenclawJSON(provider, cfg.Inference.Model, cfg.Inference.Fallbacks, authToken); err != nil {
+			return framework.StartResult{}, err
+		}
+
+		if err := installOpenclaw(cfg.Framework.PackageVersion); err != nil {
+			return framework.StartResult{}, err
+		}
+
+		if out, err := exec.Command("openclaw", "config", "set", "gateway.mode", "local").CombinedOutput(); err != nil {
+			return framework.StartResult{}, fmt.Errorf("openclaw config set: %v: %s", err, strings.TrimSpace(string(out)))
+		}
+	} else {
+		// Restart — agent self-mods are preserved. Verify the binary is still
+		// installed (paranoid sanity check; if a plugin uninstalled openclaw
+		// during runtime we'll fail fast instead of spawning a half-broken state).
+		if _, err := exec.Command("openclaw", "--version").Output(); err != nil {
+			return framework.StartResult{}, fmt.Errorf("openclaw binary missing on restart: %w", err)
+		}
+		logger.Logf("openclaw restart: skipping npm install + openclaw.json rewrite (preserving agent self-modifications)")
 	}
 
-	authToken, err := randomTokenHex(32)
-	if err != nil {
-		return framework.StartResult{}, fmt.Errorf("generate openclaw auth token: %w", err)
-	}
-
-	if err := writeOpenclawJSON(provider, cfg.Inference.Model, cfg.Inference.Fallbacks, authToken); err != nil {
-		return framework.StartResult{}, err
-	}
-
+	// Always export the inference provider API key into bootstrap's env so
+	// spawnGateway's whitelist can pass it to the new openclaw subprocess.
+	// This is spawn config (lifetime = next subprocess), not agent state.
 	if err := exportAPIKey(provider, rt.APIKey); err != nil {
 		return framework.StartResult{}, err
 	}
 
-	if err := installOpenclaw(cfg.Framework.PackageVersion); err != nil {
-		return framework.StartResult{}, err
-	}
-
-	if out, err := exec.Command("openclaw", "config", "set", "gateway.mode", "local").CombinedOutput(); err != nil {
-		return framework.StartResult{}, fmt.Errorf("openclaw config set: %v: %s", err, strings.TrimSpace(string(out)))
-	}
-
-	// Surface the sandbox's public URL to the LLM via TOOLS.md system prompt
-	// injection (deployment-agnostic instruction telling the agent to read
-	// AGENT_PUBLIC_URL env at runtime). The actual URL value lives in env,
-	// keeping TOOLS.md content reusable across deployments.
-	//
-	// AGENT_PUBLIC_URL itself is added to the openclaw subprocess env in
-	// spawnGateway() below, so the agent can `exec printenv AGENT_PUBLIC_URL`.
+	// Always upsert the platform section in TOOLS.md (idempotent, marker-based;
+	// owner / agent content elsewhere in the file is preserved).
 	if err := upsertPlatformSection(toolsMDPath, rt.PublicURL); err != nil {
 		logger.Logf("warn: upsert TOOLS.md platform section: %v", err)
 	} else if rt.PublicURL != "" {
@@ -173,6 +202,7 @@ func (a *Adapter) Start(ctx context.Context, rt framework.RuntimeContext) (frame
 	a.mu.Lock()
 	a.cmd = cmd
 	a.authToken = authToken
+	a.initialized = true
 	a.mu.Unlock()
 
 	addr := fmt.Sprintf("127.0.0.1:%d", upstreamPort)

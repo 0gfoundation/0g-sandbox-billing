@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -125,12 +126,19 @@ func runMainPipeline(cfg *config.Bootstrap, agent *state.Agent, adapter *opencla
 
 	logger.Logf("")
 	logger.Logf("--- Starting agent ---")
-	if err := startAgent(adapter, agent, res, agentSealPriv, cfg.APIKey, cfg.PublicURL, cfg.Attestation.SealID); err != nil {
+	// onFailed is invoked by the manager exactly once if the supervisor
+	// exhausts restart retries. Reports an "error" status to the attestor
+	// so the platform can decide whether to recreate the sandbox.
+	onFailed := func(err error) {
+		logger.Logf("FAIL supervisor: max retries exceeded: %v", err)
+		report.Status(cfg.AttestorURL, agentSealPriv, cfg.Attestation.SealID, "error", "supervisor exhausted retries: "+err.Error())
+	}
+	if err := startAgent(adapter, agent, res, agentSealPriv, cfg.APIKey, cfg.PublicURL, cfg.Attestation.SealID, onFailed); err != nil {
 		logger.Logf("FAIL agent: %v", err)
 		report.Status(cfg.AttestorURL, agentSealPriv, cfg.Attestation.SealID, "error", err.Error())
 		return
 	}
-	logger.Logf("OK   agent ready (upstream listening, agentState armed)")
+	logger.Logf("OK   agent ready (upstream listening, agentState armed, supervisor active)")
 	report.Status(cfg.AttestorURL, agentSealPriv, cfg.Attestation.SealID, "running", "")
 }
 
@@ -259,14 +267,36 @@ func decryptEntry(ctx context.Context, idx int, d chain.IntelligentData, sealedK
 	return decryptedEntry{Role: desc.Role, DataHash: d.DataHash, Plaintext: plaintext}, true
 }
 
-// startAgent dispatches each decrypted entry to the framework adapter, then
-// invokes the manager to bring the process up. Currently routes role="config"
-// to adapter.Restore("config", ...) — Phase 4 will iterate every dimension.
-func startAgent(adapter *openclaw.Adapter, agent *state.Agent, res *chainBootstrapResult, agentSealPriv []byte, apiKey, publicURL, sealID string) error {
-	dataHashes := make([]string, 0, len(res.entries))
+// startAgent dispatches each decrypted entry to the framework adapter, seeds
+// per-dim iData snapshots into shared state, then hands off to the manager
+// which spawns the process and supervises it.
+//
+// Currently each iData entry is routed by its role string. Long-term this
+// becomes label-based dispatch (EVOLUTION_DESIGN section 4) but the
+// snapshot-seeding pattern is already correct: every entry contributes one
+// (dim, contentHash, dataHash) tuple to both chainSnapshot and currentSnapshot.
+//
+// The supervisor (manager) handles process death, liveness probes, restart
+// backoff, and the Failed-phase escalation. onFailed fires once if max
+// retries are exhausted.
+func startAgent(
+	adapter *openclaw.Adapter,
+	agent *state.Agent,
+	res *chainBootstrapResult,
+	agentSealPriv []byte,
+	apiKey, publicURL, sealID string,
+	onFailed func(err error),
+) error {
 	var configEntry *decryptedEntry
 	for i := range res.entries {
-		dataHashes = append(dataHashes, "0x"+hex.EncodeToString(res.entries[i].DataHash[:]))
+		// Dim mapping: legacy role == new dim label until Phase 5 attestor
+		// switches to multi-dimension mint. For role="config" that's
+		// dim="config".
+		dim := res.entries[i].Role
+		contentHash := sha256Hex(res.entries[i].Plaintext)
+		dataHash := "0x" + hex.EncodeToString(res.entries[i].DataHash[:])
+		agent.SeedSnapshots(dim, contentHash, dataHash)
+
 		if res.entries[i].Role == "config" && configEntry == nil {
 			configEntry = &res.entries[i]
 		}
@@ -286,17 +316,28 @@ func startAgent(adapter *openclaw.Adapter, agent *state.Agent, res *chainBootstr
 		return fmt.Errorf("openclaw adapter returned nil cfg after Restore")
 	}
 
-	mgr := manager.New(adapter, agent)
-	startRes, err := mgr.Start(ctx, framework.RuntimeContext{
-		APIKey:    apiKey,
-		PublicURL: publicURL,
+	mgr := manager.New(adapter, agent, manager.Config{
+		OnFailed: onFailed,
+		// LivenessProbeInterval / BackoffSeq / MaxRetries / GracefulStopTimeout
+		// take defaults — see manager.Config.applyDefaults.
 	})
-	if err != nil {
-		return err
-	}
+	return mgr.Start(context.Background(), manager.StartParams{
+		Runtime: framework.RuntimeContext{
+			APIKey:    apiKey,
+			PublicURL: publicURL,
+		},
+		AgentSealPriv: agentSealPriv,
+		SealID:        sealID,
+		Owner:         res.owner,
+		AgentConfig:   cfg,
+	})
+}
 
-	agent.Set(agentSealPriv, startRes.Upstream, sealID, res.owner, startRes.Secret, dataHashes, cfg)
-	return nil
+// sha256Hex computes hex-encoded sha256 over data. Used for iData content
+// hashes recorded in the snapshot pair.
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 func readFile(path string) ([]byte, error) { return os.ReadFile(path) }
