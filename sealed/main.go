@@ -142,13 +142,6 @@ func runMainPipeline(cfg *config.Bootstrap, agent *state.Agent, adapter *opencla
 	}
 	logger.Logf("OK   agent ready (upstream listening, agentState armed, supervisor active)")
 
-	// Start the iData watcher: polls adapter.EvolutionFor for each dim every
-	// 30s, computes sha256, updates state.currentSnapshot when drift is
-	// detected. Drift is visible in the bootstrap log via state.UpdateCurrent's
-	// own log line. No upload happens here -- the evaluator (Phase 4) decides
-	// when chain push is appropriate.
-	go watcher.New(adapter, agent, watcher.Config{}).Run(context.Background())
-
 	report.Status(cfg.AttestorURL, agentSealPriv, cfg.Attestation.SealID, "running", "")
 }
 
@@ -332,17 +325,26 @@ func startAgent(
 	}
 
 	// Restore framework first so its schema_version check fails fast.
-	// Other dims are order-independent (EVOLUTION_DESIGN §7.2).
 	frameworkEntry := findEntry(res.entries, "framework")
 	if err := adapter.Restore(ctx, "framework", frameworkEntry.Plaintext); err != nil {
 		return fmt.Errorf("restore framework: %w", err)
 	}
-	for i := range res.entries {
-		if res.entries[i].Role == "framework" {
-			continue
+
+	// Restore EVERY adapter dim, even when absent on chain (plaintext=nil).
+	// Adapters use zero-value config for nil and still write their disk
+	// artifacts — empty workspace markdown / empty openclaw.json sections.
+	// This pre-empts openclaw's `writeFileIfMissing` template auto-install
+	// (~8KB AGENTS.md / 650B USER.md per absent dim) which would otherwise
+	// fire on first agent activity and drift the dim falsely.
+	//
+	// Dim order is irrelevant per EVOLUTION_DESIGN §7.2 (Restore must commute).
+	for _, dim := range adapter.Dimensions() {
+		var pt []byte
+		if e := findEntry(res.entries, dim); e != nil {
+			pt = e.Plaintext
 		}
-		if err := adapter.Restore(ctx, res.entries[i].Role, res.entries[i].Plaintext); err != nil {
-			return fmt.Errorf("restore %s: %w", res.entries[i].Role, err)
+		if err := adapter.Restore(ctx, dim, pt); err != nil {
+			return fmt.Errorf("restore %s: %w", dim, err)
 		}
 	}
 
@@ -385,7 +387,48 @@ func startAgent(
 	}
 	logger.Logf("OK   baseline captured: %d dims total, %d on chain, %d absent (will add on drift)",
 		len(allDims), len(dataHashByDim), len(allDims)-len(dataHashByDim))
+
+	// Start the iData watcher inside startAgent so the OnDimDrift callback
+	// closes over the real manager (for Reload) and adapter (for
+	// ReconcileFramework). Bootstrap continues; watcher loop runs in a
+	// goroutine until the process exits.
+	watchCtx := context.Background()
+	go watcher.New(adapter, agent, watcher.Config{
+		OnDimDrift: func(dim string) { handleDimDrift(watchCtx, dim, adapter, mgr) },
+	}).Run(watchCtx)
+
 	return nil
+}
+
+// handleDimDrift is the bootstrap-side reaction to a watcher-detected
+// drift event. Currently it covers two paths:
+//
+//   - framework drift: reconcile to the validated whitelist max version
+//     (npm-install if needed, update in-memory pin), then reload the
+//     manager so the running process actually uses the new binary.
+//
+//   - any other drift: log a "[mock uploader]" note. The real uploader
+//     (encrypt + 0g-storage upload + chain.update + state.RecordChainUpload)
+//     replaces this stub once built; until then iData on chain stays at
+//     whatever it was at mint time.
+//
+// Errors are logged but never crash the watcher — drift handling is
+// best-effort (next tick will retry if the condition persists).
+func handleDimDrift(ctx context.Context, dim string, adapter *openclaw.Adapter, mgr *manager.Manager) {
+	if dim == "framework" {
+		if err := adapter.ReconcileFramework(ctx); err != nil {
+			logger.Logf("drift: ReconcileFramework: %v", err)
+			return
+		}
+		if err := mgr.Reload(ctx); err != nil {
+			logger.Logf("drift: manager.Reload: %v", err)
+			return
+		}
+		logger.Logf("drift: framework reconciled + reloaded")
+	}
+	// TODO(uploader): build sealedKey, ciphertext, root_hash; call
+	// chain.update; on tx receipt call agent.RecordChainUpload.
+	logger.Logf("[mock uploader] would push dim=%q to chain", dim)
 }
 
 // openclawSettleDelay is how long bootstrap waits after mgr.Start succeeds

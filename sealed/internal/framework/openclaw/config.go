@@ -56,25 +56,36 @@ type inferenceConfig struct {
 
 // ── knowledge dim ───────────────────────────────────────────────────────────
 //
-// knowledge dim plaintext = tar.gz with:
+// knowledge dim plaintext is JSON carrying the workspace markdown files
+// that define what the agent knows. Each is written to disk by Restore
+// BEFORE openclaw spawns, so openclaw's `writeFileIfMissing` template
+// fallback is a no-op — we own the content, not the openclaw boilerplate.
 //
-//	memory.md        → MemoryMD        (workspace/MEMORY.md)
-//	dreams.md        → DreamsMD        (workspace/DREAMS.md)
-//	user.md          → UserMD          (workspace/memories/USER.md)
-//	agents.md        → AgentsMD        (workspace/AGENTS.md)
-//	memory.json      → Memory          (openclaw.json `memory.*`)
-//	session.json     → Session         (openclaw.json `session.*`)
-//	manifest.json    → Manifest        (large-file refs; v0 empty)
+// TOOLS.md is special: it has a platform-injected section bracketed by
+// `<!-- 0g-platform-injected:* -->` markers carrying the per-deployment
+// public URL guidance. EvolutionFor strips that section before computing
+// the dim's content; only the owner-authored portion travels via iData.
+// Same field can therefore round-trip through iTransferFrom without
+// leaking the source sandbox's URL into the destination.
+//
+// NOT included here:
+//
+//   - workspace/memory/<YYYY-MM-DD>.md — per-day session log, grows every
+//     turn. The promotion step picks qualified entries into MEMORY.md; the
+//     daily logs themselves are raw conversation history, not knowledge.
+//   - openclaw.json `memory.*` / `session.*` — runtime engine config
+//     (memory backend choice, session timeouts), not knowledge content.
 
 type knowledgeConfig struct {
-	MemoryMD string `json:"memory_md,omitempty"`
-	DreamsMD string `json:"dreams_md,omitempty"`
-	UserMD   string `json:"user_md,omitempty"`
-	AgentsMD string `json:"agents_md,omitempty"`
+	MemoryMD string `json:"memory_md,omitempty"` // workspace/MEMORY.md (consolidated long-term memory)
+	DreamsMD string `json:"dreams_md,omitempty"` // workspace/DREAMS.md (reflection logs)
+	UserMD   string `json:"user_md,omitempty"`   // workspace/USER.md (user model)
+	AgentsMD string `json:"agents_md,omitempty"` // workspace/AGENTS.md (agent self-guide)
+	ToolsMD  string `json:"tools_md,omitempty"`  // workspace/TOOLS.md owner content (platform marker section stripped)
 
-	Memory  json.RawMessage `json:"memory,omitempty"`
-	Session json.RawMessage `json:"session,omitempty"`
-
+	// Manifest is a sealed-side bookkeeping field for future large-file
+	// references (e.g. when MEMORY.md grows to MB and we want to reference
+	// it via 0g-storage root_hash instead of inlining).
 	Manifest knowledgeManifest `json:"manifest"`
 }
 

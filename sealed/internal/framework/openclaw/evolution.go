@@ -104,11 +104,6 @@ func splitProviderModel(combined string) (provider, model string) {
 // ── knowledge ───────────────────────────────────────────────────────────────
 
 func (a *Adapter) evoKnowledge() ([]byte, error) {
-	cfg, err := loadOpenclawJSON()
-	if err != nil {
-		return nil, err
-	}
-
 	// Manifest is sealed-side state (we own the on-chain "files" pointer
 	// list), not something openclaw modifies — pull from in-memory cfg.
 	a.mu.RLock()
@@ -121,13 +116,19 @@ func (a *Adapter) evoKnowledge() ([]byte, error) {
 		manifest.Files = []knowledgeFileRef{}
 	}
 
+	// TOOLS.md gets the platform-injected section stripped out — only
+	// owner-authored content travels via iData; the per-deployment
+	// public URL guidance is regenerated each boot from rt.PublicURL
+	// in spawn.go's upsertPlatformSection.
+	rawTools := readWorkspaceFile(toolsMDPath())
+	ownerTools := string(stripPlatformInjection([]byte(rawTools)))
+
 	out := knowledgeConfig{
 		MemoryMD: readWorkspaceFile(memoryMDPath()),
 		DreamsMD: readWorkspaceFile(dreamsMDPath()),
 		UserMD:   readWorkspaceFile(userMDPath()),
 		AgentsMD: readWorkspaceFile(agentsMDPath()),
-		Memory:   section(cfg, "memory"),
-		Session:  section(cfg, "session"),
+		ToolsMD:  ownerTools,
 		Manifest: manifest,
 	}
 	return json.Marshal(&out)

@@ -152,30 +152,33 @@ func (a *Adapter) restoreKnowledge(plaintext []byte) error {
 	a.cfg.knowledge = k
 	a.mu.Unlock()
 
-	// Workspace markdown.
-	if err := writeWorkspaceFile(memoryMDPath(), k.MemoryMD); err != nil {
-		return err
-	}
-	if err := writeWorkspaceFile(dreamsMDPath(), k.DreamsMD); err != nil {
-		return err
-	}
-	if err := writeWorkspaceFile(agentsMDPath(), k.AgentsMD); err != nil {
-		return err
-	}
-	if err := writeWorkspaceFile(userMDPath(), k.UserMD); err != nil {
-		return err
+	// Write every workspace markdown file even when content is empty —
+	// openclaw's `writeFileIfMissing` template fallback only fires when
+	// the file doesn't exist, so creating the file (empty or not)
+	// suppresses the multi-KB stock template install for AGENTS.md /
+	// USER.md / TOOLS.md.
+	//
+	// TOOLS.md gets owner content here; spawn.go's upsertPlatformSection
+	// will append the per-deployment public URL section between markers
+	// before openclaw spawns. EvolutionFor strips that section back out
+	// when reading TOOLS.md, so the round-trip preserves owner content.
+	for _, f := range []struct {
+		path    string
+		content string
+	}{
+		{memoryMDPath(), k.MemoryMD},
+		{dreamsMDPath(), k.DreamsMD},
+		{userMDPath(), k.UserMD},
+		{agentsMDPath(), k.AgentsMD},
+		{toolsMDPath(), k.ToolsMD},
+	} {
+		if err := writeWorkspaceFile(f.path, f.content); err != nil {
+			return err
+		}
 	}
 
-	// openclaw.json: memory + session sections.
-	if err := updateOpenclawJSON(func(cfg map[string]any) {
-		_ = setSection(cfg, "memory", k.Memory)
-		_ = setSection(cfg, "session", k.Session)
-	}); err != nil {
-		return err
-	}
-
-	logger.Logf("openclaw.Restore[knowledge]: memory=%dB dreams=%dB user=%dB agents=%dB manifest_files=%d",
-		len(k.MemoryMD), len(k.DreamsMD), len(k.UserMD), len(k.AgentsMD), len(k.Manifest.Files))
+	logger.Logf("openclaw.Restore[knowledge]: memory=%dB dreams=%dB user=%dB agents=%dB tools=%dB manifest_files=%d",
+		len(k.MemoryMD), len(k.DreamsMD), len(k.UserMD), len(k.AgentsMD), len(k.ToolsMD), len(k.Manifest.Files))
 	return nil
 }
 

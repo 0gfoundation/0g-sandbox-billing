@@ -174,6 +174,42 @@ func (a *Adapter) Liveness(ctx context.Context) error {
 // Readiness today is the same as Liveness.
 func (a *Adapter) Readiness(ctx context.Context) error { return a.Liveness(ctx) }
 
+// ReconcileFramework collapses any framework dim drift back onto the
+// version sealed has been validated against (whitelistMax). Behaviour:
+//
+//   - If openclaw on disk already == whitelistMax: no-op.
+//   - Otherwise: npm-install whitelistMax, update in-memory cfg's
+//     package_version, return. Caller is expected to follow up with a
+//     manager.Reload to spawn the new binary.
+//
+// Caller signals: "user (or openclaw self-upgrade) brought a non-target
+// version onto disk; bring it back to the target." Same path handles
+// both "user picked something out of whitelist" and "user picked a
+// whitelisted version below max" — sealed always targets max.
+//
+// iData chain sync (uploader.Push for framework dim) is the caller's
+// responsibility, separate from reconciliation.
+func (a *Adapter) ReconcileFramework(ctx context.Context) error {
+	target := whitelistMax()
+	if target == "" {
+		return fmt.Errorf("no supported openclaw versions configured")
+	}
+	running := probeOpenclawVersion(ctx)
+	if running == target {
+		return nil
+	}
+	logger.Logf("openclaw: reconciling framework version %q -> %q (whitelistMax)", running, target)
+	if err := installOpenclaw(target); err != nil {
+		return fmt.Errorf("install %s: %w", target, err)
+	}
+	a.mu.Lock()
+	if a.cfg != nil {
+		a.cfg.framework.PackageVersion = target
+	}
+	a.mu.Unlock()
+	return nil
+}
+
 // MonitorExit runs the supplied onExit callback after the spawned process
 // exits. Wraps cmd.Wait so the manager can be notified without polling.
 func (a *Adapter) MonitorExit(onExit func(err error)) {

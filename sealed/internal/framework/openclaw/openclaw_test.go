@@ -179,14 +179,15 @@ func dimRoundTripFixture(t *testing.T) map[string][]byte {
 	}
 	out["persona"] = persona
 
-	// knowledge: bare JSON with workspace markdown + memory/session + manifest
+	// knowledge: workspace markdown files (owner content only) + manifest.
+	// tools_md must round-trip with platform section stripping handled
+	// inside evoKnowledge.
 	knowledge, err := json.Marshal(map[string]any{
 		"memory_md": "# Memory\n",
 		"dreams_md": "# Dreams\n",
 		"user_md":   "# User\n",
 		"agents_md": "# Agents\n",
-		"memory":    map[string]string{"engine": "sqlite-vec"},
-		"session":   map[string]any{},
+		"tools_md":  "# Owner tools\n",
 		"manifest":  map[string]any{"files": []any{}},
 	})
 	if err != nil {
@@ -273,6 +274,86 @@ func TestAdapter_RestoreFramework_RejectsWrongFrameworkName(t *testing.T) {
 	bad := []byte(`{"name":"langchain","package_version":"x","schema_version":1}`)
 	if err := a.Restore(context.Background(), "framework", bad); err == nil {
 		t.Errorf("expected error on framework name mismatch, got nil")
+	}
+}
+
+func TestEvoKnowledge_StripsPlatformSectionFromToolsMD(t *testing.T) {
+	useTempHome(t)
+	a := &Adapter{}
+	ctx := context.Background()
+
+	// Restore knowledge with owner content only.
+	knowledge := []byte(`{
+		"memory_md": "",
+		"dreams_md": "",
+		"user_md": "",
+		"agents_md": "",
+		"tools_md": "# Owner tool guide\n\n- prefer the exec tool\n",
+		"manifest": {"files": []}
+	}`)
+	if err := a.Restore(ctx, "knowledge", knowledge); err != nil {
+		t.Fatalf("Restore[knowledge]: %v", err)
+	}
+
+	// Simulate spawn.go: append platform section to TOOLS.md.
+	if err := upsertPlatformSection(toolsMDPath(), "http://8080-x.example:4000"); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	// Verify TOOLS.md on disk now contains BOTH owner content AND platform section.
+	disk, err := os.ReadFile(toolsMDPath())
+	if err != nil {
+		t.Fatalf("read TOOLS.md: %v", err)
+	}
+	diskStr := string(disk)
+	if !strings.Contains(diskStr, "# Owner tool guide") {
+		t.Errorf("disk TOOLS.md lost owner content: %q", diskStr)
+	}
+	if !strings.Contains(diskStr, "AGENT_PUBLIC_URL") {
+		t.Errorf("disk TOOLS.md missing platform section: %q", diskStr)
+	}
+
+	// EvolutionFor should round-trip ONLY owner content (platform section
+	// stripped) — i.e. byte-equal to what Restore originally received.
+	out, err := a.EvolutionFor(ctx, "knowledge")
+	if err != nil {
+		t.Fatalf("EvolutionFor: %v", err)
+	}
+	var k knowledgeConfig
+	if err := json.Unmarshal(out, &k); err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	// stripPlatformInjection trims trailing newlines that were added as
+	// separator before the marker — owner content's prose is preserved
+	// but the cosmetic trailing newline isn't. Watcher cares about
+	// stable bytes across evolves, not byte-equality with attestor.
+	if !strings.Contains(k.ToolsMD, "# Owner tool guide") ||
+		!strings.Contains(k.ToolsMD, "prefer the exec tool") {
+		t.Errorf("ToolsMD lost owner content: %q", k.ToolsMD)
+	}
+	if strings.Contains(k.ToolsMD, "AGENT_PUBLIC_URL") {
+		t.Errorf("ToolsMD leaked platform section into iData: %q", k.ToolsMD)
+	}
+
+	// Round-trip stability: a second Restore-then-EvolutionFor of the
+	// same TOOLS.md content must produce the same bytes (otherwise the
+	// watcher would see phantom drift on every tick).
+	roundTrip, _ := json.Marshal(map[string]any{
+		"tools_md": k.ToolsMD,
+		"manifest": map[string]any{"files": []any{}},
+	})
+	if err := a.Restore(ctx, "knowledge", roundTrip); err != nil {
+		t.Fatalf("Restore round-trip: %v", err)
+	}
+	if err := upsertPlatformSection(toolsMDPath(), "http://8080-x.example:4000"); err != nil {
+		t.Fatalf("upsert round-trip: %v", err)
+	}
+	out2, err := a.EvolutionFor(ctx, "knowledge")
+	if err != nil {
+		t.Fatalf("EvolutionFor round-trip: %v", err)
+	}
+	if !equalBytes(out, out2) {
+		t.Errorf("knowledge dim not stable across two cycles\n first=%s\n second=%s", sha(out), sha(out2))
 	}
 }
 

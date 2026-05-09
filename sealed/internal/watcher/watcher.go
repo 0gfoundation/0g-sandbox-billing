@@ -39,6 +39,14 @@ const DefaultInterval = 30 * time.Second
 type Config struct {
 	// Interval between poll cycles. Default: 30s.
 	Interval time.Duration
+
+	// OnDimDrift, if non-nil, is invoked once per drifted dim per tick
+	// (not when a dim stays stable). Hands off to the bootstrap layer
+	// for dim-specific reactions: framework drift triggers
+	// reconcile + manager.Reload; other dims may schedule an iData
+	// chain push via the uploader. Errors thrown by the callback are
+	// the caller's responsibility — watcher just dispatches.
+	OnDimDrift func(dim string)
 }
 
 func (c *Config) applyDefaults() {
@@ -149,6 +157,17 @@ func (w *Watcher) tick(ctx context.Context) {
 		logger.Logf("watcher: tick -- %d drifted: %s", driftCount, strings.Join(parts, " "))
 	} else {
 		logger.Logf("watcher: tick -- stable: %s", strings.Join(parts, " "))
+	}
+
+	// Dispatch drift callbacks AFTER logging so the summary line prints
+	// even if a callback panics (recover would still let other handlers
+	// run, but visibility into "what drifted" is preserved either way).
+	if w.cfg.OnDimDrift != nil {
+		for _, r := range results {
+			if r.drifted {
+				w.cfg.OnDimDrift(r.dim)
+			}
+		}
 	}
 }
 

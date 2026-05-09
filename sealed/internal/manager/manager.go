@@ -21,6 +21,7 @@ package manager
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -162,6 +163,37 @@ func (m *Manager) Stop(ctx context.Context) {
 	m.once.Do(func() { close(m.stopCh) })
 	_ = m.adapter.Stop(ctx, m.cfg.GracefulStopTimeout)
 	m.agent.Clear()
+}
+
+// Reload stops the running agent and re-spawns it. Used by the watcher
+// when a framework dim drift requires the binary on disk to actually
+// take effect (Node modules already loaded in memory don't get swapped
+// in-place by an npm install). Args / runtime context are replayed from
+// the StartParams captured at the initial Start.
+//
+// Concurrent Reload + auto-restart attempts coalesce on inFlight (same
+// guard as restart()).
+func (m *Manager) Reload(ctx context.Context) error {
+	if !m.inFlight.CompareAndSwap(false, true) {
+		logger.Logf("manager: reload requested while another (re-)start is in flight; skipping")
+		return nil
+	}
+	defer m.inFlight.Store(false)
+
+	logger.Logf("manager: reload — stopping current process")
+	if err := m.adapter.Stop(ctx, m.cfg.GracefulStopTimeout); err != nil {
+		return fmt.Errorf("reload stop: %w", err)
+	}
+	logger.Logf("manager: reload — spawning replacement")
+	res, err := m.adapter.Start(ctx, m.params.Runtime)
+	if err != nil {
+		m.agent.SetPhase(state.PhaseFailed)
+		return fmt.Errorf("reload start: %w", err)
+	}
+	m.armState(res)
+	m.hookLifecycle(ctx)
+	logger.Logf("manager: reload complete; back to Running")
+	return nil
 }
 
 // ── Internal lifecycle ──────────────────────────────────────────────────────
