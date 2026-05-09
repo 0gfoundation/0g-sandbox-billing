@@ -48,9 +48,15 @@ type Framework interface {
 	EvolutionFor(ctx context.Context, dim string) ([]byte, error)
 
 	// Start spawns the agent process based on the previously-Restored state.
-	// Returns the upstream URL the proxy should forward to, plus an opaque
-	// secret (e.g. openclaw token) for the /_seal/auth flow.
+	// Returns the upstream URL the proxy should forward to.
 	Start(ctx context.Context, rt RuntimeContext) (StartResult, error)
+
+	// AuthResponse returns the framework-specific JSON-encodable payload
+	// to hand back to a verified owner via /_seal/auth. proxy is responsible
+	// for the EIP-191 verification and serve-proof signing; adapter only
+	// decides what payload the verified owner should receive (e.g. control-UI
+	// token + redirect URL). Different frameworks return different shapes.
+	AuthResponse(ctx context.Context) (any, error)
 
 	// Stop gracefully terminates the agent process. SIGTERM-then-SIGKILL
 	// pattern is acceptable; honour gracefulTimeout before escalating.
@@ -86,9 +92,11 @@ type RuntimeContext struct {
 
 // StartResult is what an adapter returns when its agent process is up and
 // listening. Bootstrap arms state.Agent with these values.
+//
+// Framework-specific credentials (control-UI tokens etc.) are NOT exposed
+// here — adapter retains them privately and surfaces them via AuthResponse.
 type StartResult struct {
 	Upstream string // e.g. "http://127.0.0.1:3284"
-	Secret   string // framework-specific access credential (openclaw token)
 	PID      int
 }
 

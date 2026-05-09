@@ -173,25 +173,36 @@ func (m *Manager) armState(res framework.StartResult) {
 		res.Upstream,
 		m.params.SealID,
 		m.params.Owner,
-		res.Secret,
 		m.params.AgentConfig,
 	)
 }
 
 // hookLifecycle wires up the death watcher + liveness probe for a freshly
 // (re-)started process. Each successful Start replaces the previous hooks.
+//
+// Liveness probe is the source of truth for "agent is unreachable". Process
+// exit (cmd.Wait returning) is treated as a hint, not a verdict:
+//
+//   - non-zero exit  → real crash; restart immediately (don't wait for probe)
+//   - exit 0         → may be a framework-internal restart that fork-exec'd a
+//                      child to take over the socket (e.g. openclaw 5.x's
+//                      handleRestartAfterServerClose path). Defer to the
+//                      liveness probe; if the child actually took over,
+//                      probe stays green and we don't compete.
+//
+// Without this distinction we race openclaw's self-restart and crashloop the
+// agent (each spawn briefly listens, then exits 0 to hand off to a child we
+// don't track, but our restart preempts it).
 func (m *Manager) hookLifecycle(ctx context.Context) {
-	// Process exit watcher: cmd.Wait() returns -> trigger restart.
 	m.adapter.MonitorExit(func(err error) {
 		if err != nil {
 			logger.Logf("manager: process exited with error: %v", err)
-		} else {
-			logger.Logf("manager: process exited cleanly")
+			go m.tryRestart(ctx)
+			return
 		}
-		go m.tryRestart(ctx)
+		logger.Logf("manager: process exited cleanly; deferring to liveness probe")
 	})
 
-	// Liveness probe loop: poll Adapter.Liveness; on failure trigger restart.
 	go m.runLivenessLoop(ctx)
 }
 

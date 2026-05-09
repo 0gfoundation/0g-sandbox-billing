@@ -31,23 +31,28 @@ import (
 
 	"github.com/ethereum/go-ethereum/crypto"
 
+	"seal-verify/internal/framework"
 	"seal-verify/internal/logger"
 	"seal-verify/internal/state"
 )
 
 const authWindowSec = 300
 
-// Server wraps the HTTP server with a reference to the live agent state.
+// Server wraps the HTTP server with references to the shared agent state and
+// the framework adapter (consulted only by /_seal/auth for the framework-
+// specific response payload).
 type Server struct {
 	agent     *state.Agent
+	adapter   framework.Framework
 	publicURL string // sandbox's externally-reachable URL prefix; empty in dev
 }
 
-// New constructs a proxy.Server backed by a state.Agent. publicURL is the
-// composed external URL ("http://8080-<id>.<domain>") that /hello surfaces
-// for verifier cross-check; empty when SANDBOX_PROXY_DOMAIN is unset.
-func New(agent *state.Agent, publicURL string) *Server {
-	return &Server{agent: agent, publicURL: publicURL}
+// New constructs a proxy.Server backed by a state.Agent and a framework
+// adapter. publicURL is the composed external URL ("http://8080-<id>.<domain>")
+// that /hello surfaces for verifier cross-check; empty when
+// SANDBOX_PROXY_DOMAIN is unset.
+func New(agent *state.Agent, adapter framework.Framework, publicURL string) *Server {
+	return &Server{agent: agent, adapter: adapter, publicURL: publicURL}
 }
 
 // Listen starts an HTTP server on :8080 in a goroutine. Errors are logged
@@ -117,7 +122,7 @@ func (s *Server) handleOpenclawLog(w http.ResponseWriter, _ *http.Request) {
 // resp_body_hash, data_hashes, ts) so verifiers can confirm the response
 // originated from this attested instance.
 func (s *Server) handleHello(w http.ResponseWriter, r *http.Request) {
-	priv, _, _, owner, _, dataHashes, _ := s.agent.Snapshot()
+	priv, _, _, owner, dataHashes, _ := s.agent.Snapshot()
 	if priv == nil {
 		http.Error(w, "agent not ready", http.StatusServiceUnavailable)
 		return
@@ -153,13 +158,9 @@ func (s *Server) handleHello(w http.ResponseWriter, r *http.Request) {
 // over "0GSealAuth:0x<sealID>:<unix-ts>" and confirms the recovered signer
 // equals the on-chain NFT owner cached at bootstrap.
 func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
-	priv, _, sealID, owner, token, dataHashes, _ := s.agent.Snapshot()
+	priv, _, sealID, owner, dataHashes, _ := s.agent.Snapshot()
 	if priv == nil || owner == "" {
 		http.Error(w, "agent not ready", http.StatusServiceUnavailable)
-		return
-	}
-	if token == "" {
-		http.Error(w, "agent credential not provisioned", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -211,12 +212,27 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := map[string]any{
-		"token":         token,
-		"dashboard_url": fmt.Sprintf("/#token=%s", token),
-		"ts":            now,
+	if s.adapter == nil {
+		http.Error(w, "framework adapter not wired", http.StatusServiceUnavailable)
+		return
 	}
-	body, err := json.Marshal(resp)
+	payload, err := s.adapter.AuthResponse(r.Context())
+	if err != nil {
+		http.Error(w, "auth response: "+err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+
+	envelope := map[string]any{}
+	if m, ok := payload.(map[string]any); ok {
+		for k, v := range m {
+			envelope[k] = v
+		}
+	} else {
+		envelope["payload"] = payload
+	}
+	envelope["ts"] = now
+
+	body, err := json.Marshal(envelope)
 	if err != nil {
 		http.Error(w, "marshal: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -230,7 +246,7 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 // ── Catch-all reverse proxy ─────────────────────────────────────────────────
 
 func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
-	priv, upstream, _, _, _, dataHashes, _ := s.agent.Snapshot()
+	priv, upstream, _, _, dataHashes, _ := s.agent.Snapshot()
 	if priv == nil || upstream == "" {
 		http.Error(w, "agent not ready", http.StatusServiceUnavailable)
 		return

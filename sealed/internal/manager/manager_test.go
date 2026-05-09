@@ -35,13 +35,14 @@ func (f *fakeAdapter) Dimensions() []string                                     
 func (f *fakeAdapter) Restore(ctx context.Context, dim string, p []byte) error       { return nil }
 func (f *fakeAdapter) EvolutionFor(ctx context.Context, dim string) ([]byte, error)  { return nil, nil }
 func (f *fakeAdapter) Readiness(ctx context.Context) error                           { return nil }
+func (f *fakeAdapter) AuthResponse(ctx context.Context) (any, error)                 { return map[string]any{}, nil }
 
 func (f *fakeAdapter) Start(ctx context.Context, rt framework.RuntimeContext) (framework.StartResult, error) {
 	atomic.AddInt32(&f.startCalls, 1)
 	if f.startFn != nil {
 		return f.startFn(rt)
 	}
-	return framework.StartResult{Upstream: "http://127.0.0.1:0", Secret: "x", PID: 0}, nil
+	return framework.StartResult{Upstream: "http://127.0.0.1:0", PID: 0}, nil
 }
 
 func (f *fakeAdapter) Stop(ctx context.Context, gracefulTimeout time.Duration) error {
@@ -142,7 +143,7 @@ func TestRestart_OnExit_WithinThreshold(t *testing.T) {
 	a := &fakeAdapter{
 		startFn: func(rt framework.RuntimeContext) (framework.StartResult, error) {
 			startCh <- struct{}{}
-			return framework.StartResult{Upstream: "http://x", Secret: "s"}, nil
+			return framework.StartResult{Upstream: "http://x"}, nil
 		},
 	}
 	ag := state.New()
@@ -182,7 +183,7 @@ func TestRestart_ExhaustsRetries_EntersFailed(t *testing.T) {
 			n := atomic.AddInt32(&startCount, 1)
 			if n == 1 {
 				// First start succeeds (the initial Start).
-				return framework.StartResult{Upstream: "http://x", Secret: "s"}, nil
+				return framework.StartResult{Upstream: "http://x"}, nil
 			}
 			// All restart attempts fail.
 			return framework.StartResult{}, bootErr
@@ -229,7 +230,7 @@ func TestRestart_DoubleTriggerCoalesces(t *testing.T) {
 	a := &fakeAdapter{
 		startFn: func(rt framework.RuntimeContext) (framework.StartResult, error) {
 			startCh <- struct{}{}
-			return framework.StartResult{Upstream: "http://x", Secret: "s"}, nil
+			return framework.StartResult{Upstream: "http://x"}, nil
 		},
 	}
 	ag := state.New()

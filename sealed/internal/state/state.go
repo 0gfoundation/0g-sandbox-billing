@@ -75,6 +75,10 @@ type Snapshot struct {
 }
 
 // Agent is the live shared state.
+//
+// Framework-specific credentials (e.g. openclaw control-UI token) are NOT
+// stored here — they live inside the adapter and surface via the framework
+// interface's AuthResponse method.
 type Agent struct {
 	mu            sync.RWMutex
 	phase         Phase
@@ -82,7 +86,6 @@ type Agent struct {
 	upstreamURL   string
 	sealID        string
 	owner         string
-	authToken     string
 	cfg           *AgentConfig
 
 	// Two snapshots; see package doc.
@@ -104,10 +107,10 @@ func New() *Agent {
 // Snapshot returns a copy of the agent's current identity material plus the
 // current sorted data hashes (for serve-proof). Callers cannot mutate the
 // returned slice.
-func (a *Agent) Snapshot() (priv []byte, upstream, sealID, owner, token string, dataHashes []string, cfg *AgentConfig) {
+func (a *Agent) Snapshot() (priv []byte, upstream, sealID, owner string, dataHashes []string, cfg *AgentConfig) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	return a.agentSealPriv, a.upstreamURL, a.sealID, a.owner, a.authToken, a.sortedCurrentLocked(), a.cfg
+	return a.agentSealPriv, a.upstreamURL, a.sealID, a.owner, a.sortedCurrentLocked(), a.cfg
 }
 
 // Phase returns the current lifecycle phase.
@@ -129,14 +132,13 @@ func (a *Agent) SetPhase(p Phase) {
 // runtime watchers update via UpdateCurrent.
 //
 // Transitions phase to PhaseRunning.
-func (a *Agent) Set(priv []byte, upstream, sealID, owner, token string, cfg *AgentConfig) {
+func (a *Agent) Set(priv []byte, upstream, sealID, owner string, cfg *AgentConfig) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.agentSealPriv = priv
 	a.upstreamURL = upstream
 	a.sealID = sealID
 	a.owner = owner
-	a.authToken = token
 	a.cfg = cfg
 	a.phase = PhaseRunning
 }
@@ -150,7 +152,6 @@ func (a *Agent) Clear() {
 	a.upstreamURL = ""
 	a.sealID = ""
 	a.owner = ""
-	a.authToken = ""
 	a.cfg = nil
 	a.chainSnapshot = Snapshot{PerDim: map[string]DimEntry{}}
 	a.currentSnapshot = Snapshot{PerDim: map[string]DimEntry{}}

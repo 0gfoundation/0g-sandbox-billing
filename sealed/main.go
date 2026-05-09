@@ -18,6 +18,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -75,7 +76,7 @@ func main() {
 	// Start the HTTP server now (after we know our public URL but before the
 	// rest of bootstrap so /healthz and /log are reachable while the chain
 	// scan + agent spawn are still in flight).
-	proxy.New(agent, cfg.PublicURL).Listen()
+	proxy.New(agent, openclawAdapter, cfg.PublicURL).Listen()
 	if cfg.APIKey != "" {
 		logger.Logf("API_KEY (from env): <set, %d chars>", len(cfg.APIKey))
 	} else {
@@ -296,33 +297,37 @@ func startAgent(
 	apiKey, publicURL, sealID string,
 	onFailed func(err error),
 ) error {
-	var configEntry *decryptedEntry
-	for i := range res.entries {
-		// Dim mapping: legacy role == new dim label until Phase 5 attestor
-		// switches to multi-dimension mint. For role="config" that's
-		// dim="config".
-		dim := res.entries[i].Role
-		contentHash := sha256Hex(res.entries[i].Plaintext)
-		dataHash := "0x" + hex.EncodeToString(res.entries[i].DataHash[:])
-		agent.SeedSnapshots(dim, contentHash, dataHash)
-
-		if res.entries[i].Role == "config" && configEntry == nil {
-			configEntry = &res.entries[i]
-		}
-	}
-	if configEntry == nil {
-		return fmt.Errorf("no intelligent-data entry with role=\"config\"")
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	if err := adapter.Restore(ctx, "config", configEntry.Plaintext); err != nil {
-		return err
+	// Restore each chain entry into the adapter's in-memory state BEFORE
+	// seeding snapshots. Seed hashes come from EvolutionFor (the same source
+	// the watcher polls) so the first tick doesn't see phantom drift caused
+	// by json.Marshal output differing from the attestor's raw plaintext
+	// bytes (whitespace, field order, nil-vs-[]).
+	for i := range res.entries {
+		if err := adapter.Restore(ctx, res.entries[i].Role, res.entries[i].Plaintext); err != nil {
+			return fmt.Errorf("restore %s: %w", res.entries[i].Role, err)
+		}
 	}
 	cfg := adapter.Cfg()
 	if cfg == nil {
-		return fmt.Errorf("openclaw adapter returned nil cfg after Restore")
+		return fmt.Errorf("no intelligent-data entry with role=\"config\"")
+	}
+
+	dataHashByDim := map[string]string{}
+	for i := range res.entries {
+		dataHashByDim[res.entries[i].Role] = "0x" + hex.EncodeToString(res.entries[i].DataHash[:])
+	}
+	for _, dim := range adapter.Dimensions() {
+		bytes, err := adapter.EvolutionFor(ctx, dim)
+		if err != nil {
+			if errors.Is(err, framework.ErrUnsupportedDim) {
+				continue
+			}
+			return fmt.Errorf("EvolutionFor[%s] (seed): %w", dim, err)
+		}
+		agent.SeedSnapshots(dim, sha256Hex(bytes), dataHashByDim[dim])
 	}
 
 	mgr := manager.New(adapter, agent, manager.Config{

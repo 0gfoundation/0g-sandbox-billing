@@ -96,11 +96,11 @@ func TestClear_ResetsSnapshots(t *testing.T) {
 
 func TestSnapshot_ReturnsCurrentHashes(t *testing.T) {
 	a := New()
-	a.Set([]byte("priv"), "http://up", "sid", "owner", "tok", nil)
+	a.Set([]byte("priv"), "http://up", "sid", "owner", nil)
 	a.SeedSnapshots("config", "h1", "0xr1")
 	a.UpdateCurrent("config", "h2")
 
-	_, _, _, _, _, dh, _ := a.Snapshot()
+	_, _, _, _, dh, _ := a.Snapshot()
 	if len(dh) != 1 || dh[0] != "h2" {
 		t.Errorf("Snapshot dataHashes = %v; want [h2] (current state, not chain)", dh)
 	}

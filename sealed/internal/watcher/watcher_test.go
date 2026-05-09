@@ -29,6 +29,7 @@ func (f *fakeAdapter) Start(context.Context, framework.RuntimeContext) (framewor
 func (f *fakeAdapter) Stop(context.Context, time.Duration) error { return nil }
 func (f *fakeAdapter) Liveness(context.Context) error             { return nil }
 func (f *fakeAdapter) Readiness(context.Context) error            { return nil }
+func (f *fakeAdapter) AuthResponse(context.Context) (any, error)  { return map[string]any{}, nil }
 func (f *fakeAdapter) EvolutionFor(ctx context.Context, dim string) ([]byte, error) {
 	atomic.AddInt32(&f.calls, 1)
 	if f.evoErr != nil {
