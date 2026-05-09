@@ -93,12 +93,12 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleLog(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	fmt.Fprint(w, logger.Snapshot())
 }
 
 func (s *Server) handleOpenclawLog(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	body, err := os.ReadFile("/tmp/openclaw.log")
 	if err != nil {
 		fmt.Fprintf(w, "openclaw log not available: %v\n", err)
@@ -122,7 +122,7 @@ func (s *Server) handleOpenclawLog(w http.ResponseWriter, _ *http.Request) {
 // resp_body_hash, data_hashes, ts) so verifiers can confirm the response
 // originated from this attested instance.
 func (s *Server) handleHello(w http.ResponseWriter, r *http.Request) {
-	priv, _, _, owner, dataHashes, _ := s.agent.Snapshot()
+	priv, _, _, owner, dataHashes := s.agent.Snapshot()
 	if priv == nil {
 		http.Error(w, "agent not ready", http.StatusServiceUnavailable)
 		return
@@ -158,7 +158,7 @@ func (s *Server) handleHello(w http.ResponseWriter, r *http.Request) {
 // over "0GSealAuth:0x<sealID>:<unix-ts>" and confirms the recovered signer
 // equals the on-chain NFT owner cached at bootstrap.
 func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
-	priv, _, sealID, owner, dataHashes, _ := s.agent.Snapshot()
+	priv, _, sealID, owner, dataHashes := s.agent.Snapshot()
 	if priv == nil || owner == "" {
 		http.Error(w, "agent not ready", http.StatusServiceUnavailable)
 		return
@@ -246,7 +246,7 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 // ── Catch-all reverse proxy ─────────────────────────────────────────────────
 
 func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
-	priv, upstream, _, _, dataHashes, _ := s.agent.Snapshot()
+	priv, upstream, _, _, dataHashes := s.agent.Snapshot()
 	if priv == nil || upstream == "" {
 		http.Error(w, "agent not ready", http.StatusServiceUnavailable)
 		return

@@ -47,7 +47,9 @@ func TestWatcher_NoDrift_NoChange(t *testing.T) {
 	a.current.Store(&initial)
 
 	ag := state.New()
-	// Seed: initial content hash matches what EvolutionFor returns
+	// Watcher polls framework + adapter.Dimensions(); seed both with the
+	// same content hash so polling produces no phantom drift.
+	ag.SeedSnapshots("framework", sha256Hex(initial), "0xfw")
 	ag.SeedSnapshots("config", sha256Hex(initial), "0xroot")
 
 	w := New(a, ag, Config{Interval: 5 * time.Millisecond})
@@ -67,6 +69,7 @@ func TestWatcher_DetectsDrift(t *testing.T) {
 	a.current.Store(&v1)
 
 	ag := state.New()
+	ag.SeedSnapshots("framework", sha256Hex(v1), "0xfw")
 	ag.SeedSnapshots("config", sha256Hex(v1), "0xroot1")
 
 	w := New(a, ag, Config{Interval: 5 * time.Millisecond})
@@ -111,6 +114,7 @@ func TestWatcher_StopHaltsLoop(t *testing.T) {
 	a.current.Store(&v1)
 
 	ag := state.New()
+	ag.SeedSnapshots("framework", sha256Hex(v1), "0xfw")
 	ag.SeedSnapshots("config", sha256Hex(v1), "0xroot")
 
 	w := New(a, ag, Config{Interval: 3 * time.Millisecond})

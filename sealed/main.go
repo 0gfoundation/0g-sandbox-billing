@@ -2,7 +2,7 @@
 //
 // Phase 0  attest         - parse env, verify SANDBOX_SEAL_KEY ↔ attestation.pubkey,
 //                           recover TEE signer (and match TEE_SIGNER_ADDRESS if set)
-// Phase 1  provision      - POST /provision → ECIES-decrypt agent_seal_priv
+// Phase 1  provision      - POST /provision -> ECIES-decrypt agent_seal_priv
 // Phase 2  chain bootstrap - getAgentIdBySealId + intelligentDatasOf +
 //                           loadSealedKeys + per-entry download + AES-GCM decrypt
 // Phase 3  framework      - adapter.Restore each decrypted entry; adapter.Start
@@ -63,7 +63,7 @@ func main() {
 	// Register adapters (side-effect of New()).
 	openclawAdapter := openclaw.New()
 
-	// Shared agent state — read by proxy, written by main + manager.
+	// Shared agent state -- read by proxy, written by main + manager.
 	agent := state.New()
 
 	// Phase 0: parse env + verify attestation. Done BEFORE starting the HTTP
@@ -88,9 +88,9 @@ func main() {
 	// Each phase is best-effort; if any fails we report error to attestor
 	// and continue to serve /healthz, /log so operators can inspect.
 	if cfg.AttestorURL == "" {
-		logger.Logf("ATTESTOR_URL unset — skipping provision / bootstrap / status")
+		logger.Logf("ATTESTOR_URL unset -- skipping provision / bootstrap / status")
 	} else if cfg.ChainRPC == "" || cfg.ContractAddr == "" || cfg.FallbackIndexer == "" {
-		logger.Logf("missing required env (CHAIN_RPC_URL=%q AGENTIC_ID_ADDR=%q INDEXER_URL=%q) — skipping provision / bootstrap / status",
+		logger.Logf("missing required env (CHAIN_RPC_URL=%q AGENTIC_ID_ADDR=%q INDEXER_URL=%q) -- skipping provision / bootstrap / status",
 			cfg.ChainRPC, cfg.ContractAddr, cfg.FallbackIndexer)
 	} else {
 		runMainPipeline(cfg, agent, openclawAdapter)
@@ -100,7 +100,7 @@ func main() {
 	logger.Logf("ALL DONE")
 	logger.Flush()
 
-	// Block forever — HTTP server runs in its own goroutine.
+	// Block forever -- HTTP server runs in its own goroutine.
 	select {}
 }
 
@@ -145,7 +145,7 @@ func runMainPipeline(cfg *config.Bootstrap, agent *state.Agent, adapter *opencla
 	// Start the iData watcher: polls adapter.EvolutionFor for each dim every
 	// 30s, computes sha256, updates state.currentSnapshot when drift is
 	// detected. Drift is visible in the bootstrap log via state.UpdateCurrent's
-	// own log line. No upload happens here — the evaluator (Phase 4) decides
+	// own log line. No upload happens here -- the evaluator (Phase 4) decides
 	// when chain push is appropriate.
 	go watcher.New(adapter, agent, watcher.Config{}).Run(context.Background())
 
@@ -300,26 +300,113 @@ func startAgent(
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	// Restore each chain entry into the adapter's in-memory state BEFORE
-	// seeding snapshots. Seed hashes come from EvolutionFor (the same source
-	// the watcher polls) so the first tick doesn't see phantom drift caused
-	// by json.Marshal output differing from the attestor's raw plaintext
-	// bytes (whitespace, field order, nil-vs-[]).
+	// Required dims: framework + persona. Other adapter dims (knowledge /
+	// skills / ops) are optional -- a default mint may produce only the
+	// minimum and rely on adapter defaults for the rest. When the agent
+	// later self-modifies an absent dim (e.g. writes its first MEMORY.md),
+	// the uploader detects drift on a dim with empty chain dataHash and
+	// adds a new entry via the contract's sealUpdate ADD path.
+	//
+	// Duplicates are a hard fail per EVOLUTION_DESIGN §8.1.
+	required := []string{"framework", "persona"}
+	allDims := append([]string{"framework"}, adapter.Dimensions()...)
+
+	dataHashByDim := map[string]string{}
 	for i := range res.entries {
+		role := res.entries[i].Role
+		if _, dup := dataHashByDim[role]; dup {
+			return fmt.Errorf("duplicate iData entry for role=%q", role)
+		}
+		dataHashByDim[role] = "0x" + hex.EncodeToString(res.entries[i].DataHash[:])
+	}
+	for _, r := range required {
+		if _, ok := dataHashByDim[r]; !ok {
+			return fmt.Errorf("missing required iData entry: role=%q", r)
+		}
+	}
+	for _, dim := range allDims {
+		if _, ok := dataHashByDim[dim]; !ok {
+			logger.Logf("iData entry %q absent on chain -- using adapter defaults; "+
+				"uploader will add this dim on first drift", dim)
+		}
+	}
+
+	// Restore framework first so its schema_version check fails fast.
+	// Other dims are order-independent (EVOLUTION_DESIGN §7.2).
+	frameworkEntry := findEntry(res.entries, "framework")
+	if err := adapter.Restore(ctx, "framework", frameworkEntry.Plaintext); err != nil {
+		return fmt.Errorf("restore framework: %w", err)
+	}
+	for i := range res.entries {
+		if res.entries[i].Role == "framework" {
+			continue
+		}
 		if err := adapter.Restore(ctx, res.entries[i].Role, res.entries[i].Plaintext); err != nil {
 			return fmt.Errorf("restore %s: %w", res.entries[i].Role, err)
 		}
 	}
-	cfg := adapter.Cfg()
-	if cfg == nil {
-		return fmt.Errorf("no intelligent-data entry with role=\"config\"")
+
+	// Pre-seed every dim from post-Restore disk state. This gives /hello
+	// non-empty dataHashes immediately after mgr.Start arms phase=Running,
+	// even though openclaw hasn't finished its own initialisation yet.
+	logger.Logf("--- iData seed phase 1: post-Restore (pre-Start) ---")
+	if err := seedAllDims(ctx, adapter, agent, allDims, dataHashByDim); err != nil {
+		return err
 	}
 
-	dataHashByDim := map[string]string{}
-	for i := range res.entries {
-		dataHashByDim[res.entries[i].Role] = "0x" + hex.EncodeToString(res.entries[i].DataHash[:])
+	mgr := manager.New(adapter, agent, manager.Config{
+		OnFailed: onFailed,
+	})
+	if err := mgr.Start(context.Background(), manager.StartParams{
+		Runtime: framework.RuntimeContext{
+			APIKey:    apiKey,
+			PublicURL: publicURL,
+		},
+		AgentSealPriv: agentSealPriv,
+		SealID:        sealID,
+		Owner:         res.owner,
+	}); err != nil {
+		return err
 	}
-	for _, dim := range adapter.Dimensions() {
+
+	// Once openclaw has spawned, give it a few seconds to apply its own
+	// defaults to whatever sections we didn't pre-populate (e.g. memory
+	// engine, session config, plugins on a fresh install). Then re-seed:
+	// the post-settle disk state is the baseline the watcher compares
+	// against so openclaw's natural defaults aren't reported as drift.
+	//
+	// During the gap between mgr.Start returning and re-seeding, /hello
+	// continues to serve the pre-seed values. Slightly stale but valid.
+	logger.Logf("--- iData seed phase 2: waiting %s for openclaw to settle ---", openclawSettleDelay)
+	time.Sleep(openclawSettleDelay)
+	logger.Logf("--- iData seed phase 2: post-settle baseline capture ---")
+	if err := seedAllDims(ctx, adapter, agent, allDims, dataHashByDim); err != nil {
+		return fmt.Errorf("re-seed after settle: %w", err)
+	}
+	logger.Logf("OK   baseline captured: %d dims total, %d on chain, %d absent (will add on drift)",
+		len(allDims), len(dataHashByDim), len(allDims)-len(dataHashByDim))
+	return nil
+}
+
+// openclawSettleDelay is how long bootstrap waits after mgr.Start succeeds
+// before snapshotting the disk state as the watcher's drift baseline.
+// openclaw may rewrite openclaw.json once on first boot to apply defaults
+// to sections we didn't populate; capturing too early treats those
+// auto-applied defaults as false drift on the first watcher tick.
+const openclawSettleDelay = 5 * time.Second
+
+// seedAllDims runs adapter.EvolutionFor for each dim, hashes the output,
+// and seeds both chainSnapshot and currentSnapshot. dataHashByDim carries
+// the on-chain storage root per dim; absent dims get "" (uploader will
+// detect them by empty DataHash and add new chain entries on first drift).
+func seedAllDims(
+	ctx context.Context,
+	adapter *openclaw.Adapter,
+	agent *state.Agent,
+	dims []string,
+	dataHashByDim map[string]string,
+) error {
+	for _, dim := range dims {
 		bytes, err := adapter.EvolutionFor(ctx, dim)
 		if err != nil {
 			if errors.Is(err, framework.ErrUnsupportedDim) {
@@ -329,22 +416,7 @@ func startAgent(
 		}
 		agent.SeedSnapshots(dim, sha256Hex(bytes), dataHashByDim[dim])
 	}
-
-	mgr := manager.New(adapter, agent, manager.Config{
-		OnFailed: onFailed,
-		// LivenessProbeInterval / BackoffSeq / MaxRetries / GracefulStopTimeout
-		// take defaults — see manager.Config.applyDefaults.
-	})
-	return mgr.Start(context.Background(), manager.StartParams{
-		Runtime: framework.RuntimeContext{
-			APIKey:    apiKey,
-			PublicURL: publicURL,
-		},
-		AgentSealPriv: agentSealPriv,
-		SealID:        sealID,
-		Owner:         res.owner,
-		AgentConfig:   cfg,
-	})
+	return nil
 }
 
 // sha256Hex computes hex-encoded sha256 over data. Used for iData content
@@ -356,3 +428,14 @@ func sha256Hex(data []byte) string {
 
 func readFile(path string) ([]byte, error) { return os.ReadFile(path) }
 func removeFile(path string)                { _ = os.Remove(path) }
+
+// findEntry returns the entry with the matching role, or nil if absent.
+// Caller is expected to have validated presence beforehand.
+func findEntry(entries []decryptedEntry, role string) *decryptedEntry {
+	for i := range entries {
+		if entries[i].Role == role {
+			return &entries[i]
+		}
+	}
+	return nil
+}

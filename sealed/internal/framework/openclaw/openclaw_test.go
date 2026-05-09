@@ -1,6 +1,10 @@
 package openclaw
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -129,4 +133,162 @@ func mustRead(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(b)
+}
+
+// ── 5-dim Restore + EvolutionFor round-trip ─────────────────────────────────
+
+// useTempHome redirects openclawHome to t.TempDir() so disk-touching tests
+// don't pollute /root/.openclaw. Restores the original value after the test.
+func useTempHome(t *testing.T) {
+	t.Helper()
+	prev := openclawHome
+	openclawHome = t.TempDir()
+	t.Cleanup(func() { openclawHome = prev })
+}
+
+// dimRoundTripFixture mints a plaintext for each dim that mirrors what the
+// attestor produces in production. The test then runs Restore → EvolutionFor
+// → Restore (idempotent) → EvolutionFor and asserts byte-stability — which is
+// what makes watcher drift detection meaningful (no phantom drift on the
+// first tick or after a benign restart).
+func dimRoundTripFixture(t *testing.T) map[string][]byte {
+	t.Helper()
+	out := map[string][]byte{}
+
+	// framework: bare JSON binding
+	fb := frameworkBinding{
+		Name:           "openclaw",
+		PackageVersion: "2026.5.6",
+		SchemaVersion:  1,
+	}
+	b, err := json.Marshal(&fb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out["framework"] = b
+
+	// persona: bare JSON with system_prompt + inference + ui + talk
+	persona, err := json.Marshal(map[string]any{
+		"system_prompt": "You are Sage. DeFi helper\n",
+		"inference":     map[string]string{"provider": "anthropic", "model": "claude-opus-4-6"},
+		"ui":            map[string]string{"seamColor": "#7e57c2"},
+		"talk":          map[string]any{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out["persona"] = persona
+
+	// knowledge: bare JSON with workspace markdown + memory/session + manifest
+	knowledge, err := json.Marshal(map[string]any{
+		"memory_md": "# Memory\n",
+		"dreams_md": "# Dreams\n",
+		"user_md":   "# User\n",
+		"agents_md": "# Agents\n",
+		"memory":    map[string]string{"engine": "sqlite-vec"},
+		"session":   map[string]any{},
+		"manifest":  map[string]any{"files": []any{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out["knowledge"] = knowledge
+
+	// skills: bare JSON with all sections present (empty)
+	out["skills"] = []byte(`{"plugins":{"entries":[]},"tools":{},"web":{},"approvals":{},"audio":{},"commands":{},"agent_defaults_skills":[]}`)
+
+	// ops: bare JSON with all sections present (empty)
+	out["ops"] = []byte(`{"channels":{},"mcp":{"servers":[]},"hooks":{},"cron":{"jobs":[]},"browser":{},"bindings":[],"surfaces":{},"broadcast":{},"media":{},"messages":{},"access_groups":{},"commitments":{},"secrets":{},"acp":{},"rate_limits":{},"safety":{}}`)
+
+	return out
+}
+
+func TestAdapter_RestoreEvolutionFor_AllFiveDims_ByteStable(t *testing.T) {
+	useTempHome(t)
+	a := &Adapter{}
+	ctx := context.Background()
+	fixture := dimRoundTripFixture(t)
+
+	dims := []string{"framework", "persona", "knowledge", "skills", "ops"}
+	for _, dim := range dims {
+		if err := a.Restore(ctx, dim, fixture[dim]); err != nil {
+			t.Fatalf("Restore[%s]: %v", dim, err)
+		}
+	}
+
+	// EvolutionFor twice on the same in-memory state must return identical
+	// bytes (deterministic packing).
+	first := map[string][]byte{}
+	for _, dim := range dims {
+		// Skip the framework version probe — it's environment-dependent
+		// (would attempt to spawn `openclaw --version` which isn't installed
+		// in the test sandbox). Determinism for framework dim is exercised
+		// indirectly via probeOpenclawVersion's empty-on-error fallback.
+		b, err := a.EvolutionFor(ctx, dim)
+		if err != nil {
+			t.Fatalf("EvolutionFor[%s] (1st): %v", dim, err)
+		}
+		first[dim] = b
+	}
+	for _, dim := range dims {
+		b, err := a.EvolutionFor(ctx, dim)
+		if err != nil {
+			t.Fatalf("EvolutionFor[%s] (2nd): %v", dim, err)
+		}
+		if !equalBytes(first[dim], b) {
+			t.Errorf("dim=%s: EvolutionFor non-deterministic\n 1st sha=%s\n 2nd sha=%s",
+				dim, sha(first[dim]), sha(b))
+		}
+	}
+
+	// Round-trip: feed EvolutionFor's output back into Restore, then call
+	// EvolutionFor again. Result must equal first cycle (idempotency).
+	for _, dim := range dims {
+		if err := a.Restore(ctx, dim, first[dim]); err != nil {
+			t.Fatalf("Restore[%s] (round-trip): %v", dim, err)
+		}
+	}
+	for _, dim := range dims {
+		b, err := a.EvolutionFor(ctx, dim)
+		if err != nil {
+			t.Fatalf("EvolutionFor[%s] (round-trip): %v", dim, err)
+		}
+		if !equalBytes(first[dim], b) {
+			t.Errorf("dim=%s: round-trip drift\n 1st sha=%s\n rt  sha=%s",
+				dim, sha(first[dim]), sha(b))
+		}
+	}
+}
+
+func TestAdapter_RestoreFramework_RejectsBadSchemaVersion(t *testing.T) {
+	a := &Adapter{}
+	bad := []byte(`{"name":"openclaw","package_version":"2026.5.6","schema_version":99}`)
+	if err := a.Restore(context.Background(), "framework", bad); err == nil {
+		t.Errorf("expected error on schema_version=99, got nil")
+	}
+}
+
+func TestAdapter_RestoreFramework_RejectsWrongFrameworkName(t *testing.T) {
+	a := &Adapter{}
+	bad := []byte(`{"name":"langchain","package_version":"x","schema_version":1}`)
+	if err := a.Restore(context.Background(), "framework", bad); err == nil {
+		t.Errorf("expected error on framework name mismatch, got nil")
+	}
+}
+
+func equalBytes(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func sha(b []byte) string {
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:8])
 }

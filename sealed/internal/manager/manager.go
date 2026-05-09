@@ -88,17 +88,19 @@ func (c *Config) applyDefaults() {
 }
 
 // StartParams bundles everything manager needs to (re-)arm state on a fresh
-// Start call. The agent identity material (priv, sealID, owner, AgentConfig)
-// is captured once at the initial Start and replayed on every successful
-// restart. iData snapshots live in state.Agent and are managed by the
-// bootstrap (seed) + watcher (current) + uploader (chain) — manager does
-// not touch them.
+// Start call. The agent identity material (priv, sealID, owner) is captured
+// once at the initial Start and replayed on every successful restart. iData
+// snapshots live in state.Agent and are managed by the bootstrap (seed) +
+// watcher (current) + uploader (chain) — manager does not touch them.
+//
+// Framework-specific configuration is NOT in this struct: the manager talks
+// to the adapter through the abstract framework.Framework interface and
+// never inspects the framework's config shape.
 type StartParams struct {
 	Runtime       framework.RuntimeContext
 	AgentSealPriv []byte
 	SealID        string
 	Owner         string
-	AgentConfig   *state.AgentConfig
 }
 
 // Manager wires an Adapter to the shared agent state, supervised.
@@ -173,7 +175,6 @@ func (m *Manager) armState(res framework.StartResult) {
 		res.Upstream,
 		m.params.SealID,
 		m.params.Owner,
-		m.params.AgentConfig,
 	)
 }
 

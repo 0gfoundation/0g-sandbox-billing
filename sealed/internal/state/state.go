@@ -1,19 +1,23 @@
-// Package state holds the global agent state shared across modules:
-// identity material (agent_seal_priv, sealID, owner), runtime metadata
-// (upstreamURL, gateway authToken, agentConfig), and the iData snapshot
-// pair used by serve-proof and the evolution flow.
+// Package state holds protocol-level agent state shared across modules:
+// identity material (agent_seal_priv, sealID, owner), runtime endpoint
+// (upstreamURL), and the iData snapshot pair used by serve-proof and the
+// evolution flow.
+//
+// Framework-specific configuration (openclaw / eliza / etc.) lives inside
+// the respective adapter package -- this state package never imports
+// framework-specific types and is agnostic to which framework is loaded.
 //
 // Two snapshots are tracked side-by-side per dimension:
 //
-//	chainSnapshot   — last state confirmed on chain. Updated only after
+//	chainSnapshot   -- last state confirmed on chain. Updated only after
 //	                  uploader receives a tx receipt.
-//	currentSnapshot — agent's actual runtime state. Updated whenever a
+//	currentSnapshot -- agent's actual runtime state. Updated whenever a
 //	                  watcher detects an in-memory state change.
 //
 // Bootstrap seeds both snapshots from the same chain entry so they start
 // equal. Agent self-modification (e.g. dashboard upgrade) drifts current
 // ahead of chain. The evaluator periodically diffs the two snapshots and
-// decides when to push current → chain via the uploader, which then
+// decides when to push current -> chain via the uploader, which then
 // re-syncs chainSnapshot. serve-proof always signs the current snapshot
 // so responses reflect the agent's truest state.
 package state
@@ -36,26 +40,6 @@ const (
 	PhaseFailed
 )
 
-// AgentConfig is the abstract config envelope decrypted from the iData entry
-// labelled "config". Framework-agnostic; the framework adapter unpacks the
-// relevant subset (e.g. openclaw maps Inference -> agents.defaults.model).
-type AgentConfig struct {
-	Framework struct {
-		Name           string `json:"name"`
-		Version        string `json:"version"`
-		PackageVersion string `json:"package_version"`
-	} `json:"framework"`
-	Inference struct {
-		Provider  string   `json:"provider"`
-		Model     string   `json:"model"`
-		Fallbacks []string `json:"fallbacks"`
-	} `json:"inference"`
-	Persona struct {
-		SystemPrompt string `json:"system_prompt"`
-	} `json:"persona"`
-	Skills []any `json:"skills"`
-}
-
 // DimEntry captures a single dimension's state in either snapshot.
 //
 //   - ContentHash is sha256 of the dimension's plaintext (in-memory canonical
@@ -76,9 +60,9 @@ type Snapshot struct {
 
 // Agent is the live shared state.
 //
-// Framework-specific credentials (e.g. openclaw control-UI token) are NOT
-// stored here — they live inside the adapter and surface via the framework
-// interface's AuthResponse method.
+// Framework-specific configuration and credentials are NOT stored here --
+// they live inside the adapter and surface via the framework interface's
+// AuthResponse / EvolutionFor methods. This package stays agnostic.
 type Agent struct {
 	mu            sync.RWMutex
 	phase         Phase
@@ -86,7 +70,6 @@ type Agent struct {
 	upstreamURL   string
 	sealID        string
 	owner         string
-	cfg           *AgentConfig
 
 	// Two snapshots; see package doc.
 	chainSnapshot   Snapshot
@@ -107,10 +90,10 @@ func New() *Agent {
 // Snapshot returns a copy of the agent's current identity material plus the
 // current sorted data hashes (for serve-proof). Callers cannot mutate the
 // returned slice.
-func (a *Agent) Snapshot() (priv []byte, upstream, sealID, owner string, dataHashes []string, cfg *AgentConfig) {
+func (a *Agent) Snapshot() (priv []byte, upstream, sealID, owner string, dataHashes []string) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	return a.agentSealPriv, a.upstreamURL, a.sealID, a.owner, a.sortedCurrentLocked(), a.cfg
+	return a.agentSealPriv, a.upstreamURL, a.sealID, a.owner, a.sortedCurrentLocked()
 }
 
 // Phase returns the current lifecycle phase.
@@ -128,18 +111,17 @@ func (a *Agent) SetPhase(p Phase) {
 }
 
 // Set arms identity + runtime fields (called by manager on start / restart).
-// Snapshot data is NOT touched here — bootstrap seeds via SeedSnapshots and
+// Snapshot data is NOT touched here -- bootstrap seeds via SeedSnapshots and
 // runtime watchers update via UpdateCurrent.
 //
 // Transitions phase to PhaseRunning.
-func (a *Agent) Set(priv []byte, upstream, sealID, owner string, cfg *AgentConfig) {
+func (a *Agent) Set(priv []byte, upstream, sealID, owner string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.agentSealPriv = priv
 	a.upstreamURL = upstream
 	a.sealID = sealID
 	a.owner = owner
-	a.cfg = cfg
 	a.phase = PhaseRunning
 }
 
@@ -152,7 +134,6 @@ func (a *Agent) Clear() {
 	a.upstreamURL = ""
 	a.sealID = ""
 	a.owner = ""
-	a.cfg = nil
 	a.chainSnapshot = Snapshot{PerDim: map[string]DimEntry{}}
 	a.currentSnapshot = Snapshot{PerDim: map[string]DimEntry{}}
 	a.phase = PhaseBootstrapping
@@ -161,43 +142,65 @@ func (a *Agent) Clear() {
 // ── Snapshot management ─────────────────────────────────────────────────────
 
 // SeedSnapshots initialises both chainSnapshot and currentSnapshot for a
-// dimension. Called by bootstrap once per decrypted iData entry. Both
-// snapshots start equal so currentDataHashes initially matches what's on
-// chain.
+// dimension. Called by bootstrap once per dim. Both snapshots start equal
+// so subsequent watcher tick comparisons see no drift on first poll.
 //
 // contentHash is sha256(plaintext). dataHash is the 0g-storage root hex
-// from the iData entry on chain.
+// from the iData entry on chain -- or "" when the dim is not on chain
+// (default mint may produce only framework + persona; absent dims have
+// empty dataHash and uploader will add them on first meaningful drift).
+//
+// Logs also show whether this is a no-op (re-seed with identical content,
+// e.g. baseline didn't shift between pre- and post-settle pass) for
+// debug clarity.
 func (a *Agent) SeedSnapshots(dim, contentHash, dataHash string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	prev, exists := a.currentSnapshot.PerDim[dim]
 	entry := DimEntry{ContentHash: contentHash, DataHash: dataHash}
 	a.chainSnapshot.PerDim[dim] = entry
 	a.currentSnapshot.PerDim[dim] = entry
-	logger.Logf("iData seed: dim=%s content=%s chain_root=%s",
-		dim, shortHash(contentHash), shortHash(dataHash))
+
+	chainStatus := "off-chain"
+	if dataHash != "" {
+		chainStatus = "on-chain " + shortHash(dataHash)
+	}
+	switch {
+	case !exists:
+		logger.Logf("iData seed[init]: dim=%s content=%s %s", dim, shortHash(contentHash), chainStatus)
+	case prev.ContentHash == contentHash:
+		logger.Logf("iData seed[stable]: dim=%s content=%s %s (no shift)", dim, shortHash(contentHash), chainStatus)
+	default:
+		logger.Logf("iData seed[shift]: dim=%s content %s -> %s %s",
+			dim, shortHash(prev.ContentHash), shortHash(contentHash), chainStatus)
+	}
 }
 
-// UpdateCurrent advances the current snapshot for a dimension. Called by
-// the watcher when adapter.EvolutionFor reveals a content hash that
-// differs from currentSnapshot's last value.
+// UpdateCurrent advances the current snapshot for a dimension. Returns
+// true if the content hash actually changed (caller can use this for
+// summary logging). Called by the watcher when adapter.EvolutionFor
+// reveals a content hash that differs from currentSnapshot's last value.
 //
-// chain snapshot is intentionally NOT touched — only RecordChainUpload
+// chain snapshot is intentionally NOT touched -- only RecordChainUpload
 // can move it forward, and only after a confirmed tx.
-func (a *Agent) UpdateCurrent(dim, contentHash string) {
+func (a *Agent) UpdateCurrent(dim, contentHash string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	prev := a.currentSnapshot.PerDim[dim]
 	if prev.ContentHash == contentHash {
-		return // no change
+		return false
 	}
+	chain := a.chainSnapshot.PerDim[dim]
 	a.currentSnapshot.PerDim[dim] = DimEntry{
 		ContentHash: contentHash,
 		// DataHash carries forward; it'll be replaced once this contentHash
 		// gets uploaded and chain confirms a new storage root.
 		DataHash: prev.DataHash,
 	}
-	logger.Logf("iData current changed: dim=%s content=%s -> %s (chain still at %s; awaiting evolution upload)",
-		dim, shortHash(prev.ContentHash), shortHash(contentHash), shortHash(prev.DataHash))
+	logger.Logf("iData drift: dim=%s content %s -> %s (chain still %s, dataHash=%s)",
+		dim, shortHash(prev.ContentHash), shortHash(contentHash),
+		shortHash(chain.ContentHash), shortHash(chain.DataHash))
+	return true
 }
 
 // RecordChainUpload syncs the chain snapshot for a dimension. Called by the
@@ -277,7 +280,7 @@ func shortHash(h string) string {
 		return "(none)"
 	}
 	if len(h) > 12 {
-		return h[:12] + "…"
+		return h[:12] + "..."
 	}
 	return h
 }

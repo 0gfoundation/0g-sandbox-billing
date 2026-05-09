@@ -2,15 +2,15 @@
 // dimension's current state, hashes the result, and updates
 // state.currentSnapshot when drift is detected.
 //
-// This is the "agent → state" half of the evolution pipeline:
+// This is the "agent -> state" half of the evolution pipeline:
 //
-//	watcher (this) → state.UpdateCurrent → (proxy /hello picks up new hash)
+//	watcher (this) -> state.UpdateCurrent -> (proxy /hello picks up new hash)
 //	                                        ↓
 //	                                    evaluator decides upload
 //	                                        ↓
-//	                                    uploader → state.RecordChainUpload
+//	                                    uploader -> state.RecordChainUpload
 //
-// Watcher does NOT decide whether to upload — that's the evaluator's job.
+// Watcher does NOT decide whether to upload -- that's the evaluator's job.
 // Watcher's only mutation is state.UpdateCurrent. Logging in state's
 // UpdateCurrent makes drift visible without watcher needing to log.
 package watcher
@@ -20,6 +20,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,7 +31,7 @@ import (
 )
 
 // Default polling interval. 30s is a balance between detection latency
-// (typical evolution event = dashboard click → ~5-30s for filesystem
+// (typical evolution event = dashboard click -> ~5-30s for filesystem
 // changes to settle) and adapter call overhead (npm version probe + reads).
 const DefaultInterval = 30 * time.Second
 
@@ -69,7 +71,7 @@ func New(adapter framework.Framework, agent *state.Agent, cfg Config) *Watcher {
 // Run blocks until ctx is cancelled or Stop is called. Spawn it in a
 // goroutine; main.go does this once after the agent is up.
 func (w *Watcher) Run(ctx context.Context) {
-	logger.Logf("watcher: started (interval=%s, dims=%v)", w.cfg.Interval, w.adapter.Dimensions())
+	logger.Logf("watcher: started (interval=%s, dims=%v)", w.cfg.Interval, w.dimsToPoll())
 	ticker := time.NewTicker(w.cfg.Interval)
 	defer ticker.Stop()
 
@@ -92,23 +94,61 @@ func (w *Watcher) Stop() {
 	w.once.Do(func() { close(w.stopCh) })
 }
 
+// dimsToPoll returns the protocol-reserved "framework" plus every adapter-
+// owned dim. framework drift detection is critical (catches dashboard
+// upgrades / npm version drift) and the adapter's Dimensions() doesn't
+// include it (per EVOLUTION_DESIGN §7.1), so we prepend it here.
+func (w *Watcher) dimsToPoll() []string {
+	return append([]string{"framework"}, w.adapter.Dimensions()...)
+}
+
 // tick runs a single poll cycle: for each dim, ask adapter for current
 // canonical bytes, sha256, push to state if drifted. Errors are logged
 // per-dim and don't abort the cycle.
+//
+// At the end of each tick we emit a single-line summary so /log readers
+// can see "watcher is alive and these are the current per-dim hashes"
+// even when there's no drift. Drift events get their own detailed log
+// from state.UpdateCurrent.
 func (w *Watcher) tick(ctx context.Context) {
-	for _, dim := range w.adapter.Dimensions() {
+	type dimHash struct {
+		dim     string
+		hash    string
+		size    int
+		drifted bool
+	}
+	results := make([]dimHash, 0, 5)
+
+	for _, dim := range w.dimsToPoll() {
 		bytes, err := w.adapter.EvolutionFor(ctx, dim)
 		if err != nil {
 			if errors.Is(err, framework.ErrUnsupportedDim) {
-				continue // adapter says it doesn't track this dim
+				continue
 			}
 			logger.Logf("watcher: EvolutionFor[%s] error: %v", dim, err)
 			continue
 		}
 		hash := sha256Hex(bytes)
-		w.agent.UpdateCurrent(dim, hash)
-		// state.UpdateCurrent logs only when drift is detected; no log here
-		// when nothing changed (avoids 30s/min spam in normal steady state).
+		drifted := w.agent.UpdateCurrent(dim, hash)
+		results = append(results, dimHash{dim, hash, len(bytes), drifted})
+	}
+
+	// Single summary line per tick. Drift dims marked with !; stable dims
+	// just show their truncated hash + plaintext size.
+	var parts []string
+	driftCount := 0
+	for _, r := range results {
+		marker := ""
+		if r.drifted {
+			marker = "!"
+			driftCount++
+		}
+		parts = append(parts, fmt.Sprintf("%s%s=%s/%dB", marker, r.dim, r.hash[:8], r.size))
+	}
+	if driftCount > 0 {
+		logger.Logf("watcher: tick -- %d drifted: %s", driftCount, strings.Join(parts, " "))
+	} else {
+		logger.Logf("watcher: tick -- stable: %s", strings.Join(parts, " "))
 	}
 }
 
