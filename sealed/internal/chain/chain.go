@@ -15,18 +15,27 @@ import (
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"seal-verify/internal/logger"
 )
 
-// AgenticIDABI is the minimal subset bootstrap needs. sealedKey is NOT on
-// IntelligentData; it lives on ITransferred event entries.
+// AgenticIDABI is the minimal subset bootstrap + uploader need.
+//
+// SealedKeys live in contract state since the storage upgrade; sealedKeysOf
+// returns them directly so we don't have to scan ITransferred / Updated
+// events at boot anymore. The event is still in the ABI for completeness /
+// future indexer use, but is not parsed by sealed today.
 const AgenticIDABI = `[
   {"type":"function","name":"getAgentIdBySealId","stateMutability":"view","inputs":[{"name":"sealId","type":"bytes32"}],"outputs":[{"name":"","type":"uint256"}]},
   {"type":"function","name":"ownerOf","stateMutability":"view","inputs":[{"name":"tokenId","type":"uint256"}],"outputs":[{"name":"","type":"address"}]},
   {"type":"function","name":"intelligentDatasOf","stateMutability":"view","inputs":[{"name":"tokenId","type":"uint256"}],"outputs":[{"name":"","type":"tuple[]","components":[{"name":"dataDescription","type":"string"},{"name":"dataHash","type":"bytes32"}]}]},
+  {"type":"function","name":"sealedKeysOf","stateMutability":"view","inputs":[{"name":"tokenId","type":"uint256"}],"outputs":[{"name":"","type":"bytes[]"}]},
+  {"type":"function","name":"update","stateMutability":"nonpayable","inputs":[{"name":"tokenId","type":"uint256"},{"name":"newDatas","type":"tuple[]","components":[{"name":"dataDescription","type":"string"},{"name":"dataHash","type":"bytes32"}]},{"name":"sealedKeys","type":"bytes[]"}],"outputs":[]},
   {"type":"event","name":"ITransferred","anonymous":false,"inputs":[{"name":"from","type":"address","indexed":true},{"name":"to","type":"address","indexed":true},{"name":"tokenId","type":"uint256","indexed":true},{"name":"entries","type":"tuple[]","indexed":false,"components":[{"name":"dataHash","type":"bytes32"},{"name":"sealedKey","type":"bytes"}]}]}
 ]`
 
@@ -159,141 +168,125 @@ func (c *Client) OwnerOf(ctx context.Context, agentID *big.Int) (common.Address,
 	return addr, nil
 }
 
-// LoadSealedKeys finds the most recent ITransferred event for tokenId and
-// returns the dataHash -> sealedKey map carried in that event.
-//
-// Strategy mirrors the old bootstrap.loadSealedKeys exactly:
-//   - Phase 1: poll the head window (last transferScanChunk blocks) for up
-//     to 30s. Some RPCs are load-balanced across nodes with slightly
-//     different sync states; eth_call may reveal a freshly-minted agentId
-//     while logs from the mint block are temporarily invisible elsewhere.
-//   - Phase 2: chunked backward scan if Phase 1 exhausted.
-func (c *Client) LoadSealedKeys(ctx context.Context, tokenID *big.Int) (map[[32]byte][]byte, error) {
-	event, ok := c.abi.Events["ITransferred"]
+// SealedKeysOf reads sealedKeys[] directly from contract state — one view
+// call, no event scanning. Result is positional (sealedKeysOf[i] pairs
+// with intelligentDatasOf[i].dataHash). Returns a map keyed by dataHash
+// for legacy callers that prefer the lookup shape; ordering can be
+// recovered from intelligentDatasOf if needed.
+func (c *Client) SealedKeysOf(ctx context.Context, tokenID *big.Int) (map[[32]byte][]byte, error) {
+	data, err := c.abi.Pack("sealedKeysOf", tokenID)
+	if err != nil {
+		return nil, fmt.Errorf("pack sealedKeysOf: %w", err)
+	}
+	out, err := c.eth.CallContract(ctx, ethereum.CallMsg{To: &c.contract, Data: data}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("call sealedKeysOf: %w", err)
+	}
+	res, err := c.abi.Unpack("sealedKeysOf", out)
+	if err != nil || len(res) == 0 {
+		return nil, fmt.Errorf("unpack sealedKeysOf: %v", err)
+	}
+	keys, ok := res[0].([][]byte)
 	if !ok {
-		return nil, fmt.Errorf("ITransferred not in ABI")
-	}
-	tokenTopic := common.BigToHash(tokenID)
-	logger.Logf("ITransferred scan: tokenId=%s topic[3]=%s", tokenID.String(), tokenTopic.Hex())
-
-	const (
-		pollTimeout  = 30 * time.Second
-		pollInterval = 3 * time.Second
-	)
-
-	tryHead := func(latest uint64) (map[[32]byte][]byte, error) {
-		var from uint64
-		if latest >= transferScanChunk {
-			from = latest - transferScanChunk + 1
-		}
-		q := ethereum.FilterQuery{
-			FromBlock: new(big.Int).SetUint64(from),
-			ToBlock:   new(big.Int).SetUint64(latest),
-			Addresses: []common.Address{c.contract},
-			Topics:    [][]common.Hash{{event.ID}, nil, nil, {tokenTopic}},
-		}
-		logs, err := c.eth.FilterLogs(ctx, q)
-		if err != nil {
-			return nil, err
-		}
-		if len(logs) == 0 {
-			return nil, nil
-		}
-		lg := logs[len(logs)-1]
-		var ev struct {
-			Entries []SealedKeyEntry
-		}
-		if err := c.abi.UnpackIntoInterface(&ev, "ITransferred", lg.Data); err != nil {
-			return nil, fmt.Errorf("decode ITransferred log: %w", err)
-		}
-		out := map[[32]byte][]byte{}
-		for _, e := range ev.Entries {
-			out[e.DataHash] = e.SealedKey
-		}
-		logger.Logf("ITransferred found at block %d (head)", lg.BlockNumber)
-		return out, nil
+		return nil, fmt.Errorf("sealedKeysOf return type: %T", res[0])
 	}
 
-	deadline := time.Now().Add(pollTimeout)
-	var latest uint64
-	for {
-		latestNew, err := c.eth.BlockNumber(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("BlockNumber: %w", err)
-		}
-		if latestNew != latest {
-			logger.Logf("ITransferred poll: trying head [%d..%d]", latestNew-transferScanChunk+1, latestNew)
-			latest = latestNew
-			result, err := tryHead(latest)
-			if err != nil {
-				return nil, err
-			}
-			if result != nil {
-				return result, nil
-			}
-		}
-		if time.Now().After(deadline) {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(pollInterval):
-		}
+	// Pair positionally with intelligentDatasOf to produce the lookup map.
+	iDatas, err := c.IntelligentDatasOf(ctx, tokenID)
+	if err != nil {
+		return nil, fmt.Errorf("intelligentDatasOf for SealedKeysOf pairing: %w", err)
 	}
-	logger.Logf("ITransferred head poll exhausted; falling back to backward scan from %d", latest)
+	if len(iDatas) != len(keys) {
+		return nil, fmt.Errorf("sealedKeysOf length mismatch: iDatas=%d keys=%d", len(iDatas), len(keys))
+	}
+	result := make(map[[32]byte][]byte, len(keys))
+	for i, e := range iDatas {
+		result[e.DataHash] = keys[i]
+	}
+	return result, nil
+}
 
-	to := latest
-	if to >= transferScanChunk {
-		to -= transferScanChunk
-	} else {
-		return nil, fmt.Errorf("no ITransferred for tokenId %s within head window", tokenID)
+// Update calls AgenticID.update(tokenId, newDatas, sealedKeys) using
+// signerPriv (the agent_seal_priv — only address allowed by the contract's
+// authz check) to sign. Returns the tx hash once the transaction has been
+// mined and the receipt indicates success.
+//
+// Arrays are positional: newDatas[i].DataHash pairs with sealedKeys[i].
+// Caller is expected to have constructed both arrays with matching length
+// and consistent label ordering.
+func (c *Client) Update(
+	ctx context.Context,
+	tokenID *big.Int,
+	newDatas []IntelligentData,
+	sealedKeys [][]byte,
+	signerPriv []byte,
+) (common.Hash, error) {
+	if len(newDatas) != len(sealedKeys) {
+		return common.Hash{}, fmt.Errorf("chain.Update: arity mismatch (newDatas=%d sealedKeys=%d)",
+			len(newDatas), len(sealedKeys))
 	}
-	chunks := 0
-	for {
-		var from uint64
-		if to >= transferScanChunk {
-			from = to - transferScanChunk + 1
-		}
-		q := ethereum.FilterQuery{
-			FromBlock: new(big.Int).SetUint64(from),
-			ToBlock:   new(big.Int).SetUint64(to),
-			Addresses: []common.Address{c.contract},
-			Topics:    [][]common.Hash{{event.ID}, nil, nil, {tokenTopic}},
-		}
-		logs, err := c.eth.FilterLogs(ctx, q)
-		chunks++
-		if err != nil {
-			return nil, fmt.Errorf("FilterLogs [%d..%d] (chunk %d): %w", from, to, chunks, err)
-		}
-		if len(logs) > 0 {
-			lg := logs[len(logs)-1]
-			var ev struct {
-				Entries []SealedKeyEntry
-			}
-			if err := c.abi.UnpackIntoInterface(&ev, "ITransferred", lg.Data); err != nil {
-				return nil, fmt.Errorf("decode ITransferred log: %w", err)
-			}
-			result := map[[32]byte][]byte{}
-			for _, e := range ev.Entries {
-				result[e.DataHash] = e.SealedKey
-			}
-			logger.Logf("ITransferred found at block %d (chunk %d)", lg.BlockNumber, chunks)
-			return result, nil
-		}
-		if chunks%10 == 0 {
-			logger.Logf("ITransferred scan: %d chunks searched, currently at [%d..%d]", chunks, from, to)
-		}
-		if from == 0 {
-			return nil, fmt.Errorf("no ITransferred for tokenId %s in chain history (%d chunks scanned)", tokenID, chunks)
-		}
-		to = from - 1
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
+
+	priv, err := crypto.ToECDSA(signerPriv)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("parse signer priv: %w", err)
 	}
+	from := crypto.PubkeyToAddress(priv.PublicKey)
+
+	data, err := c.abi.Pack("update", tokenID, newDatas, sealedKeys)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("pack update: %w", err)
+	}
+
+	chainID, err := c.eth.ChainID(ctx)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("ChainID: %w", err)
+	}
+	nonce, err := c.eth.PendingNonceAt(ctx, from)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("nonce: %w", err)
+	}
+	gasPrice, err := c.eth.SuggestGasPrice(ctx)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("suggest gas price: %w", err)
+	}
+	gas, err := c.eth.EstimateGas(ctx, ethereum.CallMsg{
+		From: from,
+		To:   &c.contract,
+		Data: data,
+	})
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("estimate gas: %w", err)
+	}
+	// 25% headroom — chain update touches variable-length storage; estimate
+	// can underestimate when the slot was previously zeroed.
+	gas = gas * 5 / 4
+
+	tx := types.NewTx(&types.LegacyTx{
+		Nonce:    nonce,
+		GasPrice: gasPrice,
+		Gas:      gas,
+		To:       &c.contract,
+		Value:    big.NewInt(0),
+		Data:     data,
+	})
+	signed, err := types.SignTx(tx, types.NewEIP155Signer(chainID), priv)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("sign tx: %w", err)
+	}
+	if err := c.eth.SendTransaction(ctx, signed); err != nil {
+		return common.Hash{}, fmt.Errorf("send tx: %w", err)
+	}
+
+	receipt, err := bind.WaitMined(ctx, c.eth, signed)
+	if err != nil {
+		return signed.Hash(), fmt.Errorf("wait mined: %w", err)
+	}
+	if receipt.Status != types.ReceiptStatusSuccessful {
+		return signed.Hash(), fmt.Errorf("update tx reverted: status=%d hash=%s",
+			receipt.Status, signed.Hash().Hex())
+	}
+	logger.Logf("chain.Update OK: tokenId=%s tx=%s gas_used=%d", tokenID.String(), signed.Hash().Hex(), receipt.GasUsed)
+	return signed.Hash(), nil
 }
 
 // HexSealID parses a hex-encoded (with or without 0x prefix) seal_id to a

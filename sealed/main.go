@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"time"
 
@@ -34,6 +35,7 @@ import (
 	"seal-verify/internal/proxy"
 	"seal-verify/internal/report"
 	"seal-verify/internal/state"
+	"seal-verify/internal/uploader"
 	"seal-verify/internal/watcher"
 )
 
@@ -123,6 +125,7 @@ func runMainPipeline(cfg *config.Bootstrap, agent *state.Agent, adapter *opencla
 	res, err := chainBootstrap(cfg.ChainRPC, cfg.ContractAddr, cfg.Attestation.SealID, agentSealPriv, cfg.FallbackIndexer)
 	if err != nil {
 		logger.Logf("FAIL bootstrap: %v", err)
+		report.Status(cfg.AttestorURL, agentSealPriv, cfg.Attestation.SealID, "error", "bootstrap: "+err.Error())
 		return
 	}
 
@@ -135,7 +138,7 @@ func runMainPipeline(cfg *config.Bootstrap, agent *state.Agent, adapter *opencla
 		logger.Logf("FAIL supervisor: max retries exceeded: %v", err)
 		report.Status(cfg.AttestorURL, agentSealPriv, cfg.Attestation.SealID, "error", "supervisor exhausted retries: "+err.Error())
 	}
-	if err := startAgent(adapter, agent, res, agentSealPriv, cfg.APIKey, cfg.PublicURL, cfg.Attestation.SealID, onFailed); err != nil {
+	if err := startAgent(cfg, adapter, agent, res, agentSealPriv, onFailed); err != nil {
 		logger.Logf("FAIL agent: %v", err)
 		report.Status(cfg.AttestorURL, agentSealPriv, cfg.Attestation.SealID, "error", err.Error())
 		return
@@ -146,9 +149,15 @@ func runMainPipeline(cfg *config.Bootstrap, agent *state.Agent, adapter *opencla
 }
 
 // chainBootstrapResult bundles the outputs of Phase 2.
+//
+// client is intentionally NOT closed by chainBootstrap — the uploader
+// reuses it long-term. The container blocks forever, so the client never
+// actually needs to be released.
 type chainBootstrapResult struct {
 	entries []decryptedEntry
 	owner   string
+	agentID *big.Int
+	client  *chain.Client
 }
 
 // chainBootstrap executes Phase 2 (mint observation, intelligentDatasOf,
@@ -162,28 +171,34 @@ func chainBootstrap(rpcURL, contractHex, sealIDHex string, agentSealPriv []byte,
 	if err != nil {
 		return nil, err
 	}
-	defer c.Close()
+	// NOTE: client lifetime intentionally extends past this function so
+	// the uploader can reuse it. The bootstrap process never exits cleanly,
+	// so there's no leak to worry about.
 
 	sealID32, err := chain.HexSealID(sealIDHex)
 	if err != nil {
+		c.Close()
 		return nil, err
 	}
 
 	agentID, err := c.WaitForMint(ctx, sealID32)
 	if err != nil {
+		c.Close()
 		return nil, fmt.Errorf("wait for mint: %w", err)
 	}
 	logger.Logf("OK   minted agent_id: %s", agentID.String())
 
 	iDatas, err := c.IntelligentDatasOf(ctx, agentID)
 	if err != nil {
+		c.Close()
 		return nil, fmt.Errorf("intelligentDatasOf: %w", err)
 	}
 	logger.Logf("OK   intelligent_datas: %d entries", len(iDatas))
 
-	sealedKeys, err := c.LoadSealedKeys(ctx, agentID)
+	sealedKeys, err := c.SealedKeysOf(ctx, agentID)
 	if err != nil {
-		return nil, fmt.Errorf("load sealedKeys: %w", err)
+		c.Close()
+		return nil, fmt.Errorf("sealedKeysOf: %w", err)
 	}
 	logger.Logf("OK   sealedKeys collected: %d entries", len(sealedKeys))
 
@@ -217,7 +232,12 @@ func chainBootstrap(rpcURL, contractHex, sealIDHex string, agentSealPriv []byte,
 	}
 
 	logger.Logf("OK   bootstrap complete")
-	return &chainBootstrapResult{entries: entries, owner: ownerHex}, nil
+	return &chainBootstrapResult{
+		entries: entries,
+		owner:   ownerHex,
+		agentID: agentID,
+		client:  c,
+	}, nil
 }
 
 // decryptEntry resolves dataDescription -> indexer + role, downloads the
@@ -283,13 +303,16 @@ func decryptEntry(ctx context.Context, idx int, d chain.IntelligentData, sealedK
 // backoff, and the Failed-phase escalation. onFailed fires once if max
 // retries are exhausted.
 func startAgent(
+	cfg *config.Bootstrap,
 	adapter *openclaw.Adapter,
 	agent *state.Agent,
 	res *chainBootstrapResult,
 	agentSealPriv []byte,
-	apiKey, publicURL, sealID string,
 	onFailed func(err error),
 ) error {
+	apiKey := cfg.APIKey
+	publicURL := cfg.PublicURL
+	sealID := cfg.Attestation.SealID
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
@@ -388,13 +411,23 @@ func startAgent(
 	logger.Logf("OK   baseline captured: %d dims total, %d on chain, %d absent (will add on drift)",
 		len(allDims), len(dataHashByDim), len(allDims)-len(dataHashByDim))
 
+	// Build the uploader once after baseline is captured. It owns the
+	// chain.Client returned by chainBootstrap (no Close — process lives
+	// forever). Each drift-handler invocation reuses it; per-Push the
+	// uploader dials a separate 0g-storage web3 instance because the SDK
+	// insists on its own.
+	upload, err := uploader.New(adapter, agent, res.client, res.agentID,
+		agentSealPriv, cfg.ChainRPC, cfg.FallbackIndexer)
+	if err != nil {
+		return fmt.Errorf("init uploader: %w", err)
+	}
+
 	// Start the iData watcher inside startAgent so the OnDimDrift callback
-	// closes over the real manager (for Reload) and adapter (for
-	// ReconcileFramework). Bootstrap continues; watcher loop runs in a
-	// goroutine until the process exits.
+	// closes over the real manager (for Reload), adapter (for
+	// ReconcileFramework), and uploader.
 	watchCtx := context.Background()
 	go watcher.New(adapter, agent, watcher.Config{
-		OnDimDrift: func(dim string) { handleDimDrift(watchCtx, dim, adapter, mgr) },
+		OnDimDrift: func(dim string) { handleDimDrift(watchCtx, dim, adapter, mgr, upload) },
 	}).Run(watchCtx)
 
 	return nil
@@ -414,7 +447,15 @@ func startAgent(
 //
 // Errors are logged but never crash the watcher — drift handling is
 // best-effort (next tick will retry if the condition persists).
-func handleDimDrift(ctx context.Context, dim string, adapter *openclaw.Adapter, mgr *manager.Manager) {
+func handleDimDrift(ctx context.Context, dim string, adapter *openclaw.Adapter, mgr *manager.Manager, upload *uploader.Uploader) {
+	// 0g-storage Go SDK has panic-prone call sites (e.g. blockchain.MustNewWeb3,
+	// logrus.Fatal in some error paths). Without recover, a panic here kills
+	// the whole sealed process and the operator loses /log + /healthz too.
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Logf("drift: handleDimDrift[%s] PANIC: %v", dim, r)
+		}
+	}()
 	if dim == "framework" {
 		if err := adapter.ReconcileFramework(ctx); err != nil {
 			logger.Logf("drift: ReconcileFramework: %v", err)
@@ -424,11 +465,15 @@ func handleDimDrift(ctx context.Context, dim string, adapter *openclaw.Adapter, 
 			logger.Logf("drift: manager.Reload: %v", err)
 			return
 		}
-		logger.Logf("drift: framework reconciled + reloaded")
+		logger.Logf("drift: framework reconciled + reloaded; will upload new pin")
 	}
-	// TODO(uploader): build sealedKey, ciphertext, root_hash; call
-	// chain.update; on tx receipt call agent.RecordChainUpload.
-	logger.Logf("[mock uploader] would push dim=%q to chain", dim)
+	// Bound the upload so a stuck SDK call cannot wedge the drift handler
+	// forever (next tick fires every 30s).
+	pushCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	if err := upload.Push(pushCtx, dim); err != nil {
+		logger.Logf("drift: uploader.Push[%s]: %v", dim, err)
+	}
 }
 
 // openclawSettleDelay is how long bootstrap waits after mgr.Start succeeds

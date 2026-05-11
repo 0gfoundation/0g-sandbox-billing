@@ -14,9 +14,11 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -106,6 +108,80 @@ func NewDataKey() ([]byte, error) {
 		return nil, err
 	}
 	return k, nil
+}
+
+// rootLineRegexp matches the CLI's success line: "file uploaded, root = 0x..."
+// Logged by /root/go/pkg/mod/github.com/0gfoundation/0g-storage-client/cmd/upload.go.
+var rootLineRegexp = regexp.MustCompile(`root\s*=\s*(0x[0-9a-fA-F]{64})`)
+
+// Upload pushes ciphertext to 0g-storage and returns the storage root
+// hash. The root is what gets recorded as IntelligentData.dataHash on
+// chain. signerPrivHex is the hex-encoded (with or without 0x prefix)
+// agent_seal_priv -- it signs the storage submission tx and pays gas.
+//
+// Runs the `0g-storage-client upload` CLI in a subprocess (rather than the
+// Go SDK in-process) so that any SDK panic, logrus.Fatal, or OOM stays
+// contained -- the sealed binary keeps serving /healthz + /log even when
+// the upload itself fails. Matches the Download path, which has always
+// shelled out to the same binary.
+func Upload(
+	ctx context.Context,
+	ciphertext []byte,
+	indexerURL string,
+	rpcURL string,
+	signerPrivHex string,
+) ([32]byte, error) {
+	signerPrivHex = strings.TrimPrefix(signerPrivHex, "0x")
+
+	tmp, err := os.CreateTemp("", "0g-upload-*.bin")
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("create tempfile: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write(ciphertext); err != nil {
+		tmp.Close()
+		return [32]byte{}, fmt.Errorf("write tempfile: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return [32]byte{}, fmt.Errorf("close tempfile: %w", err)
+	}
+
+	// Flags match cmd/upload.go defaults except where pinned:
+	//   --expected-replica 1   small payload, single replica is fine
+	//   --skip-tx              skip flow tx submission if already submitted
+	//   --fast-mode            small-file fast path (CLI default true)
+	//   --full-trusted         use trusted nodes (CLI default true)
+	//   --method random        avoid shard.Select empty-method bug
+	cmd := exec.CommandContext(ctx, "0g-storage-client", "upload",
+		"--file", tmpPath,
+		"--indexer", indexerURL,
+		"--url", rpcURL,
+		"--key", signerPrivHex,
+		"--expected-replica", "1",
+		"--skip-tx", "true",
+		"--fast-mode", "true",
+		"--full-trusted", "true",
+		"--method", "random",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("upload cmd: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+
+	m := rootLineRegexp.FindSubmatch(out)
+	if len(m) < 2 {
+		return [32]byte{}, fmt.Errorf("could not parse root from CLI output: %s", strings.TrimSpace(string(out)))
+	}
+	rootHex := strings.TrimPrefix(string(m[1]), "0x")
+	rootBytes, err := hex.DecodeString(rootHex)
+	if err != nil || len(rootBytes) != 32 {
+		return [32]byte{}, fmt.Errorf("invalid root hex %q: %v", rootHex, err)
+	}
+	var root [32]byte
+	copy(root[:], rootBytes)
+	logger.Logf("0g-storage upload OK: root=0x%s size=%dB", rootHex, len(ciphertext))
+	return root, nil
 }
 
 // Download fetches a file from 0g-storage by content root hash, writing to
