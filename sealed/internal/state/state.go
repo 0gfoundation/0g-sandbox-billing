@@ -52,6 +52,16 @@ type DimEntry struct {
 	DataHash    string // 0g-storage root hex (chain), "" if not yet uploaded
 }
 
+// DimHashes is the serve-proof-facing view of one dim's local state.
+// ContentHash is always present (sha256 of whatever the agent is running
+// right now, including adapter defaults). DataHash is the chain pin and
+// is omitted from JSON when the dim isn't on chain yet -- verifiers
+// treat its absence as "this dim is running off the adapter default".
+type DimHashes struct {
+	ContentHash string `json:"content_hash"`
+	DataHash    string `json:"data_hash,omitempty"`
+}
+
 // Snapshot bundles the per-dim DimEntry map plus a sorted view used for
 // serve-proof's data_hashes field.
 type Snapshot struct {
@@ -90,10 +100,10 @@ func New() *Agent {
 // Snapshot returns a copy of the agent's current identity material plus the
 // current sorted data hashes (for serve-proof). Callers cannot mutate the
 // returned slice.
-func (a *Agent) Snapshot() (priv []byte, upstream, sealID, owner string, dataHashes []string) {
+func (a *Agent) Snapshot() (priv []byte, upstream, sealID, owner string, dataHashes map[string]DimHashes) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	return a.agentSealPriv, a.upstreamURL, a.sealID, a.owner, a.sortedCurrentLocked()
+	return a.agentSealPriv, a.upstreamURL, a.sealID, a.owner, a.currentMapLocked()
 }
 
 // Phase returns the current lifecycle phase.
@@ -270,6 +280,24 @@ func (a *Agent) sortedCurrentLocked() []string {
 		out = append(out, e.ContentHash)
 	}
 	sort.Strings(out)
+	return out
+}
+
+// currentMapLocked returns a fresh per-dim view of currentSnapshot for
+// serve-proof. EVERY dim the agent is tracking is included, even ones
+// without a chain pin yet -- their ContentHash commits the local default
+// state so a verifier can detect tampering of adapter defaults too.
+//
+// DataHash is included only when non-empty; the omitempty tag turns
+// absent dims into "no chain pin yet" rather than '"data_hash": ""'.
+//
+// Returns an empty map when nothing qualifies, never nil, so JSON
+// marshals to "{}" not "null".
+func (a *Agent) currentMapLocked() map[string]DimHashes {
+	out := make(map[string]DimHashes, len(a.currentSnapshot.PerDim))
+	for dim, e := range a.currentSnapshot.PerDim {
+		out[dim] = DimHashes{ContentHash: e.ContentHash, DataHash: e.DataHash}
+	}
 	return out
 }
 

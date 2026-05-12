@@ -4,7 +4,9 @@
 //
 //   GET  /healthz       - container liveness probe (always 200)
 //   GET  /log           - bootstrap diagnostic log (plaintext, NOT signed)
+//   GET  /log.html      - same log, color-coded HTML view for frontends
 //   GET  /log/openclaw  - openclaw process log (plaintext, NOT signed)
+//   GET  /log/openclaw.html - same log, color-coded HTML view
 //   GET  /hello         - signed A2A self-introduction (returns 503 until armed)
 //   POST /_seal/auth    - owner-only flow returning the framework auth token
 //   *    /              - signed reverse proxy to agent upstream (returns 503 until armed)
@@ -62,7 +64,9 @@ func (s *Server) Listen() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/log", s.handleLog)
+	mux.HandleFunc("/log.html", s.handleLogHTML)
 	mux.HandleFunc("/log/openclaw", s.handleOpenclawLog)
+	mux.HandleFunc("/log/openclaw.html", s.handleOpenclawLogHTML)
 	mux.HandleFunc("/hello", s.handleHello)
 	mux.HandleFunc("/_seal/auth", s.handleAuth)
 	mux.HandleFunc("/", s.handleProxy)
@@ -364,14 +368,26 @@ func wsReverseProxy(upstream string) *httputil.ReverseProxy {
 
 // ── Serve-proof signing ─────────────────────────────────────────────────────
 
+// serveProof is the canonical envelope signed by agent_seal_priv and packed
+// into X-Agent-Proof. DataHashes keys every dim the agent currently tracks
+// ("framework", "persona", "knowledge", "skills", "ops") -- including ones
+// that have no chain pin yet -- so a verifier can do two independent
+// checks per dim:
+//
+//	content_hash : sha256 of the local plaintext (always present). Commits
+//	               the in-memory state including adapter defaults; lets a
+//	               verifier with the same plaintext recompute and match.
+//	data_hash    : 0g-storage root on chain. omitempty -- absent when the
+//	               dim hasn't been uploaded yet, otherwise verifiers
+//	               compare directly against AgenticID.intelligentDatasOf().
 type serveProof struct {
-	Method       string   `json:"method"`
-	URI          string   `json:"uri"`
-	ReqBodyHash  string   `json:"req_body_hash"`
-	Status       int      `json:"status"`
-	RespBodyHash string   `json:"resp_body_hash"`
-	DataHashes   []string `json:"data_hashes"`
-	Ts           int64    `json:"ts"`
+	Method       string                     `json:"method"`
+	URI          string                     `json:"uri"`
+	ReqBodyHash  string                     `json:"req_body_hash"`
+	Status       int                        `json:"status"`
+	RespBodyHash string                     `json:"resp_body_hash"`
+	DataHashes   map[string]state.DimHashes `json:"data_hashes"`
+	Ts           int64                      `json:"ts"`
 }
 
 // writeServeProof signs the canonical envelope with agent_seal_priv and emits
@@ -381,7 +397,7 @@ type serveProof struct {
 //
 // Body is left untouched so verifiers recompute keccak256(body) and compare
 // against proof.resp_body_hash.
-func writeServeProof(w http.ResponseWriter, r *http.Request, priv, reqBody, body []byte, dataHashes []string, statusCode int) error {
+func writeServeProof(w http.ResponseWriter, r *http.Request, priv, reqBody, body []byte, dataHashes map[string]state.DimHashes, statusCode int) error {
 	proof := serveProof{
 		Method:       r.Method,
 		URI:          r.URL.RequestURI(),

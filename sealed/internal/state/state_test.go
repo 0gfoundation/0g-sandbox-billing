@@ -101,8 +101,13 @@ func TestSnapshot_ReturnsCurrentHashes(t *testing.T) {
 	a.UpdateCurrent("config", "h2")
 
 	_, _, _, _, dh := a.Snapshot()
-	if len(dh) != 1 || dh[0] != "h2" {
-		t.Errorf("Snapshot dataHashes = %v; want [h2] (current state, not chain)", dh)
+	// Snapshot returns DimHashes for every dim the agent is tracking,
+	// with the latest ContentHash and the (carry-forward) DataHash.
+	// UpdateCurrent must move ContentHash but leave DataHash on the
+	// prior chain pin until a new tx confirms.
+	got, ok := dh["config"]
+	if len(dh) != 1 || !ok || got.ContentHash != "h2" || got.DataHash != "0xr1" {
+		t.Errorf("Snapshot dataHashes = %v; want {config: {content=h2, data=0xr1}}", dh)
 	}
 }
 

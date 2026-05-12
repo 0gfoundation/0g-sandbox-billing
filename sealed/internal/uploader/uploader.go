@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"sync"
 
 	"github.com/ethereum/go-ethereum/crypto"
 
@@ -77,6 +78,20 @@ type Uploader struct {
 	rpcURL        string // for storage submit tx (separate from chain RPC client because the SDK wants its own web3 instance)
 	indexerURL    string
 	agentSealHex  string // hex (no 0x prefix) of agent_seal_priv — what 0g-storage SDK expects
+
+	// dimLocks serializes Push calls per-dim so a slow upload + a fresh
+	// drift tick can't fire two parallel Pushes for the same dim (they
+	// would both read the same chain state, both succeed, double-paying
+	// for an effectively duplicate update tx). Different dims still
+	// upload concurrently.
+	locksMu  sync.Mutex
+	dimLocks map[string]*sync.Mutex
+
+	// FailureCount tracks consecutive Push failures per dim. Reset to 0
+	// on success. Exposed (read-only) via FailureCount so callers can
+	// decide to escalate (e.g. report.Status("error", ...) after N).
+	failMu      sync.Mutex
+	failureCnt  map[string]int
 }
 
 // New constructs an Uploader. Returns an error if agent_seal_priv can't be
@@ -104,17 +119,57 @@ func New(
 		rpcURL:        rpcURL,
 		indexerURL:    indexerURL,
 		agentSealHex:  hex.EncodeToString(agentSealPriv),
+		dimLocks:      make(map[string]*sync.Mutex),
+		failureCnt:    make(map[string]int),
 	}, nil
+}
+
+// lockFor returns the per-dim mutex, lazily creating it on first use.
+func (u *Uploader) lockFor(dim string) *sync.Mutex {
+	u.locksMu.Lock()
+	defer u.locksMu.Unlock()
+	m, ok := u.dimLocks[dim]
+	if !ok {
+		m = &sync.Mutex{}
+		u.dimLocks[dim] = m
+	}
+	return m
+}
+
+// FailureCount returns the number of consecutive failed Push attempts
+// for dim. Resets to 0 on the next successful Push. Callers use this
+// to decide when to escalate (report.Status("error", ...) at a threshold).
+func (u *Uploader) FailureCount(dim string) int {
+	u.failMu.Lock()
+	defer u.failMu.Unlock()
+	return u.failureCnt[dim]
 }
 
 // Push uploads the current state of `dim` to chain. Steps annotated inline.
 //
-// Safe to call concurrently for different dims — each Push reads the full
-// current chain state and constructs an independent newEntries array; the
-// last tx to land wins (later Pushes see the earlier upload's effect via
-// IntelligentDatasOf). For the same dim, concurrent Pushes are a no-op
-// race (both produce ~identical new dataHash if disk hasn't changed).
-func (u *Uploader) Push(ctx context.Context, dim string) error {
+// Concurrent Push calls for different dims run in parallel; concurrent
+// Push calls for the SAME dim serialize on a per-dim mutex (otherwise both
+// would read the same chain state and pay gas for effectively duplicate
+// updates).
+//
+// Maintains a per-dim consecutive-failure counter: incremented on error,
+// reset to 0 on success. Callers query via FailureCount(dim) to decide
+// when to escalate (e.g. report.Status("error", ...)).
+func (u *Uploader) Push(ctx context.Context, dim string) (retErr error) {
+	lock := u.lockFor(dim)
+	lock.Lock()
+	defer lock.Unlock()
+
+	defer func() {
+		u.failMu.Lock()
+		defer u.failMu.Unlock()
+		if retErr != nil {
+			u.failureCnt[dim]++
+			return
+		}
+		u.failureCnt[dim] = 0
+	}()
+
 	// 1. Read current plaintext.
 	plaintext, err := u.adapter.EvolutionFor(ctx, dim)
 	if err != nil {

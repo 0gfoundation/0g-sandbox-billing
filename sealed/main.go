@@ -427,10 +427,37 @@ func startAgent(
 	// ReconcileFramework), and uploader.
 	watchCtx := context.Background()
 	go watcher.New(adapter, agent, watcher.Config{
-		OnDimDrift: func(dim string) { handleDimDrift(watchCtx, dim, adapter, mgr, upload) },
+		OnDimDrift: func(dim string) {
+			handleDimDrift(watchCtx, dim, adapter, mgr, upload, cfg.AttestorURL, agentSealPriv, cfg.Attestation.SealID)
+		},
 	}).Run(watchCtx)
 
+	// Heartbeat: report.Status("running") on a slow ticker so the attestor
+	// can tell a healthy sandbox from one whose process is alive but stuck.
+	// 5 min keeps signed-tx volume low; first beat fires immediately after
+	// the initial "running" report from runMainPipeline so the cadence is
+	// regular regardless of when this goroutine starts.
+	go runHeartbeat(watchCtx, cfg.AttestorURL, agentSealPriv, cfg.Attestation.SealID)
+
 	return nil
+}
+
+// runHeartbeat re-reports "running" status every heartbeatInterval. Stops
+// when ctx is cancelled. Failures inside report.Status are already logged
+// by that package, so we don't decorate them here.
+const heartbeatInterval = 5 * time.Minute
+
+func runHeartbeat(ctx context.Context, attestorURL string, agentSealPriv []byte, sealID string) {
+	t := time.NewTicker(heartbeatInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			report.Status(attestorURL, agentSealPriv, sealID, "running", "")
+		}
+	}
 }
 
 // handleDimDrift is the bootstrap-side reaction to a watcher-detected
@@ -446,8 +473,22 @@ func startAgent(
 //     whatever it was at mint time.
 //
 // Errors are logged but never crash the watcher — drift handling is
-// best-effort (next tick will retry if the condition persists).
-func handleDimDrift(ctx context.Context, dim string, adapter *openclaw.Adapter, mgr *manager.Manager, upload *uploader.Uploader) {
+// best-effort (next tick will retry if the condition persists). After
+// pushFailureEscalateAt consecutive failures for the same dim, the
+// handler reports an "error" status to the attestor so the platform can
+// step in (the watcher itself keeps retrying — the report is informative).
+const pushFailureEscalateAt = 5
+
+func handleDimDrift(
+	ctx context.Context,
+	dim string,
+	adapter *openclaw.Adapter,
+	mgr *manager.Manager,
+	upload *uploader.Uploader,
+	attestorURL string,
+	agentSealPriv []byte,
+	sealID string,
+) {
 	// 0g-storage Go SDK has panic-prone call sites (e.g. blockchain.MustNewWeb3,
 	// logrus.Fatal in some error paths). Without recover, a panic here kills
 	// the whole sealed process and the operator loses /log + /healthz too.
@@ -471,8 +512,17 @@ func handleDimDrift(ctx context.Context, dim string, adapter *openclaw.Adapter, 
 	// forever (next tick fires every 30s).
 	pushCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	if err := upload.Push(pushCtx, dim); err != nil {
+	err := upload.Push(pushCtx, dim)
+	if err != nil {
 		logger.Logf("drift: uploader.Push[%s]: %v", dim, err)
+		// Escalate exactly at the threshold (not on every subsequent
+		// failure) to avoid flooding the attestor with identical reports.
+		if upload.FailureCount(dim) == pushFailureEscalateAt {
+			logger.Logf("drift: uploader.Push[%s] failed %d consecutive times; reporting error",
+				dim, pushFailureEscalateAt)
+			report.Status(attestorURL, agentSealPriv, sealID, "error",
+				fmt.Sprintf("uploader.Push[%s] failed %d times: %v", dim, pushFailureEscalateAt, err))
+		}
 	}
 }
 

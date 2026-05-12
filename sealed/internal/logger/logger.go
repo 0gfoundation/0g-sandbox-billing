@@ -7,7 +7,14 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
+
+// tsLayout is the timestamp prefix attached to every Logf message. Kept
+// short (HH:MM:SS.mmm) -- absolute date is rarely needed since /log is
+// always read in-session, and the millisecond resolution helps line up
+// closely-spaced events (e.g. manager reload + watcher tick).
+const tsLayout = "15:04:05.000"
 
 const LogPath = "/tmp/seal-bootstrap.log"
 
@@ -17,8 +24,10 @@ var (
 )
 
 // Logf appends a formatted line to the in-memory log AND prints it to stdout.
+// Each line gets a [HH:MM:SS.mmm] prefix so callers don't have to remember
+// to include one; renderers can parse + restyle it consistently.
 func Logf(format string, a ...any) {
-	msg := fmt.Sprintf(format, a...)
+	msg := "[" + time.Now().Format(tsLayout) + "] " + fmt.Sprintf(format, a...)
 	fmt.Println(msg)
 	mu.Lock()
 	lines = append(lines, msg)
@@ -28,7 +37,7 @@ func Logf(format string, a ...any) {
 // Fail logs the message with a "FAIL: " prefix to stderr, flushes to disk,
 // and exits the process. Reserved for unrecoverable startup errors.
 func Fail(format string, a ...any) {
-	msg := "FAIL: " + fmt.Sprintf(format, a...)
+	msg := "[" + time.Now().Format(tsLayout) + "] FAIL: " + fmt.Sprintf(format, a...)
 	fmt.Fprintln(os.Stderr, msg)
 	mu.Lock()
 	lines = append(lines, msg)
@@ -52,4 +61,14 @@ func Snapshot() string {
 	mu.RLock()
 	defer mu.RUnlock()
 	return strings.Join(lines, "\n") + "\n"
+}
+
+// Lines returns a copy of the log line slice for callers that want to
+// iterate per-line (e.g. /log.html for prefix-based colorization).
+func Lines() []string {
+	mu.RLock()
+	defer mu.RUnlock()
+	out := make([]string, len(lines))
+	copy(out, lines)
+	return out
 }
