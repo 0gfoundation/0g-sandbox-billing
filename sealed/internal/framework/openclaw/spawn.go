@@ -158,7 +158,10 @@ func exportAPIKey(provider, apiKey string) error {
 	switch provider {
 	case "anthropic":
 		envName = "ANTHROPIC_API_KEY"
-	case "openai":
+	case "openai", "0g-compute":
+		// 0G Compute is OpenAI-protocol-compatible; the endpoint switch
+		// happens in openclaw config (models.providers.openai.baseUrl),
+		// not via env. The same OPENAI_API_KEY carries the credential.
 		envName = "OPENAI_API_KEY"
 	}
 	if envName == "" {
@@ -204,8 +207,15 @@ func spawnGateway(provider, apiKey, publicURL string) (*exec.Cmd, error) {
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + os.Getenv("HOME"),
 	}
-	if provider == "anthropic" && apiKey != "" {
-		envWhitelist = append(envWhitelist, "ANTHROPIC_API_KEY="+apiKey)
+	if apiKey != "" {
+		switch provider {
+		case "anthropic":
+			envWhitelist = append(envWhitelist, "ANTHROPIC_API_KEY="+apiKey)
+		case "openai", "0g-compute":
+			// Same env name for both. Endpoint routing for 0g lives in
+			// openclaw config (models.providers.openai.baseUrl), not env.
+			envWhitelist = append(envWhitelist, "OPENAI_API_KEY="+apiKey)
+		}
 	}
 	if publicURL != "" {
 		envWhitelist = append(envWhitelist, "AGENT_PUBLIC_URL="+publicURL)

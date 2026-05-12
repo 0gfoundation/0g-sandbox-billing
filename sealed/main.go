@@ -498,6 +498,11 @@ func handleDimDrift(
 		}
 	}()
 	if dim == "framework" {
+		// framework drift is a different openclaw binary version -- openclaw
+		// can't swap itself out, so sealed has to npm-install and restart it.
+		// Every other dim (persona/knowledge/skills/ops) is openclaw's own
+		// config and is left for openclaw to hot-apply; sealed only pins
+		// the new state to chain via upload.Push below.
 		if err := adapter.ReconcileFramework(ctx); err != nil {
 			logger.Logf("drift: ReconcileFramework: %v", err)
 			return

@@ -107,13 +107,82 @@ func (a *Adapter) restorePersona(plaintext []byte) error {
 
 // applyInferenceToConfig writes provider/model into agents.defaults.model
 // and ensures auth.profiles has an api_key profile for that provider.
+//
+// 0g-compute is presented to openclaw as plain "openai" (network is
+// OpenAI-protocol-compatible). The endpoint override is written under
+// `models.providers.openai.baseUrl` -- the path openclaw actually reads
+// (see shared.ts resolveConfiguredOpenAIBaseUrl). Top-level "providers"
+// is rejected by openclaw's schema validator; OPENAI_BASE_URL env is
+// NOT consulted either.
 func applyInferenceToConfig(cfg map[string]any, inf inferenceConfig) {
 	if inf.Provider == "" || inf.Model == "" {
 		return
 	}
-	primary := inf.Provider + "/" + inf.Model
+	clawProvider := inf.Provider
+	customBaseURL := ""
+	if clawProvider == "0g-compute" {
+		clawProvider = "openai"
+		customBaseURL = "https://router-api.0g.ai/v1"
+	}
+
+	primary := clawProvider + "/" + inf.Model
 	model := map[string]any{"primary": primary}
 	_ = setAgentsDefaults(cfg, "model", json.RawMessage(mustMarshal(model)))
+
+	if customBaseURL != "" {
+		// Shape per openclaw's authoritative type defs
+		// (plugin-sdk/src/config/types.models.d.ts):
+		//   ModelProviderConfig requires { baseUrl, models }; everything
+		//   else optional. ModelDefinitionConfig requires { id, name,
+		//   reasoning, input, cost{4 fields}, contextWindow, maxTokens }.
+		// apiKey uses SecretRef shape { source:"env", provider, id }.
+		modelDef := map[string]any{
+			"id":            inf.Model,
+			"name":          inf.Model,
+			"reasoning":     false,
+			"input":         []string{"text"},
+			"cost":          map[string]any{"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+			"contextWindow": 128000,
+			"maxTokens":     8192,
+			// Conservative compat tuned to 0G's chat-completions parser.
+			// requiresStringContent is the critical one: 0G rejects the
+			// OpenAI multimodal array form (content: [{type:"text",...}])
+			// with "400 Invalid request body"; openclaw must serialize the
+			// message content as a plain string instead. The supports*
+			// flags are off out of an abundance of caution -- newer
+			// OpenAI-only fields aren't in 0G's supported_parameters list.
+			"compat": map[string]any{
+				"requiresStringContent":    true,
+				"supportsStore":            false,
+				"supportsDeveloperRole":    false,
+				"supportsReasoningEffort":  false,
+				"supportsUsageInStreaming": false,
+				"supportsStrictMode":       false,
+				"maxTokensField":           "max_tokens",
+			},
+		}
+		providerEntry := map[string]any{
+			"baseUrl": customBaseURL,
+			"api":     "openai-completions",
+			"apiKey": map[string]any{
+				"source":   "env",
+				"provider": "default",
+				"id":       "OPENAI_API_KEY",
+			},
+			"models": []any{modelDef},
+		}
+		models, _ := cfg["models"].(map[string]any)
+		if models == nil {
+			models = map[string]any{}
+		}
+		providers, _ := models["providers"].(map[string]any)
+		if providers == nil {
+			providers = map[string]any{}
+		}
+		providers[clawProvider] = providerEntry
+		models["providers"] = providers
+		cfg["models"] = models
+	}
 
 	// auth.profiles[<provider>:api] = {provider, mode: api_key}
 	authBlock, _ := cfg["auth"].(map[string]any)
@@ -124,8 +193,8 @@ func applyInferenceToConfig(cfg map[string]any, inf inferenceConfig) {
 	if profiles == nil {
 		profiles = map[string]any{}
 	}
-	profiles[inf.Provider+":api"] = map[string]any{
-		"provider": inf.Provider,
+	profiles[clawProvider+":api"] = map[string]any{
+		"provider": clawProvider,
 		"mode":     "api_key",
 	}
 	authBlock["profiles"] = profiles
@@ -133,7 +202,7 @@ func applyInferenceToConfig(cfg map[string]any, inf inferenceConfig) {
 	if order == nil {
 		order = map[string]any{}
 	}
-	order[inf.Provider] = []any{inf.Provider + ":api"}
+	order[clawProvider] = []any{clawProvider + ":api"}
 	authBlock["order"] = order
 	cfg["auth"] = authBlock
 }
